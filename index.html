@@ -5094,7 +5094,7 @@ function renderWishlist(){
     const inVault=collection.some(c=>c.cardId===w.cardId||(c.name===w.name&&c.set===w.set));
     // Store in global map by index to avoid quote escaping issues in onclick
     window._wishCards[idx] = {wishId:w.id, cardId:w.cardId||"", name:w.name, set:w.set||"", num:w.num||"", img:img||w.img||"", rarity:w.rarity||""};
-    return `<div class="db-card" style="position:relative;cursor:pointer;" onclick="openWishCard(${idx})" ontouchend="event.preventDefault();openWishCard(${idx})">
+    return `<button class="db-card" type="button" style="position:relative;cursor:pointer;background:none;border:1px solid var(--border);width:100%;text-align:left;padding:0;display:block;" onclick="openWishCard(${idx})">
       <div class="db-card-img">
         ${img?`<img src="${img}" alt="${w.name}" loading="lazy" style="pointer-events:none;" onerror="this.style.display='none'">`:'<div class="cs-img-ph" style="font-size:32px;opacity:.2;">⟡</div>'}
       </div>
@@ -5113,7 +5113,7 @@ function renderWishlist(){
           <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();removeWish((window._wishCards[${idx}]||{}).wishId)">✕</button>
         </div>
       </div>
-    </div>`;
+    </button>`;
   }).join('');
 
   // Lazy load prices
