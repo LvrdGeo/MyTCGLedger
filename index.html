@@ -5094,9 +5094,9 @@ function renderWishlist(){
     const inVault=collection.some(c=>c.cardId===w.cardId||(c.name===w.name&&c.set===w.set));
     // Store in global map by index to avoid quote escaping issues in onclick
     window._wishCards[idx] = {wishId:w.id, cardId:w.cardId||"", name:w.name, set:w.set||"", num:w.num||"", img:img||w.img||"", rarity:w.rarity||""};
-    return `<div class="db-card" style="position:relative;cursor:pointer;" onclick="openWishCard(${idx})">
+    return `<div class="db-card" style="position:relative;cursor:pointer;" onclick="openWishCard(${idx})" ontouchend="event.preventDefault();openWishCard(${idx})">
       <div class="db-card-img">
-        ${img?`<img src="${img}" alt="${w.name}" loading="lazy" onerror="this.style.display='none'">`:'<div class="cs-img-ph" style="font-size:32px;opacity:.2;">⟡</div>'}
+        ${img?`<img src="${img}" alt="${w.name}" loading="lazy" style="pointer-events:none;" onerror="this.style.display='none'">`:'<div class="cs-img-ph" style="font-size:32px;opacity:.2;">⟡</div>'}
       </div>
       ${inVault?'<div style="position:absolute;top:6px;left:6px;background:var(--green);color:#0a0a0f;font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px;">IN VAULT</div>':''}
       <div class="db-card-body">
@@ -5106,7 +5106,7 @@ function renderWishlist(){
           ${best!=null
             ? `<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green);">$${best.toFixed(2)}</div>`
             : `<div style="display:flex;align-items:center;gap:4px;"><div class="spinner" style="width:8px;height:8px;border-width:1.5px;flex-shrink:0;"></div><span style="font-size:10px;color:var(--muted);">Loading…</span></div>`}
-          <canvas id="wsp-${w.id}" width="120" height="32" style="display:block;margin-top:4px;opacity:.8;"></canvas>
+          <canvas id="wsp-${w.id}" width="120" height="32" style="display:block;margin-top:4px;opacity:.8;pointer-events:none;"></canvas>
         </div>
         <div style="display:flex;gap:4px;margin-top:8px;">
           <button class="btn btn-primary btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();moveWishToVault((window._wishCards[${idx}]||{}).wishId)">+ Vault</button>
@@ -5132,35 +5132,10 @@ function renderWishlist(){
     captureWishSnapshot();
     renderWishCharts();
     // Attach event delegation AFTER grid renders
-    attachWishGridEvents();
+  // click handled by onclick on each card
   }, 100);
 }
 
-function attachWishGridEvents() {
-  const grid = document.getElementById('wish-grid');
-  if (!grid || grid._hasWishListener) return;
-  grid._hasWishListener = true;
-  grid.addEventListener('click', function(e) {
-    // Check for button first
-    const btn = e.target.closest('[data-wishaction]');
-    if (btn) {
-      e.stopPropagation();
-      const idx = btn.dataset.wishidx;
-      const wid = (window._wishCards || {})['wc_'+idx];
-      if (!wid) return;
-      if (btn.dataset.wishaction === 'vault')  moveWishToVault(wid);
-      if (btn.dataset.wishaction === 'remove') removeWish(wid);
-      return;
-    }
-    // Otherwise open detail
-    const card = e.target.closest('.wish-card-tile');
-    if (card) {
-      const idx = card.dataset.wishidx;
-      const wid = (window._wishCards || {})['wc_'+idx];
-      if (wid) openWishDetail(wid);
-    }
-  });
-}
 function moveWishToVault(id){const w=wishlist.find(x=>x.id===id);if(!w)return;openAddModal();document.getElementById('f-name').value=w.name;}
 
 // ═══ NAV + MOBILE ═══
