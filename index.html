@@ -4978,7 +4978,7 @@ function renderWishSparklines() {
 
 function openWishCard(idx) {
   const card = (window._wishCards || {})[idx];
-  if (!card) return;
+  if (!card) { toast('Card data missing — try refreshing','red'); return; }
   // If already in collection open normal detail
   const owned = collection.find(c => c.cardId===card.cardId||(c.name===card.name&&c.set===card.set));
   if (owned) { openDetail(owned.id); return; }
@@ -4987,7 +4987,7 @@ function openWishCard(idx) {
 }
 function openWishDetail(wishId) {
   const w = wishlist.find(x => x.id === wishId);
-  if (!w) return;
+  if (!w) { toast('Watchlist item not found','red'); return; }
 
   // If already in collection, open normal detail
   const inCollection = collection.find(c => c.cardId===w.cardId||(c.name===w.name&&c.set===w.set));
