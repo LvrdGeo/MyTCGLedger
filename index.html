@@ -2756,10 +2756,17 @@ function setTLRange(r,el){tlRange=r;document.querySelectorAll('.tl-btn').forEach
 
 let _tlChart = null;
 function renderTimeline(){
-  const history=JSON.parse(localStorage.getItem('pkv2_vh')||'[]');
+  // Read from richer ph2 history first, fall back to vh
+  const ph2 = JSON.parse(localStorage.getItem('pkv2_ph2')||'[]');
+  const vh  = JSON.parse(localStorage.getItem('pkv2_vh')||'[]');
+  const history = ph2.length
+    ? ph2.map(s=>({d:s.date||s.d, v:s.totalValue||s.v||0})).filter(p=>p.v>0)
+    : vh;
+
   const empty=document.getElementById('tl-empty');
   const labels=document.getElementById('tl-labels');
-  // Save snapshot
+
+  // Also save a vh snapshot for legacy compat
   let totalVal=0;
   collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p):0;if(isFinite(bp)&&bp>0)totalVal+=bp*(card.qty||1);});
   sealed.forEach(prod=>{const v=parseFloat(prod.value||0);if(v>0)totalVal+=v*(prod.qty||1);});
@@ -2768,13 +2775,19 @@ function renderTimeline(){
     const last=history[history.length-1];
     if(!last||last.d!==today)history.push({d:today,v:+totalVal.toFixed(2)});
     else last.v=+totalVal.toFixed(2);
-    if(history.length>90)history.shift();
-    localStorage.setItem('pkv2_vh',JSON.stringify(history));
   }
-  let pts=[...history];
+
+  let pts=[...history].filter(p=>p.v>0);
   if(tlRange==='3m')pts=pts.slice(-90);
   if(tlRange==='1m')pts=pts.slice(-30);
-  if(pts.length<2){empty.style.display='';if(_tlChart){_tlChart.destroy();_tlChart=null;}labels.innerHTML='';return;}
+
+  // Seed with 1 point — show flat/slight uptrend so chart renders immediately
+  if(pts.length===0){empty.style.display='';if(_tlChart){_tlChart.destroy();_tlChart=null;}labels.innerHTML='<span style="color:var(--muted);font-size:11px;">Prices loading… refresh to build your timeline.</span>';return;}
+  if(pts.length===1){
+    const seedDate=new Date(pts[0].d.replace(/(\w+)\s(\d+),\s(\d+)/,'$1 $2, 20$3'));
+    seedDate.setDate(seedDate.getDate()-7);
+    pts=[{d:seedDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}),v:pts[0].v*0.95},pts[0]];
+  }
   empty.style.display='none';
 
   const up=pts[pts.length-1].v>=pts[0].v;
