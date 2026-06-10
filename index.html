@@ -1653,7 +1653,13 @@ function init() {
     if(c.type==='graded') delete pcache[c.id+'_'+c.cond];
   });
   localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-  AppState.update(); captureHistorySnapshot(); renderDashboard(); // other tabs render on first visit via goPage
+  // Clear graded card cache so they re-fetch with correct PSA pricing
+collection.filter(c=>c.type==='graded').forEach(card=>{
+  const ck = card.id+'_'+card.cond;
+  if(pcache[ck]) { delete pcache[ck]; }
+});
+localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
+AppState.update(); captureHistorySnapshot(); renderDashboard(); // other tabs render on first visit via goPage
   loadSets();
   loadAllPrices();
   // Silently test eBay worker and update status dot
