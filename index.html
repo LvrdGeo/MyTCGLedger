@@ -2477,10 +2477,8 @@ function renderDBChart() {
     return;
   }
   canvas.style.display = '';
-  if (pts.length === 1) {
-    // Start from 0 — honest starting point
-    pts = [{ d: 'Start', v: 0 }, pts[0]];
-  }
+  // Always start from $0 — honest baseline
+  pts = [{ d: 'Start', v: 0 }, ...pts];
 
   if (_dbChart) { _dbChart.destroy(); _dbChart = null; }
 
@@ -2831,12 +2829,9 @@ function renderTimeline(){
   if(tlRange==='3m')pts=pts.slice(-90);
   if(tlRange==='1m')pts=pts.slice(-30);
 
-  // Seed with 1 point — show flat/slight uptrend so chart renders immediately
   if(pts.length===0){empty.style.display='';if(_tlChart){_tlChart.destroy();_tlChart=null;}labels.innerHTML='<span style="color:var(--muted);font-size:11px;">Prices loading… refresh to build your timeline.</span>';return;}
-  if(pts.length===1){
-    // Start from 0 — honest starting point before any cards were tracked
-    pts=[{d:'Start',v:0},pts[0]];
-  }
+  // Always start from $0 — honest baseline before any tracking began
+  pts=[{d:'Start',v:0},...pts];
   empty.style.display='none';
 
   const up=pts[pts.length-1].v>=pts[0].v;
