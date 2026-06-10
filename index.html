@@ -238,7 +238,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .mini-stat{background:var(--bg3);border-radius:var(--r);padding:8px 10px}
 .mini-stat-lbl{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
 .mini-stat-val{font-size:14px;font-weight:600;font-family:var(--mono)}
-.psa-row{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+.psa-row{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}
 .psa-cell{background:var(--bg3);border-radius:var(--r);padding:8px;text-align:center;border:1px solid var(--border)}
 .psa-cell.hl{border-color:var(--gold);background:rgba(245,200,66,.07)}
 .psa-gnum{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--gold)}
@@ -262,7 +262,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .empty-title{font-family:var(--disp);font-size:17px;font-weight:700;color:var(--text);margin-bottom:6px}
 .empty-sub{font-size:12.5px;margin-bottom:18px}
 /* MOBILE */
-.mobile-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--bg2);border-top:1px solid var(--border);padding:8px 0 max(8px,env(safe-area-inset-bottom));grid-template-columns:repeat(5,1fr)}
+.mobile-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--bg2);border-top:1px solid var(--border);padding:8px 0 max(8px,env(safe-area-inset-bottom));grid-template-columns:repeat(6,1fr)}
 .mob-tab{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;cursor:pointer;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:10px;transition:color .15s;-webkit-tap-highlight-color:transparent}
 .mob-tab svg{width:22px;height:22px}.mob-tab.active{color:var(--gold)}
 .mob-fab{display:none;position:fixed;bottom:76px;right:18px;z-index:101;width:52px;height:52px;border-radius:50%;background:var(--gold);color:#08090e;border:none;font-size:26px;cursor:pointer;box-shadow:0 4px 16px rgba(245,200,66,.4);align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
@@ -524,7 +524,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
     <!-- TOP 5 HOLDINGS -->
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:16px;">
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;">Top Holdings</div>
-      <div id="db-top5" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;"></div>
+      <div id="db-top5" style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;"></div>
     </div>
 
   </div>
@@ -1221,21 +1221,24 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 </div><!-- /shell -->
 
 <!-- MOBILE TABS -->
-<nav class="mobile-tabs" id="mobile-tabs" style="grid-template-columns:repeat(5,1fr);">
+<nav class="mobile-tabs" id="mobile-tabs" style="grid-template-columns:repeat(6,1fr);">
   <button class="mob-tab active" id="mt-dashboard" onclick="mobGoPage('dashboard','mt-dashboard')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Home
   </button>
   <button class="mob-tab" id="mt-portfolio" onclick="mobGoPage('portfolio','mt-portfolio')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>Portfolio
   </button>
+  <button class="mob-tab" id="mt-cardsearch" onclick="mobGoPage('cardsearch','mt-cardsearch')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/></svg>Search
+  </button>
   <button class="mob-tab" id="mt-deals" onclick="mobGoPage('deals','mt-deals')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Deals
   </button>
-  <button class="mob-tab" id="mt-collection" onclick="mobGoPage('singles','mt-collection')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="2" width="12" height="18" rx="2"/><path d="M7 7h5M7 11h3"/><rect x="12" y="8" width="9" height="12" rx="1"/></svg>Collection
+  <button class="mob-tab" id="mt-analyzer" onclick="mobGoPage('analyzer','mt-analyzer')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>Analyzer
   </button>
-  <button class="mob-tab" id="mt-wishlist" onclick="mobGoPage('wishlist','mt-wishlist')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Watchlist
+  <button class="mob-tab" id="mt-collection" onclick="openMobileCollection()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="2" width="12" height="18" rx="2"/><path d="M7 7h5M7 11h3"/></svg>Collection
   </button>
 </nav>
 <button class="mob-fab" onclick="openAddModal()">+</button>
@@ -5736,6 +5739,44 @@ function goPage(name,el){
   if(name==='cardsearch'){initTabSearchSets();renderSetBrowser();setTimeout(()=>document.getElementById('tab-search-input')?.focus(),100);}
 }
 function updateMobTabs(id){document.querySelectorAll('.mob-tab').forEach(t=>t.classList.remove('active'));const el=document.getElementById(id);if(el)el.classList.add('active');}
+
+function openMobileCollection() {
+  updateMobTabs('mt-collection');
+  // Show a bottom sheet to pick which collection tab
+  const existing = document.getElementById('mob-collection-sheet');
+  if (existing) { existing.remove(); return; }
+
+  const sheet = document.createElement('div');
+  sheet.id = 'mob-collection-sheet';
+  sheet.style.cssText = 'position:fixed;bottom:calc(56px + env(safe-area-inset-bottom,20px));left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);border-radius:16px 16px 0 0;z-index:999;padding:12px 0;';
+  sheet.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);">
+      <button onclick="mobGoPage('singles','mt-collection');document.getElementById('mob-collection-sheet').remove();" style="background:var(--bg2);border:none;padding:14px;color:var(--text);font-size:12px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px;"><rect x="3" y="2" width="12" height="18" rx="2"/><path d="M7 7h5M7 11h3"/></svg>Singles
+      </button>
+      <button onclick="mobGoPage('psa','mt-collection');document.getElementById('mob-collection-sheet').remove();" style="background:var(--bg2);border:none;padding:14px;color:var(--text);font-size:12px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px;"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 12l3 3 7-7"/></svg>PSA Slabs
+      </button>
+      <button onclick="mobGoPage('sealed','mt-collection');document.getElementById('mob-collection-sheet').remove();" style="background:var(--bg2);border:none;padding:14px;color:var(--text);font-size:12px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px;"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>Sealed
+      </button>
+      <button onclick="mobGoPage('wishlist','mt-collection');document.getElementById('mob-collection-sheet').remove();" style="background:var(--bg2);border:none;padding:14px;color:var(--text);font-size:12px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Watchlist
+      </button>
+    </div>`;
+
+  document.body.appendChild(sheet);
+  // Tap anywhere else to dismiss
+  setTimeout(() => {
+    document.addEventListener('click', function dismiss(e) {
+      if (!sheet.contains(e.target) && e.target.id !== 'mt-collection') {
+        sheet.remove();
+        document.removeEventListener('click', dismiss);
+      }
+    });
+  }, 100);
+}
+
 function mobGoPage(page,tabId){goPage(page,null);updateMobTabs(tabId);}
 
 // ═══ DATA ═══
