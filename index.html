@@ -2373,28 +2373,44 @@ function openInventoryPanel(type) {
 }
 
 function renderDashboard() {
-  renderDBChart();
   renderDBKPIs();
   renderDBInventory();
   renderDBConcentration();
   renderDBMovers();
   renderDBTop5();
+  // Slight delay for chart so canvas is sized after layout paint
+  if (typeof Chart !== 'undefined') {
+    renderDBChart();
+  } else {
+    setTimeout(renderDBChart, 50);
+  }
 }
 
 function renderDBChart() {
-  const history = JSON.parse(localStorage.getItem('pkv2_vh') || '[]');
-  let pts = [...history];
+  // Read from both history keys — use richer ph2 if available, fall back to vh
+  const ph2 = JSON.parse(localStorage.getItem('pkv2_ph2') || '[]');
+  const vh  = JSON.parse(localStorage.getItem('pkv2_vh')  || '[]');
+  // Build pts from whichever has data — prefer ph2
+  let rawHistory = ph2.length ? ph2.map(s=>({d:s.date||s.d, v:s.totalValue||s.v||0})) : vh;
+  let pts = [...rawHistory].filter(p=>p.v>0);
   if (_dbRange === '3m') pts = pts.slice(-90);
   if (_dbRange === '1m') pts = pts.slice(-30);
+
   const canvas = document.getElementById('db-chart');
   const labels = document.getElementById('db-chart-labels');
   if (!canvas) return;
+
   if (typeof Chart === 'undefined') {
-    // Lazy load Chart.js only when dashboard is first opened
     const s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
-    s.onload = renderDBChart;
+    s.onload = () => setTimeout(renderDBChart, 100);
     document.head.appendChild(s);
+    return;
+  }
+
+  // Make sure canvas has a height before rendering
+  if (canvas.parentElement && canvas.parentElement.offsetHeight === 0) {
+    setTimeout(renderDBChart, 200);
     return;
   }
 
