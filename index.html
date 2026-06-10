@@ -1501,7 +1501,7 @@ const AppState = {
 
       collection.forEach(card => {
         const p    = pcache[card.id+'_'+card.cond]?.data;
-        const bp   = p ? bestPrice(p) : 0;
+        const bp   = p ? bestPrice(p, card.type==='graded') : 0;
         const paid = parseFloat(card.paid || 0);
 
         if (bp > 0) {
@@ -1866,12 +1866,21 @@ function simulate(card){
   const cm={NM:1,LP:.78,MP:.55,HP:.35}[card.cond]||1;const b=base*cm;
   return{tcg:+(b*(.9+Math.abs(Math.sin(seed))*.2)).toFixed(2),ebay:+(b*(.83+Math.abs(Math.sin(seed*2))*.18)).toFixed(2),ppt:+(b*(.86+Math.abs(Math.sin(seed*3))*.16)).toFixed(2),psa:card.type==='graded'?+(b*(1.4+Math.abs(Math.sin(seed*4))*.5)).toFixed(2):null,img:card.img||null,trend7:null,trend30:null,ebay_sales:[]};
 }
-function bestPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);return v.length?Math.min(...v):0;}
+function bestPrice(p, isGraded) {
+  if (!p) return 0;
+  if (isGraded) {
+    // For graded cards: use PSA market, then eBay sold — never raw TCGPlayer price
+    return p.psa || p.ebay || p.ppt || 0;
+  }
+  // For raw cards: use lowest price across all sources
+  const v = SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);
+  return v.length ? Math.min(...v) : 0;
+}
 function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);return v.length?Math.max(...v):0;}
 function fmtPrice(v){return(v==null||!isFinite(v)||v<=0)?'—':'$'+v.toFixed(2);}
 function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
 function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
-function getBestCached(card){const p=pcache[card.id+'_'+card.cond]?.data;return p?bestPrice(p):0;}
+function getBestCached(card){const p=pcache[card.id+'_'+card.cond]?.data;return p?bestPrice(p,card.type==='graded'):0;}
 
 // ═══ PORTFOLIO ═══
 
@@ -2250,7 +2259,7 @@ function renderHistoryMilestones(history) {
 function renderPortfolio(){
   let totalVal=0,totalPaid=0,singlesVal=0,singlesPaid=0,psaVal=0,psaPaid=0,sealedVal=0,sealedPaid=0;
   collection.forEach(card=>{
-    const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p):0;
+    const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
     const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);
     totalVal+=val;if(paid>0)totalPaid+=paid;
     if(card.type==='graded'){psaVal+=val;if(paid>0)psaPaid+=paid;}
@@ -2293,7 +2302,7 @@ function renderPortfolio(){
 
 function renderTopHoldings(){
   const rows=[];
-  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p):0;const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);const pnl=val>0&&paid>0?val-paid:null;rows.push({name:card.name,meta:(card.set||'')+(card.grade?' · '+card.grade:' · '+card.cond),val,pnl,img:p?.img||card.img||null,id:card.id});});
+  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);const pnl=val>0&&paid>0?val-paid:null;rows.push({name:card.name,meta:(card.set||'')+(card.grade?' · '+card.grade:' · '+card.cond),val,pnl,img:p?.img||card.img||null,id:card.id});});
   rows.sort((a,b)=>b.val-a.val);
   const el=document.getElementById('top-holdings');
   if(!rows.length||!rows[0].val){el.innerHTML='<p style="font-size:12px;color:var(--muted);padding:10px 0;">Add cards and purchase prices to see top holdings.</p>';return;}
@@ -2371,7 +2380,7 @@ function openInventoryPanel(type) {
       totalVal += parseFloat(card.value||0) * (card.qty||1);
     } else {
       const p  = pcache[card.id+'_'+card.cond]?.data;
-      const bp = p ? bestPrice(p) : 0;
+      const bp = p ? bestPrice(p, card.type==='graded') : 0;
       totalVal += bp * (card.qty||1);
     }
   });
@@ -2400,7 +2409,7 @@ function openInventoryPanel(type) {
     // Sort by value desc
     const sorted = [...cards].map(card => {
       const p  = pcache[card.id+'_'+card.cond]?.data;
-      const bp = p ? bestPrice(p) : 0;
+      const bp = p ? bestPrice(p, card.type==='graded') : 0;
       const img = p?.img || card.img || '';
       const paid = parseFloat(card.paid||0);
       const pnl  = paid > 0 && bp > 0 ? bp - paid : null;
@@ -2649,7 +2658,7 @@ function renderDBConcentration() {
   const rows = [];
   collection.forEach(card => {
     const p = pcache[card.id+'_'+card.cond]?.data;
-    const bp = p ? bestPrice(p) : 0;
+    const bp = p ? bestPrice(p, card.type==='graded') : 0;
     if (bp > 0) rows.push({ name: card.name, val: bp * (card.qty||1) });
   });
   sealed.forEach(s => {
@@ -2689,7 +2698,7 @@ function renderDBTop5() {
   const rows = [];
   collection.forEach(card => {
     const p   = pcache[card.id+'_'+card.cond]?.data;
-    const bp  = p ? bestPrice(p) : 0;
+    const bp  = p ? bestPrice(p, card.type==='graded') : 0;
     const img = p?.img || card.img || null;
     if (bp > 0) rows.push({ card, bp, img });
   });
@@ -2735,7 +2744,7 @@ function renderDBMovers() {
   const movers = [];
   collection.forEach(card => {
     const p = pcache[card.id+'_'+card.cond]?.data;
-    const bp = p ? bestPrice(p) : 0;
+    const bp = p ? bestPrice(p, card.type==='graded') : 0;
     const paid = parseFloat(card.paid||0);
     if (bp > 0 && paid > 0) {
       const gain = bp - paid;
@@ -2816,7 +2825,7 @@ function renderTimeline(){
 
   // Also save a vh snapshot for legacy compat
   let totalVal=0;
-  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p):0;if(isFinite(bp)&&bp>0)totalVal+=bp*(card.qty||1);});
+  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(isFinite(bp)&&bp>0)totalVal+=bp*(card.qty||1);});
   sealed.forEach(prod=>{const v=parseFloat(prod.value||0);if(v>0)totalVal+=v*(prod.qty||1);});
   if(totalVal>0){
     const today=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'});
@@ -3056,7 +3065,7 @@ function renderPSA(){
   if(!slabs.length){grid.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
   grid.innerHTML=slabs.map(card=>{
-    const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p):0;
+    const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
     const paid=parseFloat(card.paid||0);const pnl=bp>0&&paid>0?bp-paid:null;
     const grader=(card.grade||'').split(' ')[0]||'PSA';const gradeN=(card.grade||'').split(' ').slice(1).join(' ')||'?';
     const img=p?.img||card.img||null;const tcgQ=encodeURIComponent(card.name+(card.num?' '+card.num:'')+' '+card.grade);
@@ -3119,7 +3128,7 @@ function renderSingles(){
 }
 
 function buildPriceStrip(p,card){
-  const best=bestPrice(p),worst=worstPrice(p);
+  const best=bestPrice(p,card?.type==='graded'),worst=worstPrice(p);
   const rows=SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const cls=v===best?'ps-best':v===worst?'ps-high':'';return `<div class="ps-row"><span class="ps-lbl"><span class="ps-bullet" style="background:${s.color}"></span>${s.label}</span><span class="ps-val ${cls}">${fmtPrice(v)}</span></div>`;}).join('');
   const trend=p.trend7!=null?`<span class="ps-trend ${trendClass(p.trend7)}">${fmtTrend(p.trend7)} 7d</span>`:'';
   return rows+`<hr class="ps-divider"><div class="ps-summary"><span>Best: <b style="color:var(--green);font-family:var(--mono)">${fmtPrice(best)}</b></span>${trend}</div>`;
@@ -3247,7 +3256,7 @@ async function runDealSearch(q) {
     rows.push(`<div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;padding:8px 12px 4px;background:var(--bg4);">From Your Vault</div>`);
     rows.push(...vaultHits.map(card => {
       const p = pcache[card.id+'_'+card.cond]?.data;
-      const bp = p ? bestPrice(p) : 0;
+      const bp = p ? bestPrice(p, card.type==='graded') : 0;
       const img = p?.img || card.img || '';
       const label = [card.name, card.grade || card.cond, card.set, card.num ? '#'+card.num : ''].filter(Boolean).join(' · ');
       return `<div class="sd-item" onclick="selectDealCard(${JSON.stringify({name:label,img,set:card.set||'',num:card.num||'',grade:card.grade||'',cond:card.cond||''}).replace(/"/g,'&quot;')})">
@@ -4125,11 +4134,11 @@ function analyzeScreenshot(input){
 }
 function renderAnalyzer(){
   let topCard=null,topVal=0,bestROI=null,bestROIPct=0;
-  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p):0;if(bp>topVal){topVal=bp;topCard=card;}const paid=parseFloat(card.paid||0);if(bp>0&&paid>0){const pct=((bp-paid)/paid)*100;if(pct>bestROIPct){bestROIPct=pct;bestROI=card;}}});
+  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(bp>topVal){topVal=bp;topCard=card;}const paid=parseFloat(card.paid||0);if(bp>0&&paid>0){const pct=((bp-paid)/paid)*100;if(pct>bestROIPct){bestROIPct=pct;bestROI=card;}}});
   document.getElementById('val-top-name').textContent=topCard?topCard.name+(topCard.set?' · '+topCard.set:''):'—';
   document.getElementById('val-top-price').textContent=topVal>0?fmtPrice(topVal):'—';
   const brackets=[{label:'<$10',max:10},{label:'$10–50',min:10,max:50},{label:'$50–200',min:50,max:200},{label:'$200–1k',min:200,max:1000},{label:'$1k+',min:1000}];
-  const counts=brackets.map(b=>collection.filter(c=>{const p=pcache[c.id+'_'+c.cond]?.data;const bp=p?bestPrice(p):0;return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
+  const counts=brackets.map(b=>collection.filter(c=>{const p=pcache[c.id+'_'+c.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
   const maxC=Math.max(...counts,1);
   document.getElementById('val-dist').innerHTML=brackets.map((b,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px;"><span style="width:60px;color:var(--muted);">${b.label}</span><div style="flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden;"><div style="width:${(counts[i]/maxC*100).toFixed(0)}%;height:100%;background:var(--blue);border-radius:3px;"></div></div><span style="width:20px;text-align:right;color:var(--muted2);font-family:var(--mono);">${counts[i]}</span></div>`).join('');
   document.getElementById('val-roi-name').textContent=bestROI?bestROI.name:'—';
@@ -4263,7 +4272,7 @@ function saveCostBasis(cardId) {
 
   // Recalculate gain/loss in the mini-stats
   const p    = pcache[card.id+'_'+card.cond]?.data;
-  const best = p ? bestPrice(p) : 0;
+  const best = p ? bestPrice(p, card?.type==='graded') : 0;
   const roi  = card.paid && best > 0 ? best - parseFloat(card.paid) : null;
   const roiPct = roi != null ? ((best / parseFloat(card.paid) - 1) * 100).toFixed(1) : null;
   const glEl = document.querySelector('#detail-inner .mini-stat-val[data-gl]');
@@ -4304,7 +4313,7 @@ function openCostBasisEditor() {
 
   list.innerHTML = collection.map(card => {
     const p    = pcache[card.id+'_'+card.cond]?.data;
-    const best = p ? bestPrice(p) : 0;
+    const best = p ? bestPrice(p, card.type==='graded') : 0;
     const paid = parseFloat(card.paid || 0);
     const roi  = best > 0 && paid > 0 ? best - paid : null;
     const roiPct = roi != null ? ((roi / paid) * 100).toFixed(1) : null;
@@ -4348,7 +4357,7 @@ function updateCostRow(input) {
 
   // Update the P&L cell for this row
   const p    = pcache[card.id+'_'+card.cond]?.data;
-  const best = p ? bestPrice(p) : 0;
+  const best = p ? bestPrice(p, card?.type==='graded') : 0;
   const paid = parseFloat(card.paid || 0);
   const roi  = best > 0 && paid > 0 ? best - paid : null;
   const roiPct = roi != null ? ((roi / paid) * 100).toFixed(1) : null;
@@ -4388,7 +4397,7 @@ function closeCostEditor() {
 async function openDetail(id){
   const card=collection.find(c=>c.id===id);if(!card)return;
   const p=pcache[card.id+'_'+card.cond]?.data||await getPrices(card);
-  const best=bestPrice(p),worst=worstPrice(p);
+  const best=bestPrice(p,card.type==='graded'),worst=worstPrice(p);
   const roi=card.paid?(best-parseFloat(card.paid)):null;
   const roiPct=card.paid&&best>0?((best/parseFloat(card.paid)-1)*100).toFixed(1):null;
   // Sparkline
@@ -5080,7 +5089,7 @@ function renderWishlist(){
 
   // Calculate totals
   let totalVal=0;
-  wishlist.forEach(w=>{const p=pcache['wish_'+w.id]?.data;const bp=p?bestPrice(p):0;totalVal+=bp;});
+  wishlist.forEach(w=>{const p=pcache['wish_'+w.id]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;totalVal+=bp;});
   document.getElementById('wish-cnt').textContent=wishlist.length+' cards';
   document.getElementById('wish-total').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'Loading…';
   document.getElementById('wish-if-bought').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'—';
