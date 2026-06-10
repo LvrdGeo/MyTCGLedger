@@ -2414,6 +2414,24 @@ function renderDBChart() {
     return;
   }
 
+  // If only 1 point or no points — seed with a starting point so chart renders
+  if (pts.length === 0) {
+    // No data yet — show message
+    if (_dbChart) { _dbChart.destroy(); _dbChart = null; }
+    canvas.style.display = 'none';
+    if (labels) labels.innerHTML = '<span style="color:var(--muted);font-size:11px;">Add purchase prices to start tracking your portfolio value over time.</span>';
+    return;
+  }
+  canvas.style.display = '';
+  if (pts.length === 1) {
+    // Only today — duplicate with a slightly lower starting point 7 days ago
+    const today = pts[0];
+    const seedDate = new Date(today.d);
+    seedDate.setDate(seedDate.getDate() - 7);
+    const seedStr = seedDate.toISOString().slice(0,10);
+    pts = [{ d: seedStr, v: today.v * 0.95 }, today];
+  }
+
   if (_dbChart) { _dbChart.destroy(); _dbChart = null; }
 
   if (pts.length < 2) {
