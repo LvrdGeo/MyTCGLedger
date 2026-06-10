@@ -4976,14 +4976,15 @@ function renderWishSparklines() {
 
 
 
-function openWishCard(idx) {
-  const card = (window._wishCards || {})[idx];
-  if (!card) { toast('Card data missing — try refreshing','red'); return; }
+function openWishCard(wishId) {
+  // wishId is the actual wishlist item ID — look up directly
+  const w = wishlist.find(x => x.id === wishId);
+  if (!w) { toast('Card not found — try refreshing','red'); return; }
   // If already in collection open normal detail
-  const owned = collection.find(c => c.cardId===card.cardId||(c.name===card.name&&c.set===card.set));
+  const owned = collection.find(c => c.cardId===w.cardId||(c.name===w.name&&c.set===w.set));
   if (owned) { openDetail(owned.id); return; }
   // Show watchlist detail modal
-  openWishDetail(card.wishId);
+  openWishDetail(wishId);
 }
 function openWishDetail(wishId) {
   const w = wishlist.find(x => x.id === wishId);
@@ -5093,8 +5094,8 @@ function renderWishlist(){
     const img=p?.img||w.img||'';
     const inVault=collection.some(c=>c.cardId===w.cardId||(c.name===w.name&&c.set===w.set));
     // Store in global map by index to avoid quote escaping issues in onclick
-    window._wishCards[idx] = {wishId:w.id, cardId:w.cardId||"", name:w.name, set:w.set||"", num:w.num||"", img:img||w.img||"", rarity:w.rarity||""};
-    return `<button class="db-card" type="button" style="position:relative;cursor:pointer;background:none;border:1px solid var(--border);width:100%;text-align:left;padding:0;display:block;" onclick="openWishCard(${idx})">
+    window._wishCards[w.id] = {wishId:w.id, cardId:w.cardId||"", name:w.name, set:w.set||"", num:w.num||"", img:img||w.img||"", rarity:w.rarity||""};
+    return `<button class="db-card" type="button" style="position:relative;cursor:pointer;background:none;border:1px solid var(--border);width:100%;text-align:left;padding:0;display:block;" onclick="openWishCard('${w.id}')">
       <div class="db-card-img">
         ${img?`<img src="${img}" alt="${w.name}" loading="lazy" style="pointer-events:none;" onerror="this.style.display='none'">`:'<div class="cs-img-ph" style="font-size:32px;opacity:.2;">⟡</div>'}
       </div>
@@ -5109,8 +5110,8 @@ function renderWishlist(){
           <canvas id="wsp-${w.id}" width="120" height="32" style="display:block;margin-top:4px;opacity:.8;pointer-events:none;"></canvas>
         </div>
         <div style="display:flex;gap:4px;margin-top:8px;">
-          <button class="btn btn-primary btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();moveWishToVault((window._wishCards[${idx}]||{}).wishId)">+ Vault</button>
-          <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();removeWish((window._wishCards[${idx}]||{}).wishId)">✕</button>
+          <button class="btn btn-primary btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();moveWishToVault(w.id)">+ Vault</button>
+          <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();removeWish(w.id)">✕</button>
         </div>
       </div>
     </button>`;
