@@ -1602,10 +1602,11 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.0';
+const SCHEMA_VERSION = '6.1';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
-  console.log('[Schema] Version mismatch — clearing price cache');
+  console.log('[Schema] Version mismatch — clearing all price cache');
   localStorage.removeItem('pkv2_pcache');
+  localStorage.setItem('pkv2_pcache', '{}');
   localStorage.setItem('pkv2_schema', SCHEMA_VERSION);
 }
 
@@ -1653,13 +1654,7 @@ function init() {
     if(c.type==='graded') delete pcache[c.id+'_'+c.cond];
   });
   localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-  // Clear graded card cache so they re-fetch with correct PSA pricing
-collection.filter(c=>c.type==='graded').forEach(card=>{
-  const ck = card.id+'_'+card.cond;
-  if(pcache[ck]) { delete pcache[ck]; }
-});
-localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-AppState.update(); captureHistorySnapshot(); renderDashboard(); // other tabs render on first visit via goPage
+  AppState.update(); captureHistorySnapshot(); renderDashboard(); // other tabs render on first visit via goPage
   loadSets();
   loadAllPrices();
   // Silently test eBay worker and update status dot
