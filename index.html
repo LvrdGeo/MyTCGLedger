@@ -2424,12 +2424,8 @@ function renderDBChart() {
   }
   canvas.style.display = '';
   if (pts.length === 1) {
-    // Only today — duplicate with a slightly lower starting point 7 days ago
-    const today = pts[0];
-    const seedDate = new Date(today.d);
-    seedDate.setDate(seedDate.getDate() - 7);
-    const seedStr = seedDate.toISOString().slice(0,10);
-    pts = [{ d: seedStr, v: today.v * 0.95 }, today];
+    // Start from 0 — honest starting point
+    pts = [{ d: 'Start', v: 0 }, pts[0]];
   }
 
   if (_dbChart) { _dbChart.destroy(); _dbChart = null; }
@@ -2784,9 +2780,8 @@ function renderTimeline(){
   // Seed with 1 point — show flat/slight uptrend so chart renders immediately
   if(pts.length===0){empty.style.display='';if(_tlChart){_tlChart.destroy();_tlChart=null;}labels.innerHTML='<span style="color:var(--muted);font-size:11px;">Prices loading… refresh to build your timeline.</span>';return;}
   if(pts.length===1){
-    const seedDate=new Date(pts[0].d.replace(/(\w+)\s(\d+),\s(\d+)/,'$1 $2, 20$3'));
-    seedDate.setDate(seedDate.getDate()-7);
-    pts=[{d:seedDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}),v:pts[0].v*0.95},pts[0]];
+    // Start from 0 — honest starting point before any cards were tracked
+    pts=[{d:'Start',v:0},pts[0]];
   }
   empty.style.display='none';
 
@@ -2837,17 +2832,20 @@ function renderTimeline(){
       datasets:[{
         data:pts.map(p=>p.v),
         borderColor:col,
-        borderWidth:2,
+        borderWidth:2.5,
         pointRadius:0,
-        pointHoverRadius:6,
-        pointHoverBackgroundColor:col,
-        pointHoverBorderColor:'#0f0f14',
-        pointHoverBorderWidth:2,
-        tension:0.3,
+        pointHoverRadius:7,
+        pointHoverBackgroundColor:'#fff',
+        pointHoverBorderColor:col,
+        pointHoverBorderWidth:2.5,
+        tension:0.4,
         fill:true,
         backgroundColor:(ctx)=>{
           const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
-          g.addColorStop(0,colFill);g.addColorStop(1,colFade);return g;
+          g.addColorStop(0,colFill);
+          g.addColorStop(0.65,up?'rgba(46,204,128,0.04)':'rgba(255,77,109,0.04)');
+          g.addColorStop(1,'rgba(0,0,0,0)');
+          return g;
         }
       }]
     },
@@ -2857,74 +2855,61 @@ function renderTimeline(){
       plugins:{
         legend:{display:false},
         tooltip:{
-          mode:'index',
-          intersect:false,
-          backgroundColor:'rgba(15,15,22,0.95)',
-          borderColor:'rgba(255,255,255,0.1)',
-          borderWidth:1,
-          titleColor:'rgba(255,255,255,0.5)',
-          bodyColor:col,
-          bodyFont:{family:'monospace',size:14,weight:'700'},
+          mode:'index',intersect:false,
+          backgroundColor:'rgba(10,10,18,0.97)',
+          borderColor:col,borderWidth:1,
+          titleColor:'rgba(255,255,255,0.45)',
+          bodyColor:'#fff',
+          bodyFont:{family:'monospace',size:15,weight:'700'},
           titleFont:{family:'monospace',size:10},
-          padding:12,
-          displayColors:false,
-          caretSize:6,
+          padding:14,displayColors:false,
+          cornerRadius:10,
           callbacks:{
             title:items=>items[0].label,
             label:ctx=>{
               const v=ctx.parsed.y;
-              const first=pts[0].v;
-              const diff=v-first;
-              const pct=first>0?((diff/first)*100).toFixed(1):null;
-              const arrow=diff>=0?'▲':'▼';
+              const first=pts.find(p=>p.v>0);
+              const diff=first?v-first.v:0;
+              const pct=first&&first.v>0?((diff/first.v)*100).toFixed(1):null;
               const sign=diff>=0?'+':'';
-              return [
-                '$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
-                pct?arrow+' '+sign+'$'+Math.abs(diff).toFixed(2)+' ('+sign+pct+'%) from start':''
-              ].filter(Boolean);
+              const arrow=diff>=0?'▲':'▼';
+              return ['$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
+                pct?`${arrow} ${sign}$${Math.abs(diff).toLocaleString('en-US',{maximumFractionDigits:0})} (${sign}${pct}%)`:''].filter(Boolean);
             }
           }
         }
       },
       scales:{
         x:{
-          grid:{color:'rgba(255,255,255,0.04)',drawBorder:false},
-          ticks:{color:'rgba(255,255,255,0.3)',font:{family:'monospace',size:10},maxTicksLimit:6,maxRotation:0},
+          grid:{color:'rgba(255,255,255,0.03)',drawBorder:false},
+          ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:10},maxTicksLimit:5,maxRotation:0},
           border:{display:false}
         },
         y:{
           position:'left',
-          grid:{color:'rgba(255,255,255,0.04)',drawBorder:false},
-          ticks:{
-            color:'rgba(255,255,255,0.3)',
-            font:{family:'monospace',size:10},
-            maxTicksLimit:5,
-            callback:v=>v>=1000?'$'+(v/1000).toFixed(v>=10000?0:1)+'k':'$'+Math.round(v)
-          },
+          grid:{color:'rgba(255,255,255,0.03)',drawBorder:false},
+          ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:10},maxTicksLimit:5,
+            callback:v=>v===0?'$0':v>=1000?'$'+(v/1000).toFixed(v>=10000?0:1)+'k':'$'+Math.round(v)},
           border:{display:false}
         }
       },
       interaction:{mode:'index',intersect:false},
-      onHover:(e,elements,chart)=>{
-        // Update bottom labels to show hovered point instead of static labels
-        if(elements.length){
-          const idx=elements[0].index;
-          const pt=pts[idx];
-          const gain=pt.v-pts[0].v;
-          const gainPct=pts[0].v>0?((gain/pts[0].v)*100).toFixed(1):null;
-          const gainCol=gain>=0?'#2ecc80':'#ff4d6d';
-          const arrow=gain>=0?'▲ +':'▼ ';
-          const labels=document.getElementById('tl-labels');
-          if(labels) labels.innerHTML=
-            `<span style="color:rgba(255,255,255,0.4)">${pt.d}</span>`+
-            `<span style="color:${gainCol};font-weight:600;">${arrow}${fmtPrice(gain)} (${gainPct?gainPct+'%':'—'}) from start</span>`+
-            `<span style="color:rgba(255,255,255,0.9);font-weight:600;">${fmtPrice(pt.v)}</span>`;
-        }
+      onHover:(e,elements)=>{
+        if(!elements.length)return;
+        const idx=elements[0].index;
+        const pt=pts[idx];
+        const first=pts.find(p=>p.v>0);
+        const gain=first?pt.v-first.v:0;
+        const gainPct=first&&first.v>0?((gain/first.v)*100).toFixed(1):null;
+        const gainCol=gain>=0?'#2ecc80':'#ff4d6d';
+        const labEl=document.getElementById('tl-labels');
+        if(labEl)labEl.innerHTML=
+          `<span style="color:rgba(255,255,255,0.4);font-family:monospace;font-size:11px;">${pt.d}</span>`+
+          `<span style="color:${gainCol};font-weight:700;font-family:monospace;font-size:11px;">${gain>=0?'▲ +':'▼ '}${fmtPrice(gain)} (${gainPct?gainPct+'%':'—'})</span>`+
+          `<span style="color:#fff;font-weight:700;font-family:monospace;font-size:12px;">${fmtPrice(pt.v)}</span>`;
       }
     }
   });
-
-  // Reset labels to summary on mouse leave
   canvas.addEventListener('mouseleave',()=>{
     const gain=pts[pts.length-1].v-pts[0].v;
     const gainPct=pts[0].v>0?((gain/pts[0].v)*100).toFixed(1):null;
