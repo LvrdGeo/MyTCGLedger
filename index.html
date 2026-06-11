@@ -715,7 +715,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   <div class="topbar">
     <div class="page-title">Card Search</div>
   </div>
-  <div style="padding:20px;">
+  <div style="padding:20px;padding-bottom:calc(100px + env(safe-area-inset-bottom, 20px));">
     <!-- Search bar -->
     <div class="card-search-bar" style="margin-bottom:16px;">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="card-search-icon"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -781,7 +781,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
       <!-- Sets grid -->
       <div id="set-browser-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;"></div>
       <!-- Cards in set grid (shown when a set is selected) -->
-      <div id="cs-set-cards-grid" style="display:none;"></div>
+      <div id="cs-set-cards-grid" style="display:none;padding-bottom:calc(100px + env(safe-area-inset-bottom, 20px));"></div>
       <!-- Set cards loading -->
       <div id="cs-set-cards-loading" style="display:none;text-align:center;padding:40px;color:var(--muted);font-size:12px;">
         <div class="spinner" style="margin:0 auto 10px;"></div>Loading cards…
@@ -792,7 +792,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
       <div class="spinner" style="margin:0 auto 10px;"></div>Searching all sets…
     </div>
     <!-- Results grid -->
-    <div class="cs-grid" id="tab-search-grid" style="max-height:none;padding:0;"></div>
+    <div class="cs-grid" id="tab-search-grid" style="max-height:none;padding:0;padding-bottom:calc(100px + env(safe-area-inset-bottom, 20px));"></div>
     <!-- Pagination -->
     <div id="tab-search-pagination" style="display:none;flex-direction:column;gap:10px;padding:14px 0;border-top:1px solid var(--border);margin-top:10px;">
       <div style="display:flex;align-items:center;justify-content:space-between;">
