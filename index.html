@@ -1610,6 +1610,28 @@ if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
   localStorage.setItem('pkv2_schema', SCHEMA_VERSION);
 }
 
+// ── MIGRATION: fix cards that have a grade but wrong type ──
+try {
+  const _col = JSON.parse(localStorage.getItem('pkv2_col') || '[]');
+  let _fixed = 0;
+  _col.forEach(c => {
+    // If a card has a grade (PSA 10, BGS 9.5, etc) but isn't marked graded, fix it
+    if (c.grade && c.grade.trim() && c.type !== 'graded') {
+      c.type = 'graded';
+      _fixed++;
+    }
+    // Also catch cards with a cert number but no graded type
+    if (c.cert && c.cert.trim() && c.type !== 'graded') {
+      c.type = 'graded';
+      _fixed++;
+    }
+  });
+  if (_fixed > 0) {
+    console.log('[Migration] Fixed ' + _fixed + ' graded cards that were miscategorized');
+    localStorage.setItem('pkv2_col', JSON.stringify(_col));
+  }
+} catch(e) { console.error('[Migration] failed:', e); }
+
 // ── Error boundary wrapper for render functions ──
 function safeRender(fn, name) {
   try { fn(); }
