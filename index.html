@@ -1602,10 +1602,11 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.0';
+const SCHEMA_VERSION = '6.1';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache');
   localStorage.removeItem('pkv2_pcache');
+  localStorage.setItem('pkv2_pcache', '{}');
   localStorage.setItem('pkv2_schema', SCHEMA_VERSION);
 }
 
@@ -4144,7 +4145,7 @@ function renderAnalyzer(){
   document.getElementById('val-top-name').textContent=topCard?topCard.name+(topCard.set?' · '+topCard.set:''):'—';
   document.getElementById('val-top-price').textContent=topVal>0?fmtPrice(topVal):'—';
   const brackets=[{label:'<$10',max:10},{label:'$10–50',min:10,max:50},{label:'$50–200',min:50,max:200},{label:'$200–1k',min:200,max:1000},{label:'$1k+',min:1000}];
-  const counts=brackets.map(b=>collection.filter(c=>{const p=pcache[c.id+'_'+c.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
+  const counts=brackets.map(b=>collection.filter(c=>{const p=pcache[c.id+'_'+c.cond]?.data;const bp=p?bestPrice(p,c.type==='graded'):0;return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
   const maxC=Math.max(...counts,1);
   document.getElementById('val-dist').innerHTML=brackets.map((b,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px;"><span style="width:60px;color:var(--muted);">${b.label}</span><div style="flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden;"><div style="width:${(counts[i]/maxC*100).toFixed(0)}%;height:100%;background:var(--blue);border-radius:3px;"></div></div><span style="width:20px;text-align:right;color:var(--muted2);font-family:var(--mono);">${counts[i]}</span></div>`).join('');
   document.getElementById('val-roi-name').textContent=bestROI?bestROI.name:'—';
