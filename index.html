@@ -1602,7 +1602,7 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.1';
+const SCHEMA_VERSION = '6.2';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache');
   localStorage.removeItem('pkv2_pcache');
@@ -1776,10 +1776,41 @@ async function fetchLivePrices(card){
     try{
       const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
       const r=await fetch(`https://api.pokemontcg.io/v2/cards/${tcgKey}`,{headers:hdrs});
-      if(r.ok){const d=(await r.json()).data;const prices=d?.tcgplayer?.prices;
-        if(prices){const tiers=['holofoil','normal','reverseHolofoil'];for(const t of tiers){if(prices[t]?.market){result.tcg=prices[t].market;break;}}if(!result.tcg)result.tcg=Object.values(prices)[0]?.market||null;}
-        result.img=result.img||d?.images?.large||d?.images?.small||null;}
-    }catch(e){}
+      if(r.ok){
+        const d=(await r.json()).data;
+        const prices=d?.tcgplayer?.prices;
+        if(prices){
+          // Pick the right price tier based on the card's actual variant
+          const isReverse = /reverse/i.test(card.rarity||'') || /reverse/i.test(card.notes||'');
+          // Preferred tier order depends on card type
+          let tierOrder;
+          if (isReverse) {
+            tierOrder = ['reverseHolofoil','holofoil','normal'];
+          } else {
+            // For most modern rares/ex/V/VMAX the price is under holofoil
+            tierOrder = ['holofoil','normal','reverseHolofoil','1stEditionHolofoil','unlimitedHolofoil'];
+          }
+          for(const t of tierOrder){
+            if(prices[t]?.market){ result.tcg=prices[t].market; break; }
+          }
+          // If no market price, try mid price
+          if(!result.tcg){
+            for(const t of tierOrder){
+              if(prices[t]?.mid){ result.tcg=prices[t].mid; break; }
+            }
+          }
+          // Absolute fallback — any available price
+          if(!result.tcg){
+            const anyTier = Object.values(prices)[0];
+            result.tcg = anyTier?.market || anyTier?.mid || anyTier?.low || null;
+          }
+        }
+        // Also grab PriceCharting-style data if the API has it
+        result.img=result.img||d?.images?.large||d?.images?.small||null;
+        // Store the resolved card metadata
+        if(d?.number && !card.num){ const f=collection.find(x=>x.id===card.id); if(f){f.num=d.number;save();} }
+      }
+    }catch(e){ console.error('[TCG price] failed:', e); }
   }
 
   // ── Real eBay sold prices via Cloudflare Worker ──
@@ -1861,11 +1892,61 @@ async function fetchLivePrices(card){
 }
 async function lookupCardId(card){
   if(!card.name) return null;
-  try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
-    const q=`name:"${card.name}"${card.set?` set.name:"${card.set}"`:''}`;
-    const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=1`,{headers:hdrs});
-    if(r.ok){const j=await r.json();if(j.data?.[0]){const c2=j.data[0];const found=collection.find(x=>x.id===card.id);if(found){found.cardId=c2.id;save();}return c2.id;}}
-  }catch(e){}return null;
+  try{
+    const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
+    // Build the most precise query possible — number is the key to exact match
+    const numShort = (card.num||'').split('/')[0].trim();
+    let candidates = [];
+
+    // Query 1: name + number + set (most precise)
+    if (numShort && card.set) {
+      const q1 = `name:"${card.name}" number:"${numShort}" set.name:"${card.set}"`;
+      const r1 = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q1)}&pageSize=10`,{headers:hdrs});
+      if(r1.ok){ const j1=await r1.json(); candidates = j1.data||[]; }
+    }
+
+    // Query 2: name + number (if set didn't match)
+    if (!candidates.length && numShort) {
+      const q2 = `name:"${card.name}" number:"${numShort}"`;
+      const r2 = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q2)}&pageSize=10`,{headers:hdrs});
+      if(r2.ok){ const j2=await r2.json(); candidates = j2.data||[]; }
+    }
+
+    // Query 3: name + set (fallback)
+    if (!candidates.length && card.set) {
+      const q3 = `name:"${card.name}" set.name:"${card.set}"`;
+      const r3 = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q3)}&pageSize=10`,{headers:hdrs});
+      if(r3.ok){ const j3=await r3.json(); candidates = j3.data||[]; }
+    }
+
+    // Query 4: name only (last resort)
+    if (!candidates.length) {
+      const q4 = `name:"${card.name}"`;
+      const r4 = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q4)}&pageSize=10`,{headers:hdrs});
+      if(r4.ok){ const j4=await r4.json(); candidates = j4.data||[]; }
+    }
+
+    if(!candidates.length) return null;
+
+    // Pick the BEST match — prefer exact number match
+    let best = candidates[0];
+    if (numShort) {
+      const exactNum = candidates.find(c2 => (c2.number||'').toLowerCase() === numShort.toLowerCase());
+      if (exactNum) best = exactNum;
+    }
+
+    // Save the resolved cardId AND update the card's metadata
+    const found = collection.find(x=>x.id===card.id);
+    if(found){
+      found.cardId = best.id;
+      if(!found.num && best.number) found.num = best.number;
+      if(!found.set && best.set?.name) found.set = best.set.name;
+      if(!found.rarity && best.rarity) found.rarity = best.rarity;
+      save();
+    }
+    return best.id;
+  }catch(e){ console.error('[lookupCardId] failed:', e); }
+  return null;
 }
 function simulate(card){
   let seed=0;for(const ch of card.name)seed+=ch.charCodeAt(0);
@@ -4226,9 +4307,9 @@ function renderSealedQuickAdd(setName,setLogo){const panel=document.getElementBy
 function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.getElementById('sp-name').value=name;document.getElementById('sp-set').value=setName;document.getElementById('sp-type').value=type;document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const pill=document.querySelector(`#sealed-modal .type-pill[data-val="${type}"]`);if(pill)pill.classList.add('active');updateSealedPreview();}
 
 // ═══ CARD CRUD ═══
-function openAddModal(forceGraded){editingId=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));updateAddPreview();openModal('add-modal');}
-function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:document.getElementById('f-type').value,cond:document.getElementById('f-cond').value,grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};delete pcache[data.id+'_'+data.cond];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);save();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
+function openAddModal(forceGraded){editingId=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));updateAddPreview();openModal('add-modal');}
+function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}updateAddPreview();openModal('add-modal');}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:document.getElementById('f-type').value,cond:document.getElementById('f-cond').value,grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};delete pcache[data.id+'_'+data.cond];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);save();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
 function delCard(id){showConfirm('Remove card?','Permanently removes it from your vault.',()=>{collection=collection.filter(c=>c.id!==id);save();renderAll();toast('Card removed','red');});}
 
 // ═══ DETAIL VIEW ═══
@@ -4668,7 +4749,7 @@ function addToWatchlistFromPicker(card){
   renderWishlist();
   toast(card.name+' added to Watchlist','green');
 }
-function prefillAddForm(card,chosenType){editingId=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';
+function prefillAddForm(card,chosenType){editingId=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';
   if(chosenType==='graded'){const grader=document.getElementById('picker-grader').value;const grade=document.getElementById('picker-grade-sel').value;const cert=document.getElementById('picker-cert').value.trim();const tP=document.querySelector('.type-pill[data-val="graded"]');if(tP)selectType('graded',tP);document.getElementById('f-grader').value=grader;document.getElementById('f-grade-sel').value=grade;document.getElementById('f-cert').value=cert;document.getElementById('f-grade').value=grader+' '+grade;document.getElementById('f-cond').value='NM';}
   else{const r=(card.rarity||'').toLowerCase();let gt='standard';if(r.includes('ex')||r.includes('gx')||r.includes(' v')||r.includes('vmax'))gt='ex';else if(r.includes('holo'))gt='holo';else if(r.includes('reverse'))gt='reverse';const tP=document.querySelector(`.type-pill[data-val="${gt}"]`);if(tP)selectType(gt,tP);const cP=document.querySelector('.cond-pill[data-val="NM"]');if(cP)selectCond('NM',cP);document.getElementById('f-grade').value='';document.getElementById('f-cert').value='';}
   updateAddPreview();openModal('add-modal');}
