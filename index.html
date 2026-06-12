@@ -1671,20 +1671,15 @@ const EBAY_WORKER = 'https://mytcg-ebay.geo6810-03e.workers.dev';
 // ═══ INIT ═══
 function init() {
   loadKeys(); updateStatusDots();
-  // Bust cache for all graded cards so they re-fetch with real eBay prices
-  collection.forEach(c=>{
-    if(c.type==='graded') delete pcache[c.id+'_'+c.cond];
-  });
-  localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-  // Clear graded card cache so they re-fetch with correct PSA pricing
-collection.filter(c=>c.type==='graded').forEach(card=>{
-  const ck = card.id+'_'+card.cond;
-  if(pcache[ck]) { delete pcache[ck]; }
-});
-localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-AppState.update(); captureHistorySnapshot(); renderDashboard(); // other tabs render on first visit via goPage
-  loadSets();
-  loadAllPrices();
+  // Render dashboard immediately for fast perceived load
+  AppState.update();
+  renderDashboard();
+  // Defer heavy work so the UI paints first
+  setTimeout(() => {
+    captureHistorySnapshot();
+    loadSets();
+    loadAllPrices();
+  }, 100);
   // Silently test eBay worker and update status dot
   fetch(EBAY_WORKER + '/health').then(r=>r.json()).then(d=>{
     const s2 = document.getElementById('s2');
@@ -3283,46 +3278,67 @@ function getAllPriceableItems(){
   return items;
 }
 
+let _loadingPrices = false;
 async function loadAllPrices(){
+  if(_loadingPrices) return; // prevent concurrent runs
   const all = getAllPriceableItems();
   if(!all.length) return;
   const updEl  = document.getElementById('port-updated');
   const loadEl = document.getElementById('port-loading');
   if(updEl)  updEl.textContent = '';
+
+  // Only fetch cards not already cached
+  const toFetch = all.filter(c => !pcache[c.id+'_'+c.cond]);
+  if(!toFetch.length){ if(loadEl) loadEl.style.display='none'; return; }
+
+  _loadingPrices = true;
   if(loadEl) loadEl.style.display = 'flex';
 
-  // Show progress while loading
   let loaded = 0;
-  const total = all.filter(c => !pcache[c.id+'_'+c.cond]).length;
+  const total = toFetch.length;
+  let cacheDirty = false;
 
-  for(const card of all){
-    const ck = card.id+'_'+card.cond;
-    if(!pcache[ck]){
-      const data = await getPrices(card);
-      pcache[ck] = {ts:Date.now(),data};
-      localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-      const ps = document.getElementById('ps-'+card.id);
-      if(ps) ps.innerHTML = buildPriceStrip(data,card);
-      if(data.img&&!card.img&&collection.find(c=>c.id===card.id)){
-        collection.find(c=>c.id===card.id).img=data.img; save();
-      }
+  // Fetch in PARALLEL batches of 5 for speed (instead of one-at-a-time)
+  const BATCH = 5;
+  for(let i=0; i<toFetch.length; i+=BATCH){
+    const batch = toFetch.slice(i, i+BATCH);
+    await Promise.all(batch.map(async card => {
+      const ck = card.id+'_'+card.cond;
+      try{
+        const data = await getPrices(card);
+        pcache[ck] = {ts:Date.now(),data};
+        cacheDirty = true;
+        // Update just this card's price strip (cheap, targeted)
+        const ps = document.getElementById('ps-'+card.id);
+        if(ps) ps.innerHTML = buildPriceStrip(data,card);
+        if(data.img&&!card.img){
+          const cc=collection.find(c=>c.id===card.id);
+          if(cc){cc.img=data.img;}
+        }
+      }catch(e){ console.error('[price] failed for',card.name,e); }
       loaded++;
-      // Update progress label
-      if(loadEl && total > 1){
-        loadEl.querySelector('span') && (loadEl.querySelector('span').textContent =
-          `Loading prices… ${loaded}/${total}`);
+      if(loadEl){
+        const sp = loadEl.querySelector('span');
+        if(sp) sp.textContent = `Loading prices… ${loaded}/${total}`;
       }
-      // Re-render all views live as each price arrives
-      renderPortfolio();
-      renderPSA();
-      renderSingles();
-      renderWishlist();
-      renderAnalyzer();
-    }
+    }));
+    // Save cache once per batch (not per card)
+    if(cacheDirty){ localStorage.setItem('pkv2_pcache',JSON.stringify(pcache)); }
   }
+
+  // Re-render everything ONCE at the end (not per card)
+  AppState._dirty = true;
+  AppState.update();
+  renderPortfolio();
+  renderPSA();
+  renderSingles();
+  renderWishlist();
+  renderAnalyzer();
+  renderDashboard();
 
   if(loadEl) loadEl.style.display = 'none';
   if(updEl)  updEl.textContent = 'Updated '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  _loadingPrices = false;
   captureHistorySnapshot(); // capture after prices are fresh
 }
 
