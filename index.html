@@ -4712,9 +4712,9 @@ function renderSealedQuickAdd(setName,setLogo){const panel=document.getElementBy
 function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.getElementById('sp-name').value=name;document.getElementById('sp-set').value=setName;document.getElementById('sp-type').value=type;document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const pill=document.querySelector(`#sealed-modal .type-pill[data-val="${type}"]`);if(pill)pill.classList.add('active');updateSealedPreview();}
 
 // ═══ CARD CRUD ═══
-function openAddModal(forceGraded){editingId=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
+function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);save();AppState._dirty=true;AppState.update();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();AppState._dirty=true;AppState.update();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -5146,7 +5146,7 @@ async function openDetail(id){
         ${card.cert?`<a href="https://www.psacard.com/cert/verify?certNumber=${card.cert}" target="_blank" class="btn btn-ghost btn-xs">PSA Cert →</a>`:''}
       </div>
     </div>
-    <div class="modal-ft" style="gap:8px;">${card._transient?`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');dealPickCard(window._detailTransient)">＄ Log a Deal</button>`:`<button class="btn btn-danger btn-sm" onclick="closeModal('detail-modal');delCard('${card.id}');" style="margin-right:auto;">🗑 Delete</button><button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');editCard('${card.id}')">✏️ Edit</button>`}</div>`;
+    <div class="modal-ft" style="gap:8px;">${card._transient?(card._wishId?`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');moveWishToVault('${card._wishId}')">+ Add to Portfolio</button>`:`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');dealPickCard(window._detailTransient)">＄ Log a Deal</button>`):`<button class="btn btn-danger btn-sm" onclick="closeModal('detail-modal');delCard('${card.id}');" style="margin-right:auto;">🗑 Delete</button><button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');editCard('${card.id}')">✏️ Edit</button>`}</div>`;
   openModal('detail-modal');
   if(card.type==='graded') setTimeout(()=>loadActiveListings(card), 100);
 async function loadActiveListings(card) {
@@ -5347,7 +5347,7 @@ function addToWatchlistFromPicker(card,edition,kind,grade){
   const kindLabel=kind==='graded'?(grade||'Graded'):kind==='sealed'?'Sealed':'Single';
   toast(card.name+' ('+kindLabel+') added to Watchlist','green');
 }
-function prefillAddForm(card,chosenType){editingId=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';
+function prefillAddForm(card,chosenType){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';
   if(chosenType==='graded'){const grader=document.getElementById('picker-grader').value;const grade=document.getElementById('picker-grade-sel').value;const cert=document.getElementById('picker-cert').value.trim();const tP=document.querySelector('.type-pill[data-val="graded"]');if(tP)selectType('graded',tP);document.getElementById('f-grader').value=grader;document.getElementById('f-grade-sel').value=grade;document.getElementById('f-cert').value=cert;document.getElementById('f-grade').value=grader+' '+grade;document.getElementById('f-cond').value='NM';}
   else{const r=(card.rarity||'').toLowerCase();let gt='standard';if(r.includes('ex')||r.includes('gx')||r.includes(' v')||r.includes('vmax'))gt='ex';else if(r.includes('holo'))gt='holo';else if(r.includes('reverse'))gt='reverse';const tP=document.querySelector(`.type-pill[data-val="${gt}"]`);if(tP)selectType(gt,tP);const cP=document.querySelector('.cond-pill[data-val="NM"]');if(cP)selectCond('NM',cP);document.getElementById('f-grade').value='';document.getElementById('f-cert').value='';}
   document.getElementById('f-edition').value=(card.edition||'unlimited');refreshEditionSection();const _pcEd=document.getElementById('f-edition').value;const _pcP=document.querySelector(`#edition-section .ed-pill[data-val="${_pcEd}"]`);if(_pcP)selectEdition(_pcEd,_pcP);
@@ -5697,66 +5697,18 @@ function openWishCard(wishId) {
 function openWishDetail(wishId) {
   const w = wishlist.find(x => x.id === wishId);
   if (!w) { toast('Watchlist item not found','red'); return; }
-
-  // If already in collection, open normal detail
-  const inCollection = collection.find(c => c.cardId===w.cardId||(c.name===w.name&&c.set===w.set));
+  // If the user already owns this card, open its real collection detail.
+  const inCollection = collection.find(c => c.cardId===w.cardId || (c.name===w.name && c.set===w.set));
   if (inCollection) { openDetail(inCollection.id); return; }
-
-  const p    = pcache['wish_'+w.id]?.data;
-  const best = p ? bestPrice(p) : null;
-  const tcg  = p?.tcg || null;
-  const ebay = p?.ebay || null;
-  const ppt  = p?.ppt || null;
-  const img  = p?.img || w.img || '';
-
-  // Build a lightweight detail modal for watchlist cards
-  const inVault = !!inCollection;
-  const sources = [
-    tcg  ? `<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="width:8px;height:8px;border-radius:50%;background:#f5c842;display:inline-block;"></span><span style="font-size:11px;color:var(--muted);">TCGPlayer</span></div><div style="font-family:var(--mono);font-size:18px;font-weight:700;">$${tcg.toFixed(2)}</div><div style="font-size:10px;color:var(--muted);">Market price</div></div>` : '',
-    ebay ? `<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="width:8px;height:8px;border-radius:50%;background:#3b8bff;display:inline-block;"></span><span style="font-size:11px;color:var(--muted);">eBay Sold</span></div><div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--green);">$${ebay.toFixed(2)}</div><div style="font-size:10px;color:var(--muted);">Recent sold</div></div>` : '',
-    ppt  ? `<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="width:8px;height:8px;border-radius:50%;background:#2ecc80;display:inline-block;"></span><span style="font-size:11px;color:var(--muted);">PriceCharting</span></div><div style="font-family:var(--mono);font-size:18px;font-weight:700;">$${ppt.toFixed(2)}</div><div style="font-size:10px;color:var(--muted);">PriceCharting</div></div>` : '',
-  ].filter(Boolean).join('');
-
-  // Create a temporary modal
-  const existing = document.getElementById('wish-detail-modal');
-  if (existing) existing.remove();
-
-  const modal = document.createElement('div');
-  modal.className = 'modal-bg';
-  modal.id = 'wish-detail-modal';
-  modal.innerHTML = `
-    <div class="modal" style="width:min(560px,100%);">
-      <div class="modal-hd">
-        <h2 style="font-size:16px;font-weight:700;">${w.name}</h2>
-        <button class="modal-close" onclick="document.getElementById('wish-detail-modal').remove()">✕</button>
-      </div>
-      <div class="modal-body" style="padding-top:14px;">
-        <div style="display:flex;gap:14px;margin-bottom:16px;">
-          ${img ? `<img src="${img}" alt="${w.name}" style="width:90px;height:126px;object-fit:contain;border-radius:8px;flex-shrink:0;">` : '<div style="width:90px;height:126px;background:var(--bg3);border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:28px;">⟡</div>'}
-          <div style="flex:1;">
-            <div style="font-size:18px;font-weight:700;margin-bottom:4px;">${w.name}</div>
-            <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">${w.set||''}${w.num?' · #'+w.num:''}${w.rarity?' · '+w.rarity:''}</div>
-            ${best != null ? `
-              <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:2px;">BEST PRICE</div>
-              <div style="font-family:var(--mono);font-size:28px;font-weight:700;color:var(--green);">$${best.toFixed(2)}</div>
-            ` : '<div style="font-size:12px;color:var(--muted);">Loading prices…</div>'}
-          </div>
-        </div>
-        ${sources ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:14px;">${sources}</div>` : ''}
-        <div style="display:flex;gap:8px;">
-          <button class="btn btn-primary" style="flex:1;" onclick="document.getElementById('wish-detail-modal').remove();moveWishToVault('${w.id}')">
-            + Add to Vault
-          </button>
-          <button class="btn btn-ghost" onclick="document.getElementById('wish-detail-modal').remove();removeWish('${w.id}')">
-            Remove
-          </button>
-        </div>
-      </div>
-    </div>`;
-
-  document.body.appendChild(modal);
-  // Click backdrop to close
-  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  // Otherwise show the SAME full detail view as the portfolio, via a not-owned
+  // (transient) card carrying the watchlist item's kind/grade/edition so it prices right.
+  window._detailTransient = {
+    id: 'wishview_' + w.id, cardId: w.cardId || '', name: w.name, set: w.set || '', num: w.num || '',
+    img: (pcache['wish_'+w.id] && pcache['wish_'+w.id].data && pcache['wish_'+w.id].data.img) || w.img || '',
+    rarity: w.rarity || '', type: w.type==='graded' ? 'graded' : 'standard', grade: w.grade || '',
+    cert: '', edition: w.edition || 'unlimited', cond: 'NM', paid: '', _transient: true, _wishId: w.id
+  };
+  openDetail('wishview_' + w.id);
 }
 
 function renderWishlist(){
@@ -5845,7 +5797,18 @@ function renderWishlist(){
   }, 100);
 }
 
-function moveWishToVault(id){const w=wishlist.find(x=>x.id===id);if(!w)return;openAddModal();document.getElementById('f-name').value=w.name;}
+function moveWishToVault(id){
+  const w=wishlist.find(x=>x.id===id);if(!w)return;
+  const cardObj={id:w.cardId||'',name:w.name,set:w.set||'',num:w.num||'',img:w.img||'',rarity:w.rarity||'',edition:w.edition||'unlimited'};
+  prefillAddForm(cardObj, w.type==='graded'?'graded':'raw');
+  if(w.type==='graded' && w.grade){
+    const parts=w.grade.match(/^(\w+)\s+(.+)$/);
+    if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}
+    document.getElementById('f-grade').value=w.grade;
+  }
+  // Once saved, this watchlist entry moves into the portfolio.
+  window._pendingWishRemoval=id;
+}
 
 // ═══ NAV + MOBILE ═══
 
