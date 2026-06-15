@@ -1260,7 +1260,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="2" width="12" height="18" rx="2"/><path d="M7 7h5M7 11h3"/></svg>Collection
   </button>
 </nav>
-<button class="mob-fab" onclick="openAddModal()">+</button>
+<button class="mob-fab" id="mob-fab" onclick="fabAction()" title="Add card" aria-label="Add card">+</button>
 
 <!-- CARD PICKER -->
 <div class="modal-bg" id="card-picker-modal">
@@ -1292,6 +1292,18 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
           <button type="button" class="ed-pill active" data-val="unlimited" onclick="pickerSelectEdition('unlimited',this)" style="--ec:#9ca3af;--ec-bg:rgba(148,163,184,.15);">Unlimited</button>
           <button type="button" class="ed-pill" data-val="1stEdition" onclick="pickerSelectEdition('1stEdition',this)" style="--ec:var(--gold);--ec-bg:rgba(245,200,66,.18);">1st Edition</button>
           <button type="button" class="ed-pill" id="picker-ed-shadowless" data-val="shadowless" onclick="pickerSelectEdition('shadowless',this)" style="--ec:#60a5fa;--ec-bg:rgba(79,142,247,.16);display:none;">Shadowless</button>
+        </div>
+      </div>
+      <div id="picker-watch-panel" style="display:none;background:var(--bg3);border-radius:var(--r);padding:14px;margin-top:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">What are you watching?</div>
+        <div style="display:flex;gap:6px;margin-bottom:12px;">
+          <button type="button" class="ed-pill active" data-kind="single" onclick="pickerSelectWatchKind('single',this)" style="--ec:var(--gold);--ec-bg:rgba(245,200,66,.18);">Single</button>
+          <button type="button" class="ed-pill" data-kind="graded" onclick="pickerSelectWatchKind('graded',this)" style="--ec:var(--gold);--ec-bg:rgba(245,200,66,.18);">PSA Slab</button>
+          <button type="button" class="ed-pill" data-kind="sealed" onclick="pickerSelectWatchKind('sealed',this)" style="--ec:var(--gold);--ec-bg:rgba(245,200,66,.18);">Sealed</button>
+        </div>
+        <div id="picker-watch-grade" style="display:none;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="form-group"><div class="form-label">Grader</div><select class="select" id="picker-watch-grader"><option value="PSA">PSA</option><option value="BGS">BGS</option><option value="CGC">CGC</option><option value="SGC">SGC</option><option value="ACE">ACE</option></select></div>
+          <div class="form-group"><div class="form-label">Grade</div><select class="select" id="picker-watch-grade-sel"><option value="10">10 — Gem Mint</option><option value="9.5">9.5</option><option value="9">9 — Mint</option><option value="8.5">8.5</option><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1 — Poor</option><option value="AUTH">AUTH</option></select></div>
         </div>
       </div>
     </div>
@@ -1701,7 +1713,7 @@ let prefs      = JSON.parse(localStorage.getItem('pkv2_prefs') || '{"cond":"NM"}
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
 let allSets=[], typeFilter='', sealedFilter='', sealedSetFilter='', sortBy='added';
 let editingId=null, editingSealedId=null, editingDealId=null, tlRange='all';
-let _pickerCard=null, _pickerEdition='unlimited', searchTimer=null;
+let _pickerCard=null, _pickerEdition='unlimited', _pickerWatchKind='single', searchTimer=null;
 
 const SOURCES=[
   {k:'tcg', label:'TCGPlayer', color:'#f5c842'},
@@ -4294,7 +4306,7 @@ async function doDealSearch(q) {
       const key = 'dsc_' + card.id.replace(/[^a-z0-9]/gi,'_');
       window._dscCards = window._dscCards || {};
       window._dscCards[key] = {id:card.id,name:card.name,set:card.set?.name||'',num:card.number||'',img:card.images?.large||card.images?.small||''};
-      return `<div class="cs-card" onclick="dealPickCard(window._dscCards['${key}'])">
+      return `<div class="cs-card" onclick="openDealCardDetail(window._dscCards['${key}'])">
         <div class="cs-img-wrap">${card.images?.small?`<img src="${card.images.small}" loading="lazy">`:'<div class="cs-img-ph">⟡</div>'}</div>
         <div class="cs-body">
           <div class="cs-set-pill">#${card.number||'?'}</div>
@@ -4308,6 +4320,16 @@ async function doDealSearch(q) {
   } catch(e) { grid.innerHTML = '<div class="cs-empty">Search failed.</div>'; }
 }
 
+function openDealCardDetail(c) {
+  if(!c) return;
+  // Build a not-owned (transient) card so openDetail can show full price + links.
+  window._detailTransient = {
+    id: c.id, cardId: c.id, name: c.name, set: c.set || '', num: c.num || '',
+    img: c.img || '', type: 'standard', cond: 'NM', edition: 'unlimited',
+    grade: '', cert: '', paid: '', rarity: '', _transient: true
+  };
+  openDetail(c.id);
+}
 function dealPickCard(card) {
   closeDealSearch();
   document.getElementById('deal-search-input').value = '';
@@ -5048,7 +5070,7 @@ function closeCostEditor() {
 }
 
 async function openDetail(id){
-  const card=collection.find(c=>c.id===id);if(!card)return;
+  const card=collection.find(c=>c.id===id)||((window._detailTransient&&window._detailTransient.id===id)?window._detailTransient:null);if(!card)return;
   const p=pcache[cacheKey(card)]?.data||await getPrices(card);
   const best=bestPrice(p,card.type==='graded'),worst=worstPrice(p);
   const priceAnalysis=analyzePrice(p,card.type==='graded');
@@ -5094,7 +5116,7 @@ async function openDetail(id){
           </div>
           <div class="mini-stats">
             <div class="mini-stat"><div class="mini-stat-lbl">Best Price</div><div class="mini-stat-val" style="color:var(--green)">${fmtPrice(best)}</div></div>
-            <div class="mini-stat" style="cursor:pointer;position:relative;" onclick="startEditCost('${card.id}')" title="Click to edit cost basis">
+            <div class="mini-stat" style="position:relative;${card._transient?'':'cursor:pointer;'}" ${card._transient?'':`onclick="startEditCost('${card.id}')" title="Click to edit cost basis"`}>
               <div class="mini-stat-lbl" style="display:flex;align-items:center;justify-content:space-between;">
                 COST BASIS
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:10px;height:10px;color:var(--muted);opacity:.6;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -5124,7 +5146,7 @@ async function openDetail(id){
         ${card.cert?`<a href="https://www.psacard.com/cert/verify?certNumber=${card.cert}" target="_blank" class="btn btn-ghost btn-xs">PSA Cert →</a>`:''}
       </div>
     </div>
-    <div class="modal-ft" style="gap:8px;"><button class="btn btn-danger btn-sm" onclick="closeModal('detail-modal');delCard('${card.id}');" style="margin-right:auto;">🗑 Delete</button><button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');editCard('${card.id}')">✏️ Edit</button></div>`;
+    <div class="modal-ft" style="gap:8px;">${card._transient?`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');dealPickCard(window._detailTransient)">＄ Log a Deal</button>`:`<button class="btn btn-danger btn-sm" onclick="closeModal('detail-modal');delCard('${card.id}');" style="margin-right:auto;">🗑 Delete</button><button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');editCard('${card.id}')">✏️ Edit</button>`}</div>`;
   openModal('detail-modal');
   if(card.type==='graded') setTimeout(()=>loadActiveListings(card), 100);
 async function loadActiveListings(card) {
@@ -5284,8 +5306,9 @@ async function doNameSearch(q){
 }
 document.addEventListener('click',e=>{if(!e.target.closest('#mode-name'))document.getElementById('name-dd').classList.remove('open');});
 
-function quickAdd(card){document.getElementById('name-dd').classList.remove('open');document.getElementById('name-search').value='';_pickerCard=card;document.getElementById('picker-img').src=card.img;document.getElementById('picker-img').style.display=card.img?'':'none';document.getElementById('picker-img-ph').style.display=card.img?'none':'';document.getElementById('picker-name').textContent=card.name;document.getElementById('picker-meta').textContent=[card.set,card.num?'#'+card.num:'',card.rarity].filter(Boolean).join(' · ');document.getElementById('picker-graded-panel').style.display='none';document.getElementById('picker-grade-sel').value='10';document.getElementById('picker-cert').value='';document.getElementById('picker-grader').value='PSA';document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='');document.getElementById('picker-confirm-btn').disabled=true;_pickerEdition='unlimited';const _pe=editionEligibility({cardId:card.id,set:card.set,type:'standard'});const _per=document.getElementById('picker-edition-row');if(_pe.eligible){_per.style.display='';document.getElementById('picker-ed-shadowless').style.display=_pe.shadowless?'':'none';document.querySelectorAll('#picker-edition-row .ed-pill').forEach(p=>p.classList.toggle('active',p.dataset.val==='unlimited'));}else{_per.style.display='none';}openModal('card-picker-modal');}
-function pickerSelectType(type,el){document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='var(--border)');el.style.borderColor='var(--gold)';document.getElementById('picker-graded-panel').style.display=type==='graded'?'':'none';document.getElementById('picker-confirm-btn').disabled=false;}
+function quickAdd(card){document.getElementById('name-dd').classList.remove('open');document.getElementById('name-search').value='';_pickerCard=card;document.getElementById('picker-img').src=card.img;document.getElementById('picker-img').style.display=card.img?'':'none';document.getElementById('picker-img-ph').style.display=card.img?'none':'';document.getElementById('picker-name').textContent=card.name;document.getElementById('picker-meta').textContent=[card.set,card.num?'#'+card.num:'',card.rarity].filter(Boolean).join(' · ');document.getElementById('picker-graded-panel').style.display='none';document.getElementById('picker-grade-sel').value='10';document.getElementById('picker-cert').value='';document.getElementById('picker-grader').value='PSA';document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='');document.getElementById('picker-confirm-btn').disabled=true;_pickerEdition='unlimited';const _pe=editionEligibility({cardId:card.id,set:card.set,type:'standard'});const _per=document.getElementById('picker-edition-row');if(_pe.eligible){_per.style.display='';document.getElementById('picker-ed-shadowless').style.display=_pe.shadowless?'':'none';document.querySelectorAll('#picker-edition-row .ed-pill').forEach(p=>p.classList.toggle('active',p.dataset.val==='unlimited'));}else{_per.style.display='none';}document.getElementById('picker-watch-panel').style.display='none';_pickerWatchKind='single';document.querySelectorAll('#picker-watch-panel .ed-pill').forEach(b=>b.classList.toggle('active',b.dataset.kind==='single'));document.getElementById('picker-watch-grade').style.display='none';document.getElementById('picker-watch-grader').value='PSA';document.getElementById('picker-watch-grade-sel').value='10';openModal('card-picker-modal');}
+function pickerSelectType(type,el){document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='var(--border)');el.style.borderColor='var(--gold)';document.getElementById('picker-graded-panel').style.display=type==='graded'?'':'none';document.getElementById('picker-watch-panel').style.display=type==='watchlist'?'':'none';document.getElementById('picker-confirm-btn').disabled=false;}
+function pickerSelectWatchKind(kind,el){_pickerWatchKind=kind;document.querySelectorAll('#picker-watch-panel .ed-pill').forEach(b=>b.classList.remove('active'));if(el)el.classList.add('active');document.getElementById('picker-watch-grade').style.display=kind==='graded'?'grid':'none';}
 function pickerSelectEdition(val,el){_pickerEdition=val;document.querySelectorAll('#picker-edition-row .ed-pill').forEach(p=>p.classList.remove('active'));if(el)el.classList.add('active');}
 function pickerConfirm(){
   const sel=document.querySelector('.picker-choice[style*="gold"]');
@@ -5293,14 +5316,18 @@ function pickerConfirm(){
   const type=sel.dataset.type;
   closeModal('card-picker-modal');
   if(type==='watchlist'){
-    addToWatchlistFromPicker(_pickerCard,_pickerEdition);
+    let grade='';
+    if(_pickerWatchKind==='graded'){
+      grade=document.getElementById('picker-watch-grader').value+' '+document.getElementById('picker-watch-grade-sel').value;
+    }
+    addToWatchlistFromPicker(_pickerCard,_pickerEdition,_pickerWatchKind,grade);
   } else {
     prefillAddForm({..._pickerCard,edition:_pickerEdition},type);
   }
 }
-function addToWatchlistFromPicker(card,edition){
+function addToWatchlistFromPicker(card,edition,kind,grade){
   if(!card)return;
-  const existing=wishlist.find(w=>w.cardId===card.id||(w.name===card.name&&w.set===card.set));
+  const existing=wishlist.find(w=>((w.cardId&&w.cardId===card.id)||(w.name===card.name&&w.set===card.set))&&(w.type||'single')===(kind||'single')&&(w.grade||'')===(grade||''));
   if(existing){toast('Already on watchlist','gold');return;}
   wishlist.push({
     id:'w'+Date.now(),
@@ -5311,11 +5338,14 @@ function addToWatchlistFromPicker(card,edition){
     img:card.img||'',
     rarity:card.rarity||'',
     edition:edition||'unlimited',
+    type:kind||'single',
+    grade:grade||'',
     added:new Date().toISOString()
   });
   save();
   renderWishlist();
-  toast(card.name+' added to Watchlist','green');
+  const kindLabel=kind==='graded'?(grade||'Graded'):kind==='sealed'?'Sealed':'Single';
+  toast(card.name+' ('+kindLabel+') added to Watchlist','green');
 }
 function prefillAddForm(card,chosenType){editingId=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';
   if(chosenType==='graded'){const grader=document.getElementById('picker-grader').value;const grade=document.getElementById('picker-grade-sel').value;const cert=document.getElementById('picker-cert').value.trim();const tP=document.querySelector('.type-pill[data-val="graded"]');if(tP)selectType('graded',tP);document.getElementById('f-grader').value=grader;document.getElementById('f-grade-sel').value=grade;document.getElementById('f-cert').value=cert;document.getElementById('f-grade').value=grader+' '+grade;document.getElementById('f-cond').value='NM';}
@@ -5401,7 +5431,7 @@ function onWishSearch(val){
 }
 function addToWatchlistFromSearch(card){
   if(wishlist.some(w=>w.cardId===card.id||(w.name===card.name&&w.set===card.set))){toast('Already watching','gold');return;}
-  wishlist.push({id:'w'+Date.now(),name:card.name,set:card.set||'',num:card.num||'',cardId:card.id||'',img:card.img||'',rarity:card.rarity||'',edition:'unlimited',added:new Date().toISOString()});
+  wishlist.push({id:'w'+Date.now(),name:card.name,set:card.set||'',num:card.num||'',cardId:card.id||'',img:card.img||'',rarity:card.rarity||'',edition:'unlimited',type:'single',grade:'',added:new Date().toISOString()});
   save();renderWishlist();
   closeWishSearch();
   toast(card.name+' added to watchlist','green');
@@ -5758,7 +5788,7 @@ function renderWishlist(){
 
   // Calculate totals
   let totalVal=0;
-  wishlist.forEach(w=>{const p=pcache['wish_'+w.id]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;totalVal+=bp;});
+  wishlist.forEach(w=>{const p=pcache['wish_'+w.id]?.data;const bp=p?bestPrice(p,w.type==='graded'):0;totalVal+=bp;});
   document.getElementById('wish-cnt').textContent=wishlist.length+' cards';
   document.getElementById('wish-total').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'Loading…';
   document.getElementById('wish-if-bought').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'—';
@@ -5779,7 +5809,7 @@ function renderWishlist(){
       </div>
       ${inVault?'<div style="position:absolute;top:6px;left:6px;background:var(--green);color:#0a0a0f;font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px;">IN VAULT</div>':''}
       <div class="db-card-body">
-        <div class="db-card-set-pill" style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.set||''}${w.num?' · #'+w.num:''}</div>
+        <div class="db-card-set-pill" style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.set||''}${w.num?' · #'+w.num:''}${w.type==='graded'&&w.grade?' · '+w.grade:(w.type==='sealed'?' · Sealed':'')}</div>
         <div class="db-card-name">${w.name}</div>${editionBadge({edition:w.edition})?`<div style="margin-top:3px;">${editionBadge({edition:w.edition})}</div>`:''}
         <div style="margin-top:4px;">
           ${best!=null
@@ -5799,7 +5829,7 @@ function renderWishlist(){
   wishlist.forEach(async w=>{
     const ck='wish_'+w.id;
     if(!pcache[ck]){
-      const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:'holo',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
+      const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:w.type==='graded'?'graded':'holo',grade:w.grade||'',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
       pcache[ck]={ts:Date.now(),data};
       localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
       renderWishlist();
@@ -6464,11 +6494,34 @@ function setTabPageSize(size, el){
   if(_tabQuery) doTabSearch(_tabQuery, 1);
 }
 
+let _currentPage='dashboard';
+// The mobile FAB is context-aware: it adds a card everywhere, but creates a new
+// deal while in the Deal Center (with a distinct look so the action is obvious).
+function fabAction(){
+  if(_currentPage==='deals') openDealModal();
+  else openAddModal();
+}
+function updateFab(name){
+  const fab=document.getElementById('mob-fab');
+  if(!fab)return;
+  if(name==='deals'){
+    fab.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
+    fab.title='New deal'; fab.setAttribute('aria-label','Create new deal');
+    fab.style.background='rgba(46,204,128,0.85)';
+    fab.style.boxShadow='0 4px 16px rgba(46,204,128,.35)';
+  } else {
+    fab.innerHTML='+';
+    fab.title='Add card'; fab.setAttribute('aria-label','Add card');
+    fab.style.background=''; fab.style.boxShadow='';
+  }
+}
 function goPage(name,el){
+  _currentPage=name;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   if(el)el.classList.add('active');
+  updateFab(name);
   // Render each tab when first visited
   if(name==='dashboard'){renderDashboard();}
   if(name==='portfolio'){renderPortfolio();loadAllPrices();}
