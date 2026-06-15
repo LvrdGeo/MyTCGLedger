@@ -1653,7 +1653,7 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.6';
+const SCHEMA_VERSION = '6.7';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache');
   localStorage.removeItem('pkv2_pcache');
@@ -1776,6 +1776,12 @@ function editionBadge(card){
   const d = EDITIONS[e];
   return `<span style="background:${d.bg};color:${d.color};font-family:var(--mono);font-size:10px;font-weight:600;padding:1px 6px;border-radius:5px;">${d.label}</span>`;
 }
+// eBay search qualifier for edition ('' for unlimited). Used by both the worker
+// query and the clickable "View sold" link so they always match.
+function editionSearchTerm(card){
+  const e = cardEdition(card);
+  return e === '1stEdition' ? '1st Edition' : e === 'shadowless' ? 'Shadowless' : '';
+}
 // Edition-aware TCGPlayer tier selection. Returns a price number or null.
 function pickTcgTier(prices, card){
   if(!prices) return null;
@@ -1824,9 +1830,12 @@ async function fetchEbaySold(card) {
   try {
     let endpoint;
     if (card.type === 'graded' && card.grade) {
-      // Pass rarity too so worker can detect alt arts and vintage sets
-      endpoint = `${EBAY_WORKER}/graded?name=${encodeURIComponent(card.name)}&number=${encodeURIComponent(card.num||'')}&set=${encodeURIComponent(card.set||'')}&grade=${encodeURIComponent(card.grade||'')}&rarity=${encodeURIComponent(card.rarity||'')}`;
-      console.log('[eBay] Graded query:', card.name, card.grade, 'set:', card.set, 'num:', card.num);
+      // Edition matters enormously for vintage slabs (1st-Ed PSA 10 ≫ Unlimited PSA 10),
+      // so fold it into the search name AND pass it explicitly to the worker.
+      const edTerm = editionSearchTerm(card);
+      const gradedName = edTerm ? `${card.name} ${edTerm}` : card.name;
+      endpoint = `${EBAY_WORKER}/graded?name=${encodeURIComponent(gradedName)}&number=${encodeURIComponent(card.num||'')}&set=${encodeURIComponent(card.set||'')}&grade=${encodeURIComponent(card.grade||'')}&rarity=${encodeURIComponent(card.rarity||'')}&edition=${encodeURIComponent(edTerm)}`;
+      console.log('[eBay] Graded query:', gradedName, card.grade, 'set:', card.set, 'num:', card.num, 'ed:', edTerm || 'unlimited');
     } else {
       // Build a precise, contextual query using everything we know about the card
       const numClean = (card.num || '').split('/')[0]; // strip "/94" from "125/94"
@@ -4976,7 +4985,7 @@ async function openDetail(id){
   const nameNum  = [card.name, card.num].filter(Boolean).join(' ');
   const nameSet  = [card.name, card.set].filter(Boolean).join(' ');
   const full     = [card.name, card.num, card.set].filter(Boolean).join(' ');
-  const fullGrade= [card.name, card.num, card.set, card.grade].filter(Boolean).join(' ');
+  const fullGrade= [card.name, editionSearchTerm(card), card.num, card.set, card.grade].filter(Boolean).join(' ');
   const tcgQ  = encodeURIComponent(full);
   const pcQ   = encodeURIComponent(full);
   const ebayQ = encodeURIComponent(full + ' pokemon card');
