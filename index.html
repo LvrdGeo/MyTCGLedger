@@ -86,7 +86,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .cat-pnl{font-family:var(--mono);font-size:11px}
 .cat-cnt{font-size:10px;color:var(--muted);margin-top:3px}
 /* HOLDINGS */
-.holdings-wrap{padding:20px 24pxpadding-bottom:calc(80px + env(safe-area-inset-bottom,20px));}
+.holdings-wrap{padding:20px 24px;padding-bottom:calc(80px + env(safe-area-inset-bottom,20px));}
 .sec-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .sec-title{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px}
 .holding-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer}
@@ -6262,7 +6262,7 @@ function closeBrowseSet() {
   // Show sets grid + era filters
   document.getElementById('set-browser-grid').style.display    = 'grid';
   document.getElementById('cs-set-cards-grid').style.display      = 'none';
-  document.getElementById('set-cards-loading').style.display   = 'none';
+  document.getElementById('cs-set-cards-loading').style.display   = 'none';
   document.getElementById('set-era-filters').style.display     = '';
   // Hide breadcrumb set name + back button
   document.getElementById('set-browser-set-name').style.display = 'none';
