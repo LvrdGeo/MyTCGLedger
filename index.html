@@ -269,7 +269,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 @media(max-width:768px){
   .sidebar{display:none!important}.mobile-tabs{display:grid}.mob-fab{display:flex}
   .toast{bottom:80px}.topbar{padding:10px 14px;gap:8px}
-  .page-title small{display:none}.topbar .btn-ghost{display:none}.topbar .btn-primary{display:none}
+  .page-title small{display:none}.topbar .btn-ghost{display:none}.topbar .btn-primary{display:none}.topbar .topbar-sold-btn{display:inline-flex!important}
   .port-hero{padding:16px 14px 0}.port-total{font-size:32px}
   .kpi-row{grid-template-columns:1fr 1fr 1fr}.kpi{padding:10px 12px}.kpi-val{font-size:14px}
   .tl-wrap{padding:14px}.cat-grid{grid-template-columns:1fr 1fr;padding:12px 14px;gap:8px}
@@ -542,6 +542,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   <div class="topbar">
     <div class="page-title">Portfolio <small id="port-updated"></small></div>
     <button class="btn btn-ghost btn-sm" onclick="refreshPrices()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
+    <button class="btn btn-ghost btn-sm topbar-sold-btn" onclick="openSoldHistory()" title="Sold & Removed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Sold</button>
     <button class="btn btn-primary" onclick="openAddModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Card</button>
   </div>
   <!-- CARD SEARCH -->
@@ -1280,6 +1281,27 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 </div>
 
 <!-- ADD / EDIT CARD -->
+<!-- SELL/REMOVE MODAL -->
+<div class="modal-bg" id="sell-modal">
+  <div class="modal" style="width:min(420px,100%);">
+    <div class="modal-hd"><h2>Sell / Remove Card</h2><button class="modal-close" onclick="closeModal('sell-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body" id="sell-modal-body"></div>
+    <div class="modal-ft" style="gap:8px;">
+      <button class="btn btn-ghost" onclick="closeModal('sell-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmSell()">Confirm Sale</button>
+    </div>
+  </div>
+</div>
+
+<!-- SOLD HISTORY MODAL -->
+<div class="modal-bg" id="sold-history-modal">
+  <div class="modal" style="width:min(620px,100%);max-height:85vh;display:flex;flex-direction:column;">
+    <div class="modal-hd"><h2>Sold &amp; Removed History</h2><button class="modal-close" onclick="closeModal('sold-history-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div id="sold-history-summary" style="padding:16px 20px 0;"></div>
+    <div class="modal-body" id="sold-history-body" style="overflow-y:auto;flex:1;"></div>
+  </div>
+</div>
+
 <div class="modal-bg" id="add-modal">
   <div class="modal" style="width:min(580px,100%)">
     <div class="modal-hd" style="border-bottom:1px solid var(--border);"><h2 id="modal-title" style="font-size:16px;font-family:var(--mono);letter-spacing:0.5px;text-transform:uppercase;">Add Card</h2><button class="modal-close" onclick="closeModal('add-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
@@ -1457,6 +1479,7 @@ let collection = JSON.parse(localStorage.getItem('pkv2_col')   || '[]');
 let sealed     = JSON.parse(localStorage.getItem('pkv2_sealed') || '[]');
 let wishlist   = JSON.parse(localStorage.getItem('pkv2_wish')  || '[]');
 let deals      = JSON.parse(localStorage.getItem('pkv2_deals') || '[]');
+let soldHistory= JSON.parse(localStorage.getItem('pkv2_sold')  || '[]');
 
 // ═══════════════════════════════════════════════════════════
 // ── CENTRAL STATE ENGINE ──
@@ -4348,7 +4371,189 @@ function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.ge
 function openAddModal(forceGraded){editingId=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}updateAddPreview();openModal('add-modal');}
 function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[data.id+'_'+data.cond];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);save();AppState._dirty=true;AppState.update();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
-function delCard(id){showConfirm('Remove card?','Permanently removes it from your vault.',()=>{collection=collection.filter(c=>c.id!==id);save();renderAll();toast('Card removed','red');});}
+function openSoldHistory(){
+  renderSoldHistory();
+  openModal('sold-history-modal');
+}
+
+function renderSoldHistory(){
+  const summary = document.getElementById('sold-history-summary');
+  const body = document.getElementById('sold-history-body');
+  if(!body) return;
+
+  if(!soldHistory.length){
+    if(summary) summary.innerHTML = '';
+    body.innerHTML = '<div style="padding:30px 20px;text-align:center;color:var(--muted);font-size:13px;">No sold or removed cards yet.<br><span style="font-size:11px;">When you remove a card from your collection, it\'ll appear here.</span></div>';
+    return;
+  }
+
+  // Summary totals
+  const totalProceeds = soldHistory.reduce((s,e)=>s+(e.soldPrice||0)*(e.qty||1),0);
+  const totalCost = soldHistory.reduce((s,e)=>s+(e.paid||0)*(e.qty||1),0);
+  const totalPnL = totalProceeds - totalCost;
+  const pnlCol = totalPnL>=0?'var(--green)':'var(--red)';
+  const pnlPct = totalCost>0?((totalPnL/totalCost)*100).toFixed(1):null;
+
+  if(summary) summary.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">
+      <div style="background:var(--bg3);border-radius:var(--r);padding:10px;text-align:center;">
+        <div style="font-size:9px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px;">Total Sold</div>
+        <div style="font-size:17px;font-weight:700;">${soldHistory.length}</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:10px;text-align:center;">
+        <div style="font-size:9px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px;">Proceeds</div>
+        <div style="font-size:17px;font-weight:700;color:var(--gold);">$${totalProceeds.toLocaleString('en-US',{maximumFractionDigits:0})}</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:10px;text-align:center;">
+        <div style="font-size:9px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px;">Realized P&L</div>
+        <div style="font-size:17px;font-weight:700;color:${pnlCol};">${totalPnL>=0?'+':''}$${Math.abs(totalPnL).toLocaleString('en-US',{maximumFractionDigits:0})}</div>
+      </div>
+    </div>`;
+
+  body.innerHTML = soldHistory.map(e=>{
+    const pnl = (e.soldPrice||0) - (e.paid||0);
+    const pnlCol = pnl>=0?'var(--green)':'var(--red)';
+    const pnlPct = e.paid>0?((pnl/e.paid)*100).toFixed(0):null;
+    const date = new Date(e.soldDate).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    return `<div style="display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);">
+      ${e.img?`<img src="${e.img}" style="width:42px;height:58px;object-fit:cover;border-radius:5px;flex-shrink:0;" onerror="this.style.display='none'">`:'<div style="width:42px;height:58px;background:var(--bg3);border-radius:5px;flex-shrink:0;"></div>'}
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.name}</div>
+        <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">${e.set||''}${e.num?' · #'+e.num:''}${e.grade?' · '+e.grade:''}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px;">${date} · Paid $${(e.paid||0).toFixed(2)} → Sold $${(e.soldPrice||0).toFixed(2)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-weight:700;font-size:13px;color:${pnlCol};">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</div>
+        ${pnlPct?`<div style="font-size:10px;color:${pnlCol};">${pnl>=0?'+':''}${pnlPct}%</div>`:''}
+        <div style="display:flex;gap:4px;margin-top:6px;">
+          <button class="btn btn-ghost btn-xs" style="font-size:9px;padding:3px 6px;" onclick="restoreSoldCard('${e.id}')">↩ Restore</button>
+          <button class="btn btn-danger btn-xs" style="font-size:9px;padding:3px 6px;" onclick="deleteSoldEntry('${e.id}')">✕</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function delCard(id){
+  const card = collection.find(c=>c.id===id);
+  if(!card){ return; }
+  openSellModal(card);
+}
+
+function openSellModal(card){
+  window._sellCardId = card.id;
+  const p = pcache[card.id+'_'+card.cond]?.data;
+  const marketPrice = p ? bestPrice(p, card.type==='graded') : 0;
+  const paid = parseFloat(card.paid)||0;
+  window._sellMarketPrice = marketPrice;
+
+  const img = p?.img || card.img || '';
+  document.getElementById('sell-modal-body').innerHTML = `
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;">
+      ${img?`<img src="${img}" style="width:48px;height:67px;object-fit:cover;border-radius:6px;" onerror="this.style.display='none'">`:''}
+      <div>
+        <div style="font-weight:600;font-size:15px;">${card.name}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);">${card.set||''}${card.num?' · #'+card.num:''}${card.grade?' · '+card.grade:''}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:14px;">
+      <div style="flex:1;background:var(--bg3);border-radius:var(--r);padding:10px;">
+        <div style="font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;">You Paid</div>
+        <div style="font-size:16px;font-weight:700;">${paid>0?'$'+paid.toFixed(2):'—'}</div>
+      </div>
+      <div style="flex:1;background:var(--bg3);border-radius:var(--r);padding:10px;">
+        <div style="font-size:10px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;">Market Value</div>
+        <div style="font-size:16px;font-weight:700;color:var(--gold);">${marketPrice>0?'$'+marketPrice.toFixed(2):'—'}</div>
+      </div>
+    </div>
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Sale price (leave blank to use market value)</label>
+    <input id="sell-price-input" type="number" step="0.01" placeholder="${marketPrice>0?marketPrice.toFixed(2):'0.00'}" style="width:100%;padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:15px;font-family:var(--mono);margin-bottom:14px;">
+    <div id="sell-pnl-preview" style="font-size:12px;color:var(--muted);margin-bottom:4px;"></div>
+  `;
+
+  // Live P&L preview
+  setTimeout(()=>{
+    const inp = document.getElementById('sell-price-input');
+    const updatePreview = ()=>{
+      const sale = parseFloat(inp.value) || marketPrice;
+      const pnl = sale - paid;
+      const pct = paid>0 ? ((pnl/paid)*100).toFixed(1) : null;
+      const col = pnl>=0 ? 'var(--green)' : 'var(--red)';
+      document.getElementById('sell-pnl-preview').innerHTML = paid>0
+        ? `Realized P&L: <span style="color:${col};font-weight:700;">${pnl>=0?'+':''}$${pnl.toFixed(2)}${pct?` (${pnl>=0?'+':''}${pct}%)`:''}</span>`
+        : `Sale value: <span style="color:var(--gold);font-weight:700;">$${sale.toFixed(2)}</span>`;
+    };
+    if(inp){ inp.addEventListener('input', updatePreview); updatePreview(); }
+  }, 50);
+
+  openModal('sell-modal');
+}
+
+function confirmSell(){
+  const card = collection.find(c=>c.id===window._sellCardId);
+  if(!card){ closeModal('sell-modal'); return; }
+  const inp = document.getElementById('sell-price-input');
+  const salePrice = parseFloat(inp?.value) || window._sellMarketPrice || 0;
+  const paid = parseFloat(card.paid)||0;
+
+  // Record in sold history
+  soldHistory.unshift({
+    id: 'sold'+Date.now(),
+    cardId: card.cardId||'',
+    name: card.name,
+    set: card.set||'',
+    num: card.num||'',
+    img: pcache[card.id+'_'+card.cond]?.data?.img || card.img || '',
+    type: card.type||'standard',
+    grade: card.grade||'',
+    cond: card.cond||'',
+    paid: paid,
+    soldPrice: salePrice,
+    marketPrice: window._sellMarketPrice||0,
+    realizedPnL: salePrice - paid,
+    qty: card.qty||1,
+    soldDate: new Date().toISOString(),
+    origCard: {...card}  // store full card so we can restore it
+  });
+  localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
+
+  // Remove from collection
+  collection = collection.filter(c=>c.id!==card.id);
+  save();
+  closeModal('sell-modal');
+  renderAll();
+  if(typeof renderSoldHistory==='function') renderSoldHistory();
+  toast(`${card.name} sold for $${salePrice.toFixed(2)}`,'green');
+}
+
+function restoreSoldCard(soldId){
+  const entry = soldHistory.find(s=>s.id===soldId);
+  if(!entry){ return; }
+  showConfirm('Restore to collection?', `Add ${entry.name} back to your vault?`, ()=>{
+    const card = entry.origCard || {
+      id:'c'+Date.now(), name:entry.name, set:entry.set, num:entry.num,
+      cardId:entry.cardId, type:entry.type, grade:entry.grade, cond:entry.cond,
+      paid:entry.paid, qty:entry.qty, img:entry.img, added:new Date().toISOString()
+    };
+    card.id = 'c'+Date.now(); // fresh id
+    collection.push(card);
+    soldHistory = soldHistory.filter(s=>s.id!==soldId);
+    localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
+    save();
+    renderAll();
+    if(typeof renderSoldHistory==='function') renderSoldHistory();
+    toast(`${entry.name} restored to collection`,'green');
+  });
+}
+
+function deleteSoldEntry(soldId){
+  showConfirm('Delete from history?','This permanently removes the record.',()=>{
+    soldHistory = soldHistory.filter(s=>s.id!==soldId);
+    localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
+    renderSoldHistory();
+    toast('Record deleted','red');
+  });
+}
 
 // ═══ DETAIL VIEW ═══
 
