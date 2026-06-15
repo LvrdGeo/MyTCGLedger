@@ -220,6 +220,9 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .type-pill[data-val="reverse"].active{border-color:var(--teal);color:var(--teal);background:rgba(15,212,176,.1)}
 .cond-pill{flex:1;padding:10px 8px;border-radius:var(--r);font-size:13px;font-weight:700;border:1px solid var(--border);background:var(--bg3);color:var(--muted2);cursor:pointer;transition:all .15s;font-family:var(--mono)}
 .cond-pill.active{background:var(--cc);border-color:var(--cb);color:var(--ct)}
+.ed-pill{flex:1;padding:9px 8px;border-radius:var(--r);font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--bg3);color:var(--muted2);cursor:pointer;transition:all .15s;font-family:var(--font);white-space:nowrap}
+.ed-pill:hover{border-color:var(--b2);color:var(--text)}
+.ed-pill.active{background:var(--ec-bg);border-color:var(--ec);color:var(--ec)}
 /* DETAIL */
 .psrc{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:11px 13px}
 .psrc-name{font-size:11px;color:var(--muted2);margin-bottom:5px;display:flex;align-items:center;gap:5px}
@@ -1035,6 +1038,14 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
           <button class="cond-pill" id="scan-cond-MP" data-val="MP" onclick="setScanCond('MP')" style="--cc:rgba(255,140,66,.15);--cb:rgba(255,140,66,.4);--ct:var(--orange);">MP</button>
           <button class="cond-pill" id="scan-cond-HP" data-val="HP" onclick="setScanCond('HP')" style="--cc:rgba(255,77,109,.15);--cb:rgba(255,77,109,.4);--ct:var(--red);">HP</button>
         </div>
+        <div id="scan-edition-row" style="display:none;margin-bottom:14px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Edition <span id="scan-edition-hint" style="color:var(--teal);text-transform:none;letter-spacing:0;"></span></div>
+          <div style="display:flex;gap:6px;">
+            <button class="ed-pill active" id="scan-ed-unlimited" data-val="unlimited" onclick="setScanEdition('unlimited')" style="--ec:#9ca3af;--ec-bg:rgba(148,163,184,.15);">Unlimited</button>
+            <button class="ed-pill" id="scan-ed-1stEdition" data-val="1stEdition" onclick="setScanEdition('1stEdition')" style="--ec:var(--gold);--ec-bg:rgba(245,200,66,.18);">1st Edition</button>
+            <button class="ed-pill" id="scan-ed-shadowless" data-val="shadowless" onclick="setScanEdition('shadowless')" style="--ec:#60a5fa;--ec-bg:rgba(79,142,247,.16);display:none;">Shadowless</button>
+          </div>
+        </div>
         <!-- Purchase price -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
           <div class="form-group"><div class="form-label">Purchase Price ($)</div><input class="input" id="scan-paid" type="number" placeholder="0.00" step="0.01"></div>
@@ -1275,6 +1286,14 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
         </div>
         <div class="form-group"><div class="form-label">Cert # (optional)</div><input class="input" id="picker-cert" placeholder="e.g. 79721014" style="font-family:var(--mono);font-size:12px;"></div>
       </div>
+      <div id="picker-edition-row" style="display:none;background:var(--bg3);border-radius:var(--r);padding:14px;margin-top:12px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Edition <span style="color:rgba(255,255,255,0.25);">(vintage WOTC)</span></div>
+        <div style="display:flex;gap:6px;">
+          <button type="button" class="ed-pill active" data-val="unlimited" onclick="pickerSelectEdition('unlimited',this)" style="--ec:#9ca3af;--ec-bg:rgba(148,163,184,.15);">Unlimited</button>
+          <button type="button" class="ed-pill" data-val="1stEdition" onclick="pickerSelectEdition('1stEdition',this)" style="--ec:var(--gold);--ec-bg:rgba(245,200,66,.18);">1st Edition</button>
+          <button type="button" class="ed-pill" id="picker-ed-shadowless" data-val="shadowless" onclick="pickerSelectEdition('shadowless',this)" style="--ec:#60a5fa;--ec-bg:rgba(79,142,247,.16);display:none;">Shadowless</button>
+        </div>
+      </div>
     </div>
     <div class="modal-ft"><button class="btn btn-ghost" onclick="closeModal('card-picker-modal')">Cancel</button><button class="btn btn-primary" id="picker-confirm-btn" onclick="pickerConfirm()" disabled>Continue →</button></div>
   </div>
@@ -1313,7 +1332,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
       <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Card Details</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px;">
         <div class="form-group" style="grid-column:1/-1;position:relative;"><div class="form-label">Card Name *</div><input class="input" id="f-name" placeholder="e.g. Charizard" oninput="onModalSearch(this.value)" autocomplete="off" style="font-size:14px;font-weight:500;"><div class="search-dd" id="modal-name-dd" style="z-index:300;"></div></div>
-        <div class="form-group"><div class="form-label">Set</div><input class="input" id="f-set" placeholder="e.g. Base Set" oninput="updateAddPreview()"></div>
+        <div class="form-group"><div class="form-label">Set</div><input class="input" id="f-set" placeholder="e.g. Base Set" oninput="updateAddPreview();refreshEditionSection()"></div>
         <div class="form-group"><div class="form-label">Card Number</div><input class="input" id="f-num" placeholder="e.g. 4/102" oninput="updateAddPreview()"></div>
         <input type="hidden" id="f-cardid"><input type="hidden" id="f-img">
       </div>
@@ -1343,6 +1362,15 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
         <div class="form-group"><div class="form-label">Cert #</div><div style="display:flex;gap:6px;"><input class="input" id="f-cert" placeholder="e.g. 79721014" style="flex:1;font-family:var(--mono);"><button class="btn btn-ghost btn-sm" onclick="verifyCert()">Verify</button></div></div>
         <input type="hidden" id="f-grade">
         <div id="cert-msg" style="font-size:11px;margin-top:6px;"></div>
+      </div>
+      <div id="edition-section" style="display:none;margin-bottom:14px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Edition <span style="color:rgba(255,255,255,0.25);">(vintage WOTC)</span></div>
+        <div style="display:flex;gap:6px;">
+          <button type="button" class="ed-pill active" data-val="unlimited" onclick="selectEdition('unlimited',this)" style="--ec:#9ca3af;--ec-bg:rgba(148,163,184,.15);">Unlimited</button>
+          <button type="button" class="ed-pill" data-val="1stEdition" onclick="selectEdition('1stEdition',this)" style="--ec:var(--gold);--ec-bg:rgba(245,200,66,.18);">1st Edition</button>
+          <button type="button" class="ed-pill" id="ed-pill-shadowless" data-val="shadowless" onclick="selectEdition('shadowless',this)" style="--ec:#60a5fa;--ec-bg:rgba(79,142,247,.16);display:none;">Shadowless</button>
+        </div>
+        <input type="hidden" id="f-edition" value="unlimited">
       </div>
       <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;margin-top:4px;">Purchase Details</div>
       <div style="background:var(--bg3);border-radius:var(--r);padding:14px;margin-bottom:14px;">
@@ -1523,7 +1551,7 @@ const AppState = {
       const movers = [];
 
       collection.forEach(card => {
-        const p    = pcache[card.id+'_'+card.cond]?.data;
+        const p    = pcache[cacheKey(card)]?.data;
         const bp   = p ? bestPrice(p, card.type==='graded') : 0;
         const paid = parseFloat(card.paid || 0);
 
@@ -1625,7 +1653,7 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.3';
+const SCHEMA_VERSION = '6.4';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache');
   localStorage.removeItem('pkv2_pcache');
@@ -1665,7 +1693,7 @@ let prefs      = JSON.parse(localStorage.getItem('pkv2_prefs') || '{"cond":"NM"}
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
 let allSets=[], typeFilter='', sealedFilter='', sealedSetFilter='', sortBy='added';
 let editingId=null, editingSealedId=null, editingDealId=null, tlRange='all';
-let _pickerCard=null, searchTimer=null;
+let _pickerCard=null, _pickerEdition='unlimited', searchTimer=null;
 
 const SOURCES=[
   {k:'tcg', label:'TCGPlayer', color:'#f5c842'},
@@ -1691,6 +1719,78 @@ const SEALED_CATALOG=[
 const CACHE_TTL = 60*60*1000;
 const EBAY_WORKER = 'https://mytcg-ebay.geo6810-03e.workers.dev';
 
+// ═══════════════════════════════════════════════════════════════════
+// EDITION MODEL — 1st Edition / Unlimited / Shadowless
+// Single source of truth for eligibility, pricing, caching & display.
+// To change which sets are edition-eligible, edit WOTC_SETS ONLY.
+// Cutoff = Neo Destiny (last English set with a 1st Edition print run).
+// Base Set 2 (base4) intentionally excluded — reprint, no 1st Edition.
+// ═══════════════════════════════════════════════════════════════════
+const WOTC_SETS = {
+  base1:{name:'Base',           shadowless:true},
+  base2:{name:'Jungle'},
+  base3:{name:'Fossil'},
+  base5:{name:'Team Rocket'},
+  gym1: {name:'Gym Heroes'},
+  gym2: {name:'Gym Challenge'},
+  neo1: {name:'Neo Genesis'},
+  neo2: {name:'Neo Discovery'},
+  neo3: {name:'Neo Revelation'},
+  neo4: {name:'Neo Destiny'},
+};
+const WOTC_SET_NAMES = Object.fromEntries(
+  Object.entries(WOTC_SETS).map(([id,v]) => [v.name.toLowerCase(), id])
+);
+const EDITIONS = {
+  'unlimited':  {label:'Unlimited',    short:'UNL',  color:'#9ca3af',    bg:'rgba(148,163,184,.15)'},
+  '1stEdition': {label:'1st Edition',  short:'1ST',  color:'var(--gold)',bg:'rgba(245,200,66,.18)'},
+  'shadowless': {label:'Shadowless',   short:'SHDW', color:'#60a5fa',    bg:'rgba(79,142,247,.16)'},
+};
+// Resolve a card's pokemontcg.io SET id from an explicit setId,
+// from its cardId ("gym2-15" → "gym2"), or by matching its set name.
+function getSetId(card){
+  if(card && card.setId) return card.setId;
+  const cid = card && card.cardId;
+  if(cid && cid.indexOf('-') > 0) return cid.slice(0, cid.lastIndexOf('-'));
+  const nm = ((card && card.set) || '').toLowerCase().trim();
+  return WOTC_SET_NAMES[nm] || '';
+}
+// Which edition options does this card support? Sealed never qualifies.
+function editionEligibility(card){
+  if(!card || card.type === 'sealed') return {eligible:false, shadowless:false};
+  const info = WOTC_SETS[getSetId(card)];
+  if(!info) return {eligible:false, shadowless:false};
+  return {eligible:true, shadowless:!!info.shadowless};
+}
+// Normalize a card's stored edition (defaults to unlimited).
+function cardEdition(card){
+  const e = card && card.edition;
+  return (e === '1stEdition' || e === 'shadowless') ? e : 'unlimited';
+}
+// THE single source of truth for price-cache keys (now edition-aware).
+function cacheKey(card){ return card.id + '_' + card.cond + '_' + cardEdition(card); }
+// Inline badge for holdings/detail/preview. Returns '' for plain Unlimited.
+function editionBadge(card){
+  const e = cardEdition(card);
+  if(e === 'unlimited') return '';
+  const d = EDITIONS[e];
+  return `<span style="background:${d.bg};color:${d.color};font-family:var(--mono);font-size:10px;font-weight:600;padding:1px 6px;border-radius:5px;">${d.label}</span>`;
+}
+// Edition-aware TCGPlayer tier selection. Returns a price number or null.
+function pickTcgTier(prices, card){
+  if(!prices) return null;
+  const ed = cardEdition(card);
+  const isReverse = /reverse/i.test(card.rarity||'') || /reverse/i.test(card.notes||'');
+  let order;
+  if(ed === '1stEdition')      order = ['1stEditionHolofoil','1stEditionNormal','holofoil','normal'];
+  else if(isReverse)           order = ['reverseHolofoil','holofoil','normal'];
+  else                         order = ['holofoil','normal','reverseHolofoil','1stEditionHolofoil'];
+  for(const t of order){ if(prices[t]?.market) return prices[t].market; }
+  for(const t of order){ if(prices[t]?.mid)    return prices[t].mid; }
+  const any = Object.values(prices)[0];
+  return any?.market || any?.mid || any?.low || null;
+}
+
 // ═══ INIT ═══
 function init() {
   loadKeys(); updateStatusDots();
@@ -1715,7 +1815,7 @@ function updateStatusDots(){document.getElementById('s1').className='dot '+(keys
 
 // ═══ PRICING ═══
 async function getPrices(card){
-  const ck=card.id+'_'+card.cond;const hit=pcache[ck];
+  const ck=cacheKey(card);const hit=pcache[ck];
   if(hit&&(Date.now()-hit.ts)<CACHE_TTL) return hit.data;
   const data=await fetchLivePrices(card);
   pcache[ck]={ts:Date.now(),data};localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));return data;
@@ -1736,7 +1836,8 @@ async function fetchEbaySold(card) {
       // Detect card characteristics
       const isReverse  = rarity.includes('reverse');
       const isVintage  = /base set|jungle|fossil|team rocket|gym heroes|gym challenge|neo genesis|neo discovery|neo destiny|neo revelation|e-card|skyridge|aquapolis|expedition|wizards|wotc|legend/i.test(setName);
-      const is1st      = card.notes && /1st|first edition/i.test(card.notes);
+      const is1st       = card.edition === '1stEdition' || (card.notes && /1st|first edition/i.test(card.notes));
+      const isShadowless= card.edition === 'shadowless' || (card.notes && /shadowless/i.test(card.notes));
       const isHolo     = rarity.includes('holo') && !isReverse;
 
       // Detect premium cards by BOTH rarity field AND card number
@@ -1766,6 +1867,7 @@ async function fetchEbaySold(card) {
 
       // Add rarity descriptor so eBay knows which version
       if (is1st)                parts.push('1st Edition');
+      else if (isShadowless)    parts.push('Shadowless');
       if (isAltArt)             parts.push('Special Illustration Rare');
       else if (isIllustration)  parts.push('Illustration Rare');
       else if (isHyper)         parts.push('Hyper Rare');
@@ -1812,15 +1914,7 @@ async function testEbayWorker() {
 // Extract TCGPlayer prices from already-fetched card data (used by verification retry)
 function fetchLivePricesFromData(d, card, result) {
   const prices = d?.tcgplayer?.prices;
-  if (prices) {
-    const isReverse = /reverse/i.test(card.rarity||'') || /reverse/i.test(card.notes||'');
-    const tierOrder = isReverse
-      ? ['reverseHolofoil','holofoil','normal']
-      : ['holofoil','normal','reverseHolofoil','1stEditionHolofoil','unlimitedHolofoil'];
-    for(const t of tierOrder){ if(prices[t]?.market){ result.tcg=prices[t].market; break; } }
-    if(!result.tcg){ for(const t of tierOrder){ if(prices[t]?.mid){ result.tcg=prices[t].mid; break; } } }
-    if(!result.tcg){ const any=Object.values(prices)[0]; result.tcg=any?.market||any?.mid||any?.low||null; }
-  }
+  if (prices) { result.tcg = pickTcgTier(prices, card); }
   result.img = result.img || d?.images?.large || d?.images?.small || null;
   // Save the corrected cardId
   const f = collection.find(x=>x.id===card.id);
@@ -1858,32 +1952,7 @@ async function fetchLivePrices(card){
           result.unverified = true;
         }
         const prices=d?.tcgplayer?.prices;
-        if(prices){
-          // Pick the right price tier based on the card's actual variant
-          const isReverse = /reverse/i.test(card.rarity||'') || /reverse/i.test(card.notes||'');
-          // Preferred tier order depends on card type
-          let tierOrder;
-          if (isReverse) {
-            tierOrder = ['reverseHolofoil','holofoil','normal'];
-          } else {
-            // For most modern rares/ex/V/VMAX the price is under holofoil
-            tierOrder = ['holofoil','normal','reverseHolofoil','1stEditionHolofoil','unlimitedHolofoil'];
-          }
-          for(const t of tierOrder){
-            if(prices[t]?.market){ result.tcg=prices[t].market; break; }
-          }
-          // If no market price, try mid price
-          if(!result.tcg){
-            for(const t of tierOrder){
-              if(prices[t]?.mid){ result.tcg=prices[t].mid; break; }
-            }
-          }
-          // Absolute fallback — any available price
-          if(!result.tcg){
-            const anyTier = Object.values(prices)[0];
-            result.tcg = anyTier?.market || anyTier?.mid || anyTier?.low || null;
-          }
-        }
+        if(prices){ result.tcg = pickTcgTier(prices, card); }
         // Also grab PriceCharting-style data if the API has it
         result.img=result.img||d?.images?.large||d?.images?.small||null;
         // Store the resolved card metadata
@@ -2163,7 +2232,7 @@ function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);re
 function fmtPrice(v){return(v==null||!isFinite(v)||v<=0)?'—':'$'+v.toFixed(2);}
 function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
 function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
-function getBestCached(card){const p=pcache[card.id+'_'+card.cond]?.data;return p?bestPrice(p,card.type==='graded'):0;}
+function getBestCached(card){const p=pcache[cacheKey(card)]?.data;return p?bestPrice(p,card.type==='graded'):0;}
 
 // ═══ PORTFOLIO ═══
 
@@ -2542,7 +2611,7 @@ function renderHistoryMilestones(history) {
 function renderPortfolio(){
   let totalVal=0,totalPaid=0,singlesVal=0,singlesPaid=0,psaVal=0,psaPaid=0,sealedVal=0,sealedPaid=0;
   collection.forEach(card=>{
-    const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
+    const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
     const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);
     totalVal+=val;if(paid>0)totalPaid+=paid;
     if(card.type==='graded'){psaVal+=val;if(paid>0)psaPaid+=paid;}
@@ -2585,7 +2654,7 @@ function renderPortfolio(){
 
 function renderTopHoldings(){
   const rows=[];
-  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);const pnl=val>0&&paid>0?val-paid:null;rows.push({name:card.name,meta:(card.set||'')+(card.grade?' · '+card.grade:' · '+card.cond),val,pnl,img:p?.img||card.img||null,id:card.id});});
+  collection.forEach(card=>{const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);const pnl=val>0&&paid>0?val-paid:null;rows.push({name:card.name,meta:(card.set||'')+(card.grade?' · '+card.grade:' · '+card.cond),val,pnl,img:p?.img||card.img||null,id:card.id});});
   rows.sort((a,b)=>b.val-a.val);
   const el=document.getElementById('top-holdings');
   if(!rows.length||!rows[0].val){el.innerHTML='<p style="font-size:12px;color:var(--muted);padding:10px 0;">Add cards and purchase prices to see top holdings.</p>';return;}
@@ -2662,7 +2731,7 @@ function openInventoryPanel(type) {
     if (isSealed) {
       totalVal += parseFloat(card.value||0) * (card.qty||1);
     } else {
-      const p  = pcache[card.id+'_'+card.cond]?.data;
+      const p  = pcache[cacheKey(card)]?.data;
       const bp = p ? bestPrice(p, card.type==='graded') : 0;
       totalVal += bp * (card.qty||1);
     }
@@ -2691,7 +2760,7 @@ function openInventoryPanel(type) {
   } else {
     // Sort by value desc
     const sorted = [...cards].map(card => {
-      const p  = pcache[card.id+'_'+card.cond]?.data;
+      const p  = pcache[cacheKey(card)]?.data;
       const bp = p ? bestPrice(p, card.type==='graded') : 0;
       const img = p?.img || card.img || '';
       const paid = parseFloat(card.paid||0);
@@ -2940,7 +3009,7 @@ function renderDBConcentration() {
 
   const rows = [];
   collection.forEach(card => {
-    const p = pcache[card.id+'_'+card.cond]?.data;
+    const p = pcache[cacheKey(card)]?.data;
     const bp = p ? bestPrice(p, card.type==='graded') : 0;
     if (bp > 0) rows.push({ name: card.name, val: bp * (card.qty||1) });
   });
@@ -2980,7 +3049,7 @@ function renderDBTop5() {
 
   const rows = [];
   collection.forEach(card => {
-    const p   = pcache[card.id+'_'+card.cond]?.data;
+    const p   = pcache[cacheKey(card)]?.data;
     const bp  = p ? bestPrice(p, card.type==='graded') : 0;
     const img = p?.img || card.img || null;
     if (bp > 0) rows.push({ card, bp, img });
@@ -3026,7 +3095,7 @@ function renderDBMovers() {
 
   const movers = [];
   collection.forEach(card => {
-    const p = pcache[card.id+'_'+card.cond]?.data;
+    const p = pcache[cacheKey(card)]?.data;
     const bp = p ? bestPrice(p, card.type==='graded') : 0;
     const paid = parseFloat(card.paid||0);
     if (bp > 0 && paid > 0) {
@@ -3108,7 +3177,7 @@ function renderTimeline(){
 
   // Also save a vh snapshot for legacy compat
   let totalVal=0;
-  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(isFinite(bp)&&bp>0)totalVal+=bp*(card.qty||1);});
+  collection.forEach(card=>{const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(isFinite(bp)&&bp>0)totalVal+=bp*(card.qty||1);});
   sealed.forEach(prod=>{const v=parseFloat(prod.value||0);if(v>0)totalVal+=v*(prod.qty||1);});
   if(totalVal>0){
     const today=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'});
@@ -3348,7 +3417,7 @@ function renderPSA(){
   if(!slabs.length){grid.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
   grid.innerHTML=slabs.map(card=>{
-    const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
+    const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
     const paid=parseFloat(card.paid||0);const pnl=bp>0&&paid>0?bp-paid:null;
     const grader=(card.grade||'').split(' ')[0]||'PSA';const gradeN=(card.grade||'').split(' ').slice(1).join(' ')||'?';
     const img=p?.img||card.img||null;const tcgQ=encodeURIComponent(card.name+(card.num?' '+card.num:'')+' '+card.grade);
@@ -3357,7 +3426,7 @@ function renderPSA(){
         <div class="psa-grade-b">${gradeN}</div><div class="psa-grader-b">${grader}</div>
       </div>
       <div class="psa-body">
-        <div class="psa-name">${card.name}</div><div class="psa-set">${card.set||'Unknown'}${card.num?' · #'+card.num:''}</div>
+        <div class="psa-name">${card.name}</div><div class="psa-set">${card.set||'Unknown'}${card.num?' · #'+card.num:''}${editionBadge(card)?' '+editionBadge(card):''}</div>
         <div class="psa-pr"><span style="color:var(--muted2)">Market</span><span style="font-family:var(--mono);font-weight:600;color:var(--green);">${bp>0?fmtPrice(bp):'—'}</span></div>
         ${paid>0?`<div class="psa-pr"><span style="color:var(--muted2)">Paid</span><span style="font-family:var(--mono);font-weight:600;">$${paid.toFixed(2)}</span></div>`:''}
         ${pnl!=null?`<div class="psa-pr"><span style="color:var(--muted2)">P&L</span><span style="font-family:var(--mono);font-weight:600;color:${pnl>=0?'var(--green)':'var(--red)'};">${pnl>=0?'+':''}${fmtPrice(pnl)}</span></div>`:''}
@@ -3385,13 +3454,13 @@ function renderSingles(){
   empty.style.display='none';
   if(!cards.length){grid.innerHTML='<p style="color:var(--muted);font-size:12.5px;grid-column:1/-1;padding:10px 0;">No cards match this filter.</p>';return;}
   grid.innerHTML=cards.map(card=>{
-    const ck=card.id+'_'+card.cond;const p=pcache[ck]?.data;
+    const ck=cacheKey(card);const p=pcache[ck]?.data;
     const typeLabel={standard:'Standard',holo:'Holo',reverse:'Reverse',ex:'ex/GX/V',graded:'Graded'}[card.type]||card.type;
     const imgHtml=(p?.img||card.img)?`<img src="${p?.img||card.img}" alt="${card.name}" loading="lazy" onerror="this.style.display='none'">`:`<div style="font-size:28px;color:var(--muted);">${card.num?'#'+(card.num||'').split('/')[0]:'⟡'}</div>`;
     const priceHtml=p?buildPriceStrip(p,card):`<div class="ps-loading"><div class="spinner"></div>Fetching…</div>`;
     return `<div class="card-tile" id="tile-${card.id}" onclick="openDetail('${card.id}')">
       <div class="ct-img">${imgHtml}
-        <div class="ct-badges"><span class="ct-badge type-${card.type}">${typeLabel}</span></div>
+        <div class="ct-badges"><span class="ct-badge type-${card.type}">${typeLabel}</span>${editionBadge(card)}</div>
         <span class="ct-cond cond-${card.cond}">${card.cond}</span>
         <div class="liq-badge liq-loading" id="liq-${card.id}" title="Liquidity Score — loading…">·</div>
       </div>
@@ -3419,7 +3488,7 @@ function buildPriceStrip(p,card){
 
 async function loadPricesForCards(cards){
   for(const card of cards){
-    const ck=card.id+'_'+card.cond;
+    const ck=cacheKey(card);
     if(!pcache[ck]){
       const data=await getPrices(card);
       pcache[ck]={ts:Date.now(),data};
@@ -3466,7 +3535,7 @@ async function loadAllPrices(){
   if(updEl)  updEl.textContent = '';
 
   // Only fetch cards not already cached
-  const toFetch = all.filter(c => !pcache[c.id+'_'+c.cond]);
+  const toFetch = all.filter(c => !pcache[cacheKey(c)]);
   if(!toFetch.length){ if(loadEl) loadEl.style.display='none'; return; }
 
   _loadingPrices = true;
@@ -3481,7 +3550,7 @@ async function loadAllPrices(){
   for(let i=0; i<toFetch.length; i+=BATCH){
     const batch = toFetch.slice(i, i+BATCH);
     await Promise.all(batch.map(async card => {
-      const ck = card.id+'_'+card.cond;
+      const ck = cacheKey(card);
       try{
         const data = await getPrices(card);
         pcache[ck] = {ts:Date.now(),data};
@@ -3559,7 +3628,7 @@ async function runDealSearch(q) {
   if (vaultHits.length) {
     rows.push(`<div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;padding:8px 12px 4px;background:var(--bg4);">From Your Vault</div>`);
     rows.push(...vaultHits.map(card => {
-      const p = pcache[card.id+'_'+card.cond]?.data;
+      const p = pcache[cacheKey(card)]?.data;
       const bp = p ? bestPrice(p, card.type==='graded') : 0;
       const img = p?.img || card.img || '';
       const label = [card.name, card.grade || card.cond, card.set, card.num ? '#'+card.num : ''].filter(Boolean).join(' · ');
@@ -4438,11 +4507,11 @@ function analyzeScreenshot(input){
 }
 function renderAnalyzer(){
   let topCard=null,topVal=0,bestROI=null,bestROIPct=0;
-  collection.forEach(card=>{const p=pcache[card.id+'_'+card.cond]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(bp>topVal){topVal=bp;topCard=card;}const paid=parseFloat(card.paid||0);if(bp>0&&paid>0){const pct=((bp-paid)/paid)*100;if(pct>bestROIPct){bestROIPct=pct;bestROI=card;}}});
+  collection.forEach(card=>{const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(bp>topVal){topVal=bp;topCard=card;}const paid=parseFloat(card.paid||0);if(bp>0&&paid>0){const pct=((bp-paid)/paid)*100;if(pct>bestROIPct){bestROIPct=pct;bestROI=card;}}});
   document.getElementById('val-top-name').textContent=topCard?topCard.name+(topCard.set?' · '+topCard.set:''):'—';
   document.getElementById('val-top-price').textContent=topVal>0?fmtPrice(topVal):'—';
   const brackets=[{label:'<$10',max:10},{label:'$10–50',min:10,max:50},{label:'$50–200',min:50,max:200},{label:'$200–1k',min:200,max:1000},{label:'$1k+',min:1000}];
-  const counts=brackets.map(b=>collection.filter(c=>{const p=pcache[c.id+'_'+c.cond]?.data;const bp=p?bestPrice(p,c.type==='graded'):0;return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
+  const counts=brackets.map(b=>collection.filter(c=>{const p=pcache[cacheKey(c)]?.data;const bp=p?bestPrice(p,c.type==='graded'):0;return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
   const maxC=Math.max(...counts,1);
   document.getElementById('val-dist').innerHTML=brackets.map((b,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px;"><span style="width:60px;color:var(--muted);">${b.label}</span><div style="flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden;"><div style="width:${(counts[i]/maxC*100).toFixed(0)}%;height:100%;background:var(--blue);border-radius:3px;"></div></div><span style="width:20px;text-align:right;color:var(--muted2);font-family:var(--mono);">${counts[i]}</span></div>`).join('');
   document.getElementById('val-roi-name').textContent=bestROI?bestROI.name:'—';
@@ -4523,9 +4592,9 @@ function renderSealedQuickAdd(setName,setLogo){const panel=document.getElementBy
 function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.getElementById('sp-name').value=name;document.getElementById('sp-set').value=setName;document.getElementById('sp-type').value=type;document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const pill=document.querySelector(`#sealed-modal .type-pill[data-val="${type}"]`);if(pill)pill.classList.add('active');updateSealedPreview();}
 
 // ═══ CARD CRUD ═══
-function openAddModal(forceGraded){editingId=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));updateAddPreview();openModal('add-modal');}
-function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[data.id+'_'+data.cond];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);save();AppState._dirty=true;AppState.update();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
+function openAddModal(forceGraded){editingId=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
+function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);save();AppState._dirty=true;AppState.update();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -4597,7 +4666,7 @@ function delCard(id){
 
 function openSellModal(card){
   window._sellCardId = card.id;
-  const p = pcache[card.id+'_'+card.cond]?.data;
+  const p = pcache[cacheKey(card)]?.data;
   const marketPrice = p ? bestPrice(p, card.type==='graded') : 0;
   const paid = parseFloat(card.paid)||0;
   window._sellMarketPrice = marketPrice;
@@ -4658,7 +4727,7 @@ function confirmSell(){
     name: card.name,
     set: card.set||'',
     num: card.num||'',
-    img: pcache[card.id+'_'+card.cond]?.data?.img || card.img || '',
+    img: pcache[cacheKey(card)]?.data?.img || card.img || '',
     type: card.type||'standard',
     grade: card.grade||'',
     cond: card.cond||'',
@@ -4757,7 +4826,7 @@ function saveCostBasis(cardId) {
   }
 
   // Recalculate gain/loss in the mini-stats
-  const p    = pcache[card.id+'_'+card.cond]?.data;
+  const p    = pcache[cacheKey(card)]?.data;
   const best = p ? bestPrice(p, card?.type==='graded') : 0;
   const roi  = card.paid && best > 0 ? best - parseFloat(card.paid) : null;
   const roiPct = roi != null ? ((best / parseFloat(card.paid) - 1) * 100).toFixed(1) : null;
@@ -4798,7 +4867,7 @@ function openCostBasisEditor() {
   const total = document.getElementById('cost-editor-total');
 
   list.innerHTML = collection.map(card => {
-    const p    = pcache[card.id+'_'+card.cond]?.data;
+    const p    = pcache[cacheKey(card)]?.data;
     const best = p ? bestPrice(p, card.type==='graded') : 0;
     const paid = parseFloat(card.paid || 0);
     const roi  = best > 0 && paid > 0 ? best - paid : null;
@@ -4842,7 +4911,7 @@ function updateCostRow(input) {
   save();
 
   // Update the P&L cell for this row
-  const p    = pcache[card.id+'_'+card.cond]?.data;
+  const p    = pcache[cacheKey(card)]?.data;
   const best = p ? bestPrice(p, card?.type==='graded') : 0;
   const paid = parseFloat(card.paid || 0);
   const roi  = best > 0 && paid > 0 ? best - paid : null;
@@ -4862,7 +4931,7 @@ function updateCostEditorTotal() {
   let totalPaid = 0, totalVal = 0;
   collection.forEach(card => {
     const paid = parseFloat(card.paid || 0);
-    const p    = pcache[card.id+'_'+card.cond]?.data;
+    const p    = pcache[cacheKey(card)]?.data;
     const best = p ? bestPrice(p) : 0;
     if (paid > 0) totalPaid += paid * (card.qty || 1);
     if (best > 0) totalVal  += best * (card.qty || 1);
@@ -4882,7 +4951,7 @@ function closeCostEditor() {
 
 async function openDetail(id){
   const card=collection.find(c=>c.id===id);if(!card)return;
-  const p=pcache[card.id+'_'+card.cond]?.data||await getPrices(card);
+  const p=pcache[cacheKey(card)]?.data||await getPrices(card);
   const best=bestPrice(p,card.type==='graded'),worst=worstPrice(p);
   const priceAnalysis=analyzePrice(p,card.type==='graded');
   const roi=card.paid?(best-parseFloat(card.paid)):null;
@@ -4918,7 +4987,7 @@ async function openDetail(id){
       <div style="display:flex;gap:16px;margin-bottom:18px;align-items:flex-start;">
         <div style="width:110px;flex-shrink:0;border-radius:10px;overflow:hidden;background:var(--bg3);">${(p.img||card.img)?`<img src="${p.img||card.img}" alt="${card.name}" style="width:100%;display:block;">`:'<div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--muted);">⟡</div>'}</div>
         <div style="flex:1;min-width:0;">
-          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;"><span class="ct-badge type-${card.type}">${card.type}</span><span class="ct-badge cond-${card.cond}">${card.cond}</span>${card.grade?`<span class="ct-badge type-graded">${card.grade}</span>`:''}</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;"><span class="ct-badge type-${card.type}">${card.type}</span><span class="ct-badge cond-${card.cond}">${card.cond}</span>${card.grade?`<span class="ct-badge type-graded">${card.grade}</span>`:''}${editionBadge(card)}</div>
           <div style="font-family:var(--disp);font-size:20px;font-weight:800;margin-bottom:2px;">${card.name}</div>
           <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;">
             ${card.set?`<span style="background:var(--bg3);border:1px solid var(--border);padding:2px 8px;border-radius:5px;font-size:11px;font-family:var(--mono);">${card.set}</span> `:''}
@@ -5117,20 +5186,21 @@ async function doNameSearch(q){
 }
 document.addEventListener('click',e=>{if(!e.target.closest('#mode-name'))document.getElementById('name-dd').classList.remove('open');});
 
-function quickAdd(card){document.getElementById('name-dd').classList.remove('open');document.getElementById('name-search').value='';_pickerCard=card;document.getElementById('picker-img').src=card.img;document.getElementById('picker-img').style.display=card.img?'':'none';document.getElementById('picker-img-ph').style.display=card.img?'none':'';document.getElementById('picker-name').textContent=card.name;document.getElementById('picker-meta').textContent=[card.set,card.num?'#'+card.num:'',card.rarity].filter(Boolean).join(' · ');document.getElementById('picker-graded-panel').style.display='none';document.getElementById('picker-grade-sel').value='10';document.getElementById('picker-cert').value='';document.getElementById('picker-grader').value='PSA';document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='');document.getElementById('picker-confirm-btn').disabled=true;openModal('card-picker-modal');}
+function quickAdd(card){document.getElementById('name-dd').classList.remove('open');document.getElementById('name-search').value='';_pickerCard=card;document.getElementById('picker-img').src=card.img;document.getElementById('picker-img').style.display=card.img?'':'none';document.getElementById('picker-img-ph').style.display=card.img?'none':'';document.getElementById('picker-name').textContent=card.name;document.getElementById('picker-meta').textContent=[card.set,card.num?'#'+card.num:'',card.rarity].filter(Boolean).join(' · ');document.getElementById('picker-graded-panel').style.display='none';document.getElementById('picker-grade-sel').value='10';document.getElementById('picker-cert').value='';document.getElementById('picker-grader').value='PSA';document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='');document.getElementById('picker-confirm-btn').disabled=true;_pickerEdition='unlimited';const _pe=editionEligibility({cardId:card.id,set:card.set,type:'standard'});const _per=document.getElementById('picker-edition-row');if(_pe.eligible){_per.style.display='';document.getElementById('picker-ed-shadowless').style.display=_pe.shadowless?'':'none';document.querySelectorAll('#picker-edition-row .ed-pill').forEach(p=>p.classList.toggle('active',p.dataset.val==='unlimited'));}else{_per.style.display='none';}openModal('card-picker-modal');}
 function pickerSelectType(type,el){document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='var(--border)');el.style.borderColor='var(--gold)';document.getElementById('picker-graded-panel').style.display=type==='graded'?'':'none';document.getElementById('picker-confirm-btn').disabled=false;}
+function pickerSelectEdition(val,el){_pickerEdition=val;document.querySelectorAll('#picker-edition-row .ed-pill').forEach(p=>p.classList.remove('active'));if(el)el.classList.add('active');}
 function pickerConfirm(){
   const sel=document.querySelector('.picker-choice[style*="gold"]');
   if(!sel)return;
   const type=sel.dataset.type;
   closeModal('card-picker-modal');
   if(type==='watchlist'){
-    addToWatchlistFromPicker(_pickerCard);
+    addToWatchlistFromPicker(_pickerCard,_pickerEdition);
   } else {
-    prefillAddForm(_pickerCard,type);
+    prefillAddForm({..._pickerCard,edition:_pickerEdition},type);
   }
 }
-function addToWatchlistFromPicker(card){
+function addToWatchlistFromPicker(card,edition){
   if(!card)return;
   const existing=wishlist.find(w=>w.cardId===card.id||(w.name===card.name&&w.set===card.set));
   if(existing){toast('Already on watchlist','gold');return;}
@@ -5142,6 +5212,7 @@ function addToWatchlistFromPicker(card){
     cardId:card.id||'',
     img:card.img||'',
     rarity:card.rarity||'',
+    edition:edition||'unlimited',
     added:new Date().toISOString()
   });
   save();
@@ -5151,6 +5222,7 @@ function addToWatchlistFromPicker(card){
 function prefillAddForm(card,chosenType){editingId=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';
   if(chosenType==='graded'){const grader=document.getElementById('picker-grader').value;const grade=document.getElementById('picker-grade-sel').value;const cert=document.getElementById('picker-cert').value.trim();const tP=document.querySelector('.type-pill[data-val="graded"]');if(tP)selectType('graded',tP);document.getElementById('f-grader').value=grader;document.getElementById('f-grade-sel').value=grade;document.getElementById('f-cert').value=cert;document.getElementById('f-grade').value=grader+' '+grade;document.getElementById('f-cond').value='NM';}
   else{const r=(card.rarity||'').toLowerCase();let gt='standard';if(r.includes('ex')||r.includes('gx')||r.includes(' v')||r.includes('vmax'))gt='ex';else if(r.includes('holo'))gt='holo';else if(r.includes('reverse'))gt='reverse';const tP=document.querySelector(`.type-pill[data-val="${gt}"]`);if(tP)selectType(gt,tP);const cP=document.querySelector('.cond-pill[data-val="NM"]');if(cP)selectCond('NM',cP);document.getElementById('f-grade').value='';document.getElementById('f-cert').value='';}
+  document.getElementById('f-edition').value=(card.edition||'unlimited');refreshEditionSection();const _pcEd=document.getElementById('f-edition').value;const _pcP=document.querySelector(`#edition-section .ed-pill[data-val="${_pcEd}"]`);if(_pcP)selectEdition(_pcEd,_pcP);
   updateAddPreview();openModal('add-modal');}
 
 async function loadSets(){try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch('https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate',{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();allSets=j.data||[];renderSets(allSets);renderSealedSets(allSets);document.getElementById('set-cnt-lbl').textContent=allSets.length+' sets';if(document.getElementById('page-cardsearch').classList.contains('active'))renderSetBrowser();}catch(e){document.getElementById('set-list').innerHTML='<p style="font-size:12px;color:var(--muted);padding:8px;">Set browser unavailable — add pokemontcg.io key in Settings.</p>';}}
@@ -5163,8 +5235,20 @@ function setSearchMode(mode,el){document.querySelectorAll('.filter-chip[id^="sta
 // ═══ ADD FORM HELPERS ═══
 function selectType(val,el){document.querySelectorAll('#add-modal .type-pill').forEach(p=>p.classList.remove('active'));if(el)el.classList.add('active');document.getElementById('f-type').value=val;document.getElementById('graded-section').style.display=val==='graded'?'':'none';document.getElementById('cond-section').style.display=val==='graded'?'none':'';if(val==='graded')syncGrade();else document.getElementById('f-grade').value='';updateAddPreview();}
 function selectCond(val,el){document.querySelectorAll('.cond-pill').forEach(p=>p.classList.remove('active'));if(el)el.classList.add('active');document.getElementById('f-cond').value=val;updateAddPreview();}
+function selectEdition(val,el){document.querySelectorAll('#edition-section .ed-pill').forEach(p=>p.classList.remove('active'));if(el)el.classList.add('active');document.getElementById('f-edition').value=val;updateAddPreview();}
+function refreshEditionSection(){
+  const sec=document.getElementById('edition-section');if(!sec)return;
+  const probe={set:document.getElementById('f-set').value,cardId:document.getElementById('f-cardid').value,type:document.getElementById('f-type').value};
+  const elig=editionEligibility(probe);
+  if(!elig.eligible){sec.style.display='none';document.getElementById('f-edition').value='unlimited';return;}
+  sec.style.display='';
+  document.getElementById('ed-pill-shadowless').style.display=elig.shadowless?'':'none';
+  if(!elig.shadowless&&document.getElementById('f-edition').value==='shadowless'){
+    selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));
+  }
+}
 function syncGrade(){const grader=document.getElementById('f-grader').value;const grade=document.getElementById('f-grade-sel').value;document.getElementById('f-grade').value=grader+' '+grade;updateAddPreview();}
-function updateAddPreview(){const name=document.getElementById('f-name').value.trim();const set=document.getElementById('f-set').value.trim();const num=document.getElementById('f-num').value.trim();const img=document.getElementById('f-img').value.trim();const type=document.getElementById('f-type').value;const cond=document.getElementById('f-cond').value;const grade=document.getElementById('f-grade').value.trim();const nameEl=document.getElementById('add-prev-name');const metaEl=document.getElementById('add-prev-meta');const tagsEl=document.getElementById('add-prev-tags');const imgWrap=document.getElementById('add-prev-img');nameEl.textContent=name||'No card selected';nameEl.style.color=name?'var(--text)':'var(--muted)';metaEl.textContent=[set,num?'#'+num:''].filter(Boolean).join(' · ')||'Fill in details below';if(img)imgWrap.innerHTML=`<img src="${img}" style="width:100%;height:100%;object-fit:cover;" loading="lazy">`;else imgWrap.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px;color:var(--muted)"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>';const typeLabel={standard:'Standard',holo:'Holo',reverse:'Reverse',ex:'ex/GX/V',graded:'Graded'}[type]||type;const typeColor={standard:'rgba(90,90,114,.2)',holo:'rgba(176,110,245,.2)',reverse:'rgba(15,212,176,.15)',ex:'rgba(245,200,66,.18)',graded:'rgba(79,142,247,.18)'}[type]||'';const typeText={standard:'#9ca3af',holo:'#c084fc',reverse:'#2dd4bf',ex:'var(--gold)',graded:'#60a5fa'}[type]||'';let tags=`<span style="background:${typeColor};color:${typeText};font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;text-transform:uppercase;">${typeLabel}</span>`;if(grade)tags+=`<span style="background:rgba(245,200,66,.15);color:var(--gold);font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;">${grade}</span>`;else if(cond){const cc={NM:'rgba(46,204,128,.15)',LP:'rgba(79,142,247,.15)',MP:'rgba(255,140,66,.15)',HP:'rgba(255,77,109,.15)'}[cond]||'';const ct={NM:'#4ade80',LP:'#60a5fa',MP:'var(--orange)',HP:'var(--red)'}[cond]||'';tags+=`<span style="background:${cc};color:${ct};font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;">${cond}</span>`;}tagsEl.innerHTML=tags;}
+function updateAddPreview(){const name=document.getElementById('f-name').value.trim();const set=document.getElementById('f-set').value.trim();const num=document.getElementById('f-num').value.trim();const img=document.getElementById('f-img').value.trim();const type=document.getElementById('f-type').value;const cond=document.getElementById('f-cond').value;const grade=document.getElementById('f-grade').value.trim();const nameEl=document.getElementById('add-prev-name');const metaEl=document.getElementById('add-prev-meta');const tagsEl=document.getElementById('add-prev-tags');const imgWrap=document.getElementById('add-prev-img');nameEl.textContent=name||'No card selected';nameEl.style.color=name?'var(--text)':'var(--muted)';metaEl.textContent=[set,num?'#'+num:''].filter(Boolean).join(' · ')||'Fill in details below';if(img)imgWrap.innerHTML=`<img src="${img}" style="width:100%;height:100%;object-fit:cover;" loading="lazy">`;else imgWrap.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:22px;height:22px;color:var(--muted)"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>';const typeLabel={standard:'Standard',holo:'Holo',reverse:'Reverse',ex:'ex/GX/V',graded:'Graded'}[type]||type;const typeColor={standard:'rgba(90,90,114,.2)',holo:'rgba(176,110,245,.2)',reverse:'rgba(15,212,176,.15)',ex:'rgba(245,200,66,.18)',graded:'rgba(79,142,247,.18)'}[type]||'';const typeText={standard:'#9ca3af',holo:'#c084fc',reverse:'#2dd4bf',ex:'var(--gold)',graded:'#60a5fa'}[type]||'';let tags=`<span style="background:${typeColor};color:${typeText};font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;text-transform:uppercase;">${typeLabel}</span>`;if(grade)tags+=`<span style="background:rgba(245,200,66,.15);color:var(--gold);font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;">${grade}</span>`;else if(cond){const cc={NM:'rgba(46,204,128,.15)',LP:'rgba(79,142,247,.15)',MP:'rgba(255,140,66,.15)',HP:'rgba(255,77,109,.15)'}[cond]||'';const ct={NM:'#4ade80',LP:'#60a5fa',MP:'var(--orange)',HP:'var(--red)'}[cond]||'';tags+=`<span style="background:${cc};color:${ct};font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:5px;">${cond}</span>`;}tags+=editionBadge({edition:(document.getElementById('f-edition')||{}).value||'unlimited'});tagsEl.innerHTML=tags;}
 async function verifyCert(){const cert=document.getElementById('f-cert').value.trim();if(!cert)return;const msg=document.getElementById('cert-msg');msg.innerHTML='<span style="color:var(--muted)"><span class="spinner" style="display:inline-block;vertical-align:-2px;margin-right:4px"></span>Verifying…</span>';if(!keys.psa){msg.innerHTML='<span style="color:var(--gold)">⚠ Add PSA token in Settings.</span>';return;}try{const r=await fetch(`https://api.psacard.com/publicapi/cert/GetByCertNumber/${cert}`,{headers:{Authorization:'bearer '+keys.psa}});if(!r.ok)throw new Error();const j=await r.json();const info=j.PSACert;if(info){document.getElementById('f-name').value=info.Subject||document.getElementById('f-name').value;document.getElementById('f-grade').value='PSA '+(info.CardGrade||'');document.getElementById('f-type').value='graded';msg.innerHTML=`<span style="color:var(--green)">✓ PSA ${info.CardGrade} — ${info.Subject}</span>`;}}catch(e){msg.innerHTML='<span style="color:var(--red)">Cert not found.</span>';}}
 
 // ═══ WISHLIST ═══
@@ -5219,7 +5303,7 @@ function onWishSearch(val){
 }
 function addToWatchlistFromSearch(card){
   if(wishlist.some(w=>w.cardId===card.id||(w.name===card.name&&w.set===card.set))){toast('Already watching','gold');return;}
-  wishlist.push({id:'w'+Date.now(),name:card.name,set:card.set||'',num:card.num||'',cardId:card.id||'',img:card.img||'',rarity:card.rarity||'',added:new Date().toISOString()});
+  wishlist.push({id:'w'+Date.now(),name:card.name,set:card.set||'',num:card.num||'',cardId:card.id||'',img:card.img||'',rarity:card.rarity||'',edition:'unlimited',added:new Date().toISOString()});
   save();renderWishlist();
   closeWishSearch();
   toast(card.name+' added to watchlist','green');
@@ -5598,7 +5682,7 @@ function renderWishlist(){
       ${inVault?'<div style="position:absolute;top:6px;left:6px;background:var(--green);color:#0a0a0f;font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px;">IN VAULT</div>':''}
       <div class="db-card-body">
         <div class="db-card-set-pill" style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.set||''}${w.num?' · #'+w.num:''}</div>
-        <div class="db-card-name">${w.name}</div>
+        <div class="db-card-name">${w.name}</div>${editionBadge({edition:w.edition})?`<div style="margin-top:3px;">${editionBadge({edition:w.edition})}</div>`:''}
         <div style="margin-top:4px;">
           ${best!=null
             ? `<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green);">$${best.toFixed(2)}</div>`
@@ -5617,7 +5701,7 @@ function renderWishlist(){
   wishlist.forEach(async w=>{
     const ck='wish_'+w.id;
     if(!pcache[ck]){
-      const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:'holo',cond:'NM',img:w.img||null,set:w.set||'',num:w.num||''});
+      const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:'holo',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
       pcache[ck]={ts:Date.now(),data};
       localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
       renderWishlist();
@@ -6343,6 +6427,22 @@ function mobGoPage(page,tabId){goPage(page,null);updateMobTabs(tabId);}
 // ═══ CARD SCANNER ═══
 let scanSelectedCard = null;
 let scanCond = 'NM';
+let scanEdition = 'unlimited';
+let scanDetectedEdition = null;
+// Map Claude Vision's free-form edition read to our canonical value.
+function normalizeDetectedEdition(parsed){
+  const raw = ((parsed && (parsed.edition||parsed.notes)) || '').toString().toLowerCase();
+  if(/shadowless/.test(raw)) return 'shadowless';
+  if(/1st|first\s*edition|1ed|1e\b/.test(raw)) return '1stEdition';
+  if(/unlimited/.test(raw)) return 'unlimited';
+  return null; // unknown — leave default
+}
+function setScanEdition(val){
+  scanEdition = val;
+  ['unlimited','1stEdition','shadowless'].forEach(e=>{
+    const b=document.getElementById('scan-ed-'+e); if(b) b.classList.toggle('active', e===val);
+  });
+}
 
 function setScanCond(val) {
   scanCond = val;
@@ -6395,10 +6495,11 @@ Steps:
 4. Identify the set from the set symbol or expansion logo near the bottom.
 5. Determine rarity (Common, Uncommon, Rare, Rare Holo, Ultra Rare, Secret Rare, etc.) from the rarity symbol (circle/diamond/star/crown).
 6. Determine the card type: standard, holo, reverse, ex (for ex/GX/V/VMAX/VSTAR), or graded.
-7. Estimate condition: NM (Near Mint — minimal wear), LP (Lightly Played — minor edge wear), MP (Moderately Played — visible scratches or whitening), HP (Heavily Played — significant damage).
+7. Detect the EDITION (critical for vintage WOTC-era cards, Base Set through Neo Destiny). Look for a black "Edition 1" / "1st Edition" stamp on the lower-left of the artwork → "1st_edition". For Base Set only, if there is NO drop shadow on the right/bottom edge of the artwork frame AND no 1st Edition stamp → "shadowless". Otherwise → "unlimited". Modern cards (2003+) have no edition → "unlimited".
+8. Estimate condition: NM (Near Mint — minimal wear), LP (Lightly Played — minor edge wear), MP (Moderately Played — visible scratches or whitening), HP (Heavily Played — significant damage).
 
 Respond ONLY with a single JSON object on one line, no markdown fences, no explanation:
-{"name":"exact card name","set":"exact set name","number":"collector number only e.g. 4 or 215","rarity":"rarity string","type":"standard|holo|reverse|ex|graded","condition_estimate":"NM|LP|MP|HP","confidence":"high|medium|low","notes":"any relevant detail e.g. shadowless, 1st edition, Japanese"}
+{"name":"exact card name","set":"exact set name","number":"collector number only e.g. 4 or 215","rarity":"rarity string","type":"standard|holo|reverse|ex|graded","edition":"1st_edition|unlimited|shadowless","condition_estimate":"NM|LP|MP|HP","confidence":"high|medium|low","notes":"any relevant detail e.g. Japanese, promo"}
 
 If you genuinely cannot identify any text or artwork on the card, respond:
 {"error":"Cannot identify — please retake with better lighting"}`;
@@ -6464,6 +6565,9 @@ async function scanCard(input) {
       const cond = parsed.condition_estimate.toUpperCase();
       if (['NM','LP','MP','HP'].includes(cond)) setScanCond(cond);
     }
+
+    // Step 3b — capture detected edition (applied in showScanResultCard once the set is known)
+    scanDetectedEdition = normalizeDetectedEdition(parsed);
 
     // Step 4 — show confidence badge if low
     if (parsed.confidence === 'low') {
@@ -6534,7 +6638,25 @@ function showScanResultCard(card) {
   else if (r.includes('holo')) type = 'holo';
   else if (r.includes('reverse')) type = 'reverse';
 
-  scanSelectedCard = { id: card.id, name: card.name, set: card.set?.name || '', num: card.number || '', img: card.images?.large || card.images?.small || '', cardId: card.id, type, rarity };
+  scanSelectedCard = { id: card.id, name: card.name, set: card.set?.name || '', setId: card.set?.id || '', num: card.number || '', img: card.images?.large || card.images?.small || '', cardId: card.id, type, rarity };
+
+  // ── Edition: show selector only for eligible WOTC sets; pre-select Vision's read ──
+  const elig = editionEligibility(scanSelectedCard);
+  const row = document.getElementById('scan-edition-row');
+  if (elig.eligible) {
+    document.getElementById('scan-ed-shadowless').style.display = elig.shadowless ? '' : 'none';
+    let chosen = scanDetectedEdition || 'unlimited';
+    if (chosen === 'shadowless' && !elig.shadowless) chosen = 'unlimited';
+    setScanEdition(chosen);
+    scanSelectedCard.edition = chosen;
+    const hint = document.getElementById('scan-edition-hint');
+    hint.textContent = (scanDetectedEdition && chosen !== 'unlimited') ? '· auto-detected, confirm' : '';
+    row.style.display = '';
+  } else {
+    scanSelectedCard.edition = 'unlimited';
+    setScanEdition('unlimited');
+    row.style.display = 'none';
+  }
 
   // Update UI
   const imgEl = document.getElementById('scan-result-img');
@@ -6597,6 +6719,7 @@ function addScannedCard() {
     ...scanSelectedCard,
     id:   'c' + Date.now(),
     cond:  scanCond,
+    edition: scanEdition,
     qty,
     paid,
     notes: 'Added via Card Scanner',
@@ -6614,13 +6737,13 @@ function addScannedCard() {
 }
 
 function resetScanner() {
-  scanSelectedCard = null; scanCond = 'NM';
-  ['scan-loading','scan-result','scan-preview-wrap','scan-added'].forEach(id => document.getElementById(id).style.display = 'none');
+  scanSelectedCard = null; scanCond = 'NM'; scanEdition = 'unlimited'; scanDetectedEdition = null;
+  ['scan-loading','scan-result','scan-preview-wrap','scan-added','scan-edition-row'].forEach(id => document.getElementById(id).style.display = 'none');
   document.getElementById('scan-drop').style.display = '';
   document.getElementById('scan-file').value = '';
   document.getElementById('scan-paid').value = '';
   document.getElementById('scan-qty').value = '1';
-  setScanCond('NM');
+  setScanCond('NM'); setScanEdition('unlimited');
 }
 
 function renderAll(){
