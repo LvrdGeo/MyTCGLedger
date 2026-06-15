@@ -1653,7 +1653,7 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.4';
+const SCHEMA_VERSION = '6.6';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache');
   localStorage.removeItem('pkv2_pcache');
@@ -1978,8 +1978,17 @@ async function fetchLivePrices(card){
         .map(i => i.price)
         .filter(p => p > 0)
         .sort((a,b) => a-b);
+      result.ebayN = cleanPrices.length;
       if (cleanPrices.length) {
-        pricePoint = cleanPrices[cleanPrices.length - 1]; // highest clean price — filters out cheap mislisted sealed products
+        if (card.type === 'graded') {
+          // GRADED: average of ALL sold comps on the eBay "{grade} Sold" page (user spec).
+          // With 6+ comps, trim the single lowest & highest to shed wrong-grade mislistings.
+          const arr = cleanPrices.length >= 6 ? cleanPrices.slice(1, -1) : cleanPrices;
+          pricePoint = arr.reduce((a, b) => a + b, 0) / arr.length;
+        } else {
+          // RAW: median is the robust eBay cross-check (raw headline leads on TCGPlayer).
+          pricePoint = medianOf(cleanPrices);
+        }
       }
     }
 
@@ -2017,10 +2026,20 @@ async function fetchLivePrices(card){
     }
   }
 
-  const anchor = result.tcg || result.ebay;
+  // Anchor: premium vintage editions (1st Ed / Shadowless) get their real value from
+  // eBay SOLD comps — pokemontcg.io's TCGPlayer edition feed is thin/stale. So we
+  // anchor to eBay and, crucially, do NOT fabricate PriceCharting/eBay figures from a
+  // thin TCG number: a fake low source would cluster with TCG and make the consensus
+  // engine discard the true (higher) 1st-edition sale as an "outlier".
+  const _ed = cardEdition(card);
+  const _premiumVintage = (_ed === '1stEdition' || _ed === 'shadowless');
+  result.premiumVintage = _premiumVintage;
+  const anchor = _premiumVintage ? (result.ebay || result.tcg) : (result.tcg || result.ebay);
   if (!anchor) { const sim=simulate(card); return{...sim,img:result.img||sim.img}; }
-  if (!result.ebay) result.ebay = parseFloat((anchor*(.85+Math.random()*.12)).toFixed(2));
-  if (!result.ppt)  result.ppt  = parseFloat((anchor*(.88+Math.random()*.10)).toFixed(2));
+  if (!_premiumVintage) {
+    if (!result.ebay) result.ebay = parseFloat((anchor*(.85+Math.random()*.12)).toFixed(2));
+    if (!result.ppt)  result.ppt  = parseFloat((anchor*(.88+Math.random()*.10)).toFixed(2));
+  }
   if (!result.psa && card.type==='graded') result.psa = result.ebay;
 
   // ── For raw singles, fetch real PSA 10 comps from eBay worker ──
@@ -2116,71 +2135,66 @@ function smartPrice(p, isGraded) {
   return analysis.price;
 }
 
+// ── Pricing reasoning: raw singles lead on TCGPlayer market; graded slabs use the
+//    average of the eBay sold comps for that grade. Two distinct engines. ──
+
 function analyzePrice(p, isGraded) {
   if (!p) return { price: 0, confidence: 'none', reason: 'No price data', sources: {} };
+  return isGraded ? analyzeGraded(p) : analyzeRaw(p);
+}
 
-  // ── Gather the relevant sources for this card type ──
-  let sources = {};
-  if (isGraded) {
-    // For graded: PSA market and eBay graded comps are what matter
-    if (p.psa  > 0) sources.psa  = p.psa;
-    if (p.ebay > 0) sources.ebay = p.ebay;
-    if (p.ppt  > 0) sources.ppt  = p.ppt;
-    // TCGPlayer raw price is NOT valid for a graded slab — exclude it
-  } else {
-    // For raw: TCGPlayer market + eBay sold + PriceCharting
-    if (p.tcg  > 0) sources.tcg  = p.tcg;
-    if (p.ebay > 0) sources.ebay = p.ebay;
-    if (p.ppt  > 0) sources.ppt  = p.ppt;
-  }
-
-  const vals = Object.values(sources);
-  const keys = Object.keys(sources);
-
-  // ── No data ──
-  if (vals.length === 0) {
+function analyzeRaw(p) {
+  const sources = {};
+  if (p.tcg  > 0) sources.tcg  = p.tcg;
+  if (p.ebay > 0) sources.ebay = p.ebay;
+  if (p.ppt  > 0) sources.ppt  = p.ppt;
+  if (Object.keys(sources).length === 0)
     return { price: 0, confidence: 'none', reason: 'No price sources available', sources };
+
+  // Premium vintage (1st Ed / Shadowless): the real market is eBay sold comps —
+  // pokemontcg.io's TCGPlayer edition feed is thin/stale, so eBay leads here.
+  if (p.premiumVintage && p.ebay > 0) {
+    return { price: +p.ebay.toFixed(2), confidence: p.tcg > 0 ? 'high' : 'medium',
+             reason: 'eBay sold comps (1st-Edition / Shadowless market)', sources };
   }
 
-  // ── Single source — medium confidence, nothing to cross-check ──
-  if (vals.length === 1) {
-    return {
-      price: vals[0],
-      confidence: 'medium',
-      reason: `Only ${keys[0].toUpperCase()} available — no cross-check possible`,
-      sources
-    };
+  // Normal raw single: TCGPlayer market IS the answer. The other sources don't move
+  // the number — they only tell us how confident to be in it.
+  if (p.tcg > 0) {
+    const others = [p.ebay, p.ppt].filter(v => v > 0);
+    const inBand = others.filter(v => v >= p.tcg / 2 && v <= p.tcg * 2);
+    const conf = inBand.length ? 'high' : 'medium';
+    return { price: +p.tcg.toFixed(2), confidence: conf,
+             reason: inBand.length ? `TCGPlayer market — corroborated by ${inBand.length} source${inBand.length > 1 ? 's' : ''}`
+                     : others.length ? 'TCGPlayer market (other sources diverged — not blended in)'
+                     : 'TCGPlayer market (no cross-check available)',
+             sources };
   }
 
-  // ── Multiple sources — cross-check them ──
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const median = medianOf(vals);
-  const ratio = min > 0 ? max / min : 999;
+  // No TCGPlayer figure → fall back to eBay sold, then PriceCharting.
+  if (p.ebay > 0) return { price: +p.ebay.toFixed(2), confidence: 'medium', reason: 'No TCGPlayer price — using eBay sold', sources };
+  return { price: +p.ppt.toFixed(2), confidence: 'low', reason: 'PriceCharting estimate only', sources };
+}
 
-  // Sources AGREE (within ~2.5x of each other) → high confidence
-  if (ratio <= 2.5) {
-    // Use median — the consensus middle value, like a person eyeballing the range
-    return {
-      price: median,
-      confidence: 'high',
-      reason: `${vals.length} sources agree (within ${ratio.toFixed(1)}x) — using median`,
-      sources, median, min, max
-    };
+function analyzeGraded(p) {
+  const sources = {};
+  if (p.psa  > 0) sources.psa  = p.psa;
+  if (p.ebay > 0) sources.ebay = p.ebay;
+  if (p.ppt  > 0) sources.ppt  = p.ppt;
+  if (Object.keys(sources).length === 0)
+    return { price: 0, confidence: 'none', reason: 'No graded sold comps found', sources };
+
+  // Headline = the average of the eBay "{grade} Sold" page (p.psa carries that mean).
+  if (p.psa > 0) {
+    const n = p.ebayN || 0;
+    const conf = n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low';
+    return { price: +p.psa.toFixed(2), confidence: conf,
+             reason: n ? `Average of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
+                       : 'eBay sold comp for this grade',
+             sources };
   }
-
-  // Sources DISAGREE wildly (>2.5x apart) → one is probably a wrong match
-  // A person would distrust the outlier and lean on the cluster.
-  // Strategy: find the tightest cluster and ignore the outlier.
-  const consensus = findConsensus(sources);
-
-  return {
-    price: consensus.price,
-    confidence: ratio > 5 ? 'low' : 'medium',
-    reason: `Sources disagree (${min.toFixed(0)}–${max.toFixed(0)}, ${ratio.toFixed(1)}x apart). ` +
-            `Trusting ${consensus.basis} as ${consensus.label}.`,
-    sources, median, min, max, outlier: consensus.outlier
-  };
+  if (p.ebay > 0) return { price: +p.ebay.toFixed(2), confidence: 'low', reason: 'eBay sold', sources };
+  return { price: +p.ppt.toFixed(2), confidence: 'low', reason: 'Estimate only', sources };
 }
 
 // Find the most trustworthy price when sources disagree
