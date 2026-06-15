@@ -1625,7 +1625,7 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.2';
+const SCHEMA_VERSION = '6.3';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache');
   localStorage.removeItem('pkv2_pcache');
@@ -1809,6 +1809,25 @@ async function testEbayWorker() {
   }
 }
 
+// Extract TCGPlayer prices from already-fetched card data (used by verification retry)
+function fetchLivePricesFromData(d, card, result) {
+  const prices = d?.tcgplayer?.prices;
+  if (prices) {
+    const isReverse = /reverse/i.test(card.rarity||'') || /reverse/i.test(card.notes||'');
+    const tierOrder = isReverse
+      ? ['reverseHolofoil','holofoil','normal']
+      : ['holofoil','normal','reverseHolofoil','1stEditionHolofoil','unlimitedHolofoil'];
+    for(const t of tierOrder){ if(prices[t]?.market){ result.tcg=prices[t].market; break; } }
+    if(!result.tcg){ for(const t of tierOrder){ if(prices[t]?.mid){ result.tcg=prices[t].mid; break; } } }
+    if(!result.tcg){ const any=Object.values(prices)[0]; result.tcg=any?.market||any?.mid||any?.low||null; }
+  }
+  result.img = result.img || d?.images?.large || d?.images?.small || null;
+  // Save the corrected cardId
+  const f = collection.find(x=>x.id===card.id);
+  if (f && d?.id) { f.cardId = d.id; if(d.number) f.num = f.num||d.number; save(); }
+  return result;
+}
+
 async function fetchLivePrices(card){
   let result={tcg:null,ebay:null,ppt:null,psa:null,img:card.img||null,trend7:null,trend30:null,ebay_sales:[]};
   const tcgKey=card.cardId||await lookupCardId(card);
@@ -1818,6 +1837,26 @@ async function fetchLivePrices(card){
       const r=await fetch(`https://api.pokemontcg.io/v2/cards/${tcgKey}`,{headers:hdrs});
       if(r.ok){
         const d=(await r.json()).data;
+        // ── VERIFY THE MATCH — does the resolved card's number match what we expect? ──
+        const wantNum = (card.num||'').split('/')[0].trim().toLowerCase().replace(/^0+/,'');
+        const gotNum  = (d?.number||'').trim().toLowerCase().replace(/^0+/,'');
+        if (wantNum && gotNum && wantNum !== gotNum) {
+          // Mismatch! The cardId points to the wrong card. Clear it and re-resolve.
+          console.warn(`[Verify] Card number mismatch for ${card.name}: wanted #${wantNum}, got #${gotNum}. Re-resolving.`);
+          const f = collection.find(x=>x.id===card.id);
+          if (f) { f.cardId = ''; }
+          const freshId = await lookupCardId(card);
+          if (freshId && freshId !== tcgKey) {
+            // Retry once with the correct ID
+            const r2 = await fetch(`https://api.pokemontcg.io/v2/cards/${freshId}`,{headers:hdrs});
+            if (r2.ok) {
+              const d2 = (await r2.json()).data;
+              if (d2) { return fetchLivePricesFromData(d2, card, result); }
+            }
+          }
+          // Mark as unverified if we still couldn't fix it
+          result.unverified = true;
+        }
         const prices=d?.tcgplayer?.prices;
         if(prices){
           // Pick the right price tier based on the card's actual variant
@@ -1994,15 +2033,131 @@ function simulate(card){
   const cm={NM:1,LP:.78,MP:.55,HP:.35}[card.cond]||1;const b=base*cm;
   return{tcg:+(b*(.9+Math.abs(Math.sin(seed))*.2)).toFixed(2),ebay:+(b*(.83+Math.abs(Math.sin(seed*2))*.18)).toFixed(2),ppt:+(b*(.86+Math.abs(Math.sin(seed*3))*.16)).toFixed(2),psa:card.type==='graded'?+(b*(1.4+Math.abs(Math.sin(seed*4))*.5)).toFixed(2):null,img:card.img||null,trend7:null,trend30:null,ebay_sales:[]};
 }
-function bestPrice(p, isGraded) {
-  if (!p) return 0;
+// ══════════════════════════════════════════════════════════
+// SMART PRICING BRAIN
+// Reasons about a card's price the way a knowledgeable person would:
+//  1. Gather every available source
+//  2. Cross-check them against each other
+//  3. Detect when one source wildly disagrees (likely a wrong match)
+//  4. Trust the consensus, flag the outlier
+//  5. Return a price + a confidence level + reasoning
+// ══════════════════════════════════════════════════════════
+function smartPrice(p, isGraded) {
+  const analysis = analyzePrice(p, isGraded);
+  return analysis.price;
+}
+
+function analyzePrice(p, isGraded) {
+  if (!p) return { price: 0, confidence: 'none', reason: 'No price data', sources: {} };
+
+  // ── Gather the relevant sources for this card type ──
+  let sources = {};
   if (isGraded) {
-    // For graded cards: use PSA market, then eBay sold — never raw TCGPlayer price
-    return p.psa || p.ebay || p.ppt || 0;
+    // For graded: PSA market and eBay graded comps are what matter
+    if (p.psa  > 0) sources.psa  = p.psa;
+    if (p.ebay > 0) sources.ebay = p.ebay;
+    if (p.ppt  > 0) sources.ppt  = p.ppt;
+    // TCGPlayer raw price is NOT valid for a graded slab — exclude it
+  } else {
+    // For raw: TCGPlayer market + eBay sold + PriceCharting
+    if (p.tcg  > 0) sources.tcg  = p.tcg;
+    if (p.ebay > 0) sources.ebay = p.ebay;
+    if (p.ppt  > 0) sources.ppt  = p.ppt;
   }
-  // For raw cards: use lowest price across all sources
-  const v = SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);
-  return v.length ? Math.min(...v) : 0;
+
+  const vals = Object.values(sources);
+  const keys = Object.keys(sources);
+
+  // ── No data ──
+  if (vals.length === 0) {
+    return { price: 0, confidence: 'none', reason: 'No price sources available', sources };
+  }
+
+  // ── Single source — medium confidence, nothing to cross-check ──
+  if (vals.length === 1) {
+    return {
+      price: vals[0],
+      confidence: 'medium',
+      reason: `Only ${keys[0].toUpperCase()} available — no cross-check possible`,
+      sources
+    };
+  }
+
+  // ── Multiple sources — cross-check them ──
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const median = medianOf(vals);
+  const ratio = min > 0 ? max / min : 999;
+
+  // Sources AGREE (within ~2.5x of each other) → high confidence
+  if (ratio <= 2.5) {
+    // Use median — the consensus middle value, like a person eyeballing the range
+    return {
+      price: median,
+      confidence: 'high',
+      reason: `${vals.length} sources agree (within ${ratio.toFixed(1)}x) — using median`,
+      sources, median, min, max
+    };
+  }
+
+  // Sources DISAGREE wildly (>2.5x apart) → one is probably a wrong match
+  // A person would distrust the outlier and lean on the cluster.
+  // Strategy: find the tightest cluster and ignore the outlier.
+  const consensus = findConsensus(sources);
+
+  return {
+    price: consensus.price,
+    confidence: ratio > 5 ? 'low' : 'medium',
+    reason: `Sources disagree (${min.toFixed(0)}–${max.toFixed(0)}, ${ratio.toFixed(1)}x apart). ` +
+            `Trusting ${consensus.basis} as ${consensus.label}.`,
+    sources, median, min, max, outlier: consensus.outlier
+  };
+}
+
+// Find the most trustworthy price when sources disagree
+function findConsensus(sources) {
+  const entries = Object.entries(sources); // [['tcg', 357], ['ebay', 8]]
+  const vals = entries.map(e => e[1]);
+
+  // If we have 3+ sources, drop the single biggest outlier and use median of rest
+  if (entries.length >= 3) {
+    const med = medianOf(vals);
+    // Which source is furthest from the median? That's the outlier.
+    let outlierKey = null, maxDist = 0;
+    for (const [k, v] of entries) {
+      const dist = Math.abs(v - med) / med;
+      if (dist > maxDist) { maxDist = dist; outlierKey = k; }
+    }
+    const trimmed = entries.filter(([k]) => k !== outlierKey).map(([,v]) => v);
+    return {
+      price: medianOf(trimmed),
+      basis: 'consensus of remaining sources',
+      label: 'most reliable',
+      outlier: outlierKey
+    };
+  }
+
+  // Only 2 sources that disagree — trust eBay (real sold market) over TCGPlayer (can mismatch)
+  // because eBay sold is actual transactions; a wrong TCGPlayer match is the usual culprit.
+  if (sources.ebay && sources.ebay > 0) {
+    const outlier = sources.tcg && Math.abs(sources.tcg - sources.ebay)/sources.ebay > 1.5 ? 'tcg' : null;
+    return { price: sources.ebay, basis: 'eBay sold data', label: 'actual sales', outlier };
+  }
+  // No eBay — fall back to the lower value (overpriced listings are common; wrong-match highs too)
+  const lo = Math.min(...vals);
+  return { price: lo, basis: 'lower estimate', label: 'conservative', outlier: null };
+}
+
+function medianOf(arr) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a,b)=>a-b);
+  const mid = Math.floor(s.length/2);
+  return s.length % 2 ? s[mid] : (s[mid-1]+s[mid])/2;
+}
+
+// Keep bestPrice as a thin wrapper so all existing call sites still work
+function bestPrice(p, isGraded) {
+  return smartPrice(p, isGraded);
 }
 function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);return v.length?Math.max(...v):0;}
 function fmtPrice(v){return(v==null||!isFinite(v)||v<=0)?'—':'$'+v.toFixed(2);}
@@ -4729,6 +4884,7 @@ async function openDetail(id){
   const card=collection.find(c=>c.id===id);if(!card)return;
   const p=pcache[card.id+'_'+card.cond]?.data||await getPrices(card);
   const best=bestPrice(p,card.type==='graded'),worst=worstPrice(p);
+  const priceAnalysis=analyzePrice(p,card.type==='graded');
   const roi=card.paid?(best-parseFloat(card.paid)):null;
   const roiPct=card.paid&&best>0?((best/parseFloat(card.paid)-1)*100).toFixed(1):null;
   // Sparkline
@@ -4786,7 +4942,7 @@ async function openDetail(id){
         </div>
       </div>
       <div class="trend-area"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span class="sec-title-sm">30-Day Trend</span><span style="font-family:var(--mono);font-size:11px;color:${p.trend30!=null&&p.trend30>=0?'var(--green)':'var(--red)'};">${p.trend30!=null?fmtTrend(p.trend30)+' 30d':''}</span></div>${sparkSvg}</div>
-      <div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price':s.k==='ebay'?'Recent sold':s.k==='ppt'?'PriceCharting':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
+      ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price':s.k==='ebay'?'Recent sold':s.k==='ppt'?'PriceCharting':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
       <div style="margin-bottom:18px;"><div class="sec-title-sm">eBay Recent Sold</div><div>${eSales}</div></div>
