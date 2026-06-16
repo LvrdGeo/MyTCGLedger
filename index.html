@@ -1030,13 +1030,23 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
           <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Multiple matches — pick one</div>
           <div id="scan-matches-list" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;"></div>
         </div>
-        <!-- Condition -->
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Condition</div>
-        <div style="display:flex;gap:6px;margin-bottom:14px;">
-          <button class="cond-pill active" id="scan-cond-NM" data-val="NM" onclick="setScanCond('NM')" style="--cc:rgba(46,204,128,.15);--cb:rgba(46,204,128,.4);--ct:#4ade80;">NM</button>
-          <button class="cond-pill" id="scan-cond-LP" data-val="LP" onclick="setScanCond('LP')" style="--cc:rgba(79,142,247,.15);--cb:rgba(79,142,247,.4);--ct:#60a5fa;">LP</button>
-          <button class="cond-pill" id="scan-cond-MP" data-val="MP" onclick="setScanCond('MP')" style="--cc:rgba(255,140,66,.15);--cb:rgba(255,140,66,.4);--ct:var(--orange);">MP</button>
-          <button class="cond-pill" id="scan-cond-HP" data-val="HP" onclick="setScanCond('HP')" style="--cc:rgba(255,77,109,.15);--cb:rgba(255,77,109,.4);--ct:var(--red);">HP</button>
+        <!-- Condition (raw cards) -->
+        <div id="scan-cond-row">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Condition</div>
+          <div style="display:flex;gap:6px;margin-bottom:14px;">
+            <button class="cond-pill active" id="scan-cond-NM" data-val="NM" onclick="setScanCond('NM')" style="--cc:rgba(46,204,128,.15);--cb:rgba(46,204,128,.4);--ct:#4ade80;">NM</button>
+            <button class="cond-pill" id="scan-cond-LP" data-val="LP" onclick="setScanCond('LP')" style="--cc:rgba(79,142,247,.15);--cb:rgba(79,142,247,.4);--ct:#60a5fa;">LP</button>
+            <button class="cond-pill" id="scan-cond-MP" data-val="MP" onclick="setScanCond('MP')" style="--cc:rgba(255,140,66,.15);--cb:rgba(255,140,66,.4);--ct:var(--orange);">MP</button>
+            <button class="cond-pill" id="scan-cond-HP" data-val="HP" onclick="setScanCond('HP')" style="--cc:rgba(255,77,109,.15);--cb:rgba(255,77,109,.4);--ct:var(--red);">HP</button>
+          </div>
+        </div>
+        <!-- Grade (graded slabs) -->
+        <div id="scan-grade-row" style="display:none;margin-bottom:14px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Grade <span id="scan-grade-hint" style="color:var(--teal);text-transform:none;letter-spacing:0;"></span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="form-group"><div class="form-label">Grader</div><select class="select" id="scan-grader" onchange="setScanGrade()"><option value="PSA">PSA</option><option value="BGS">BGS</option><option value="CGC">CGC</option><option value="SGC">SGC</option><option value="ACE">ACE</option></select></div>
+            <div class="form-group"><div class="form-label">Grade</div><select class="select" id="scan-grade-sel" onchange="setScanGrade()"><option value="10">10 — Gem Mint</option><option value="9.5">9.5</option><option value="9">9 — Mint</option><option value="8.5">8.5</option><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option><option value="AUTH">AUTH</option></select></div>
+          </div>
         </div>
         <div id="scan-edition-row" style="display:none;margin-bottom:14px;">
           <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Edition <span id="scan-edition-hint" style="color:var(--teal);text-transform:none;letter-spacing:0;"></span></div>
@@ -1522,6 +1532,20 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 </div>
 <div class="toast" id="toast"><div class="dot" id="toast-dot"></div><span id="toast-msg"></span></div>
 <script>
+// ╔═══════════════════════════════════════════════════════════════════════╗
+// ║  MyTCGLedger  ·  SCRIPT 1 of 2  ·  SECTION MAP                          ║
+// ║  Jump to any section by searching its  "// ═══ NAME ═══"  banner.      ║
+// ╟───────────────────────────────────────────────────────────────────────╢
+// ║  STATE                 globals, localStorage keys, schema, load & save  ║
+// ║  INIT                  startup sequence and first render                ║
+// ║  PRICING               cache keys, source fetch, raw & graded engines   ║
+// ║  PORTFOLIO             holdings list, KPIs, category breakdown          ║
+// ║  PROFIT & LOSS WINDOW  per-card P&L modal (openPnL)                     ║
+// ║  TIMELINE              portfolio value-over-time chart                  ║
+// ║  DASHBOARD             home page KPIs and charts                        ║
+// ║  PSA SLABS             graded-card view                                 ║
+// ║  ALL SINGLES           raw-singles view                                 ║
+// ╚═══════════════════════════════════════════════════════════════════════╝
 // ═══ STATE ═══
 let collection = JSON.parse(localStorage.getItem('pkv2_col')   || '[]');
 let sealed     = JSON.parse(localStorage.getItem('pkv2_sealed') || '[]');
@@ -3702,6 +3726,23 @@ async function loadAllPrices(){
 function setTypeFilter(f,el){typeFilter=f;document.querySelectorAll('#page-singles .filter-chip:not([id^="stab"])').forEach(c=>c.classList.remove('active'));el.classList.add('active');renderSingles();}
 </script>
 <script>
+// ╔═══════════════════════════════════════════════════════════════════════╗
+// ║  MyTCGLedger  ·  SCRIPT 2 of 2  ·  SECTION MAP                          ║
+// ║  Jump to any section by searching its  "// ═══ NAME ═══"  banner.      ║
+// ╟───────────────────────────────────────────────────────────────────────╢
+// ║  DEALS              Deal Center: deal logging, gallery, leaderboard     ║
+// ║  ANALYZER           standalone price analyzer                           ║
+// ║  SEALED             sealed product tracking                             ║
+// ║  CARD CRUD          add / edit / save / delete cards                    ║
+// ║  DETAIL VIEW        full card detail modal (incl. not-owned cards)      ║
+// ║  SEARCH + SETS      card search and set browser                         ║
+// ║  ADD FORM HELPERS   prefill / open helpers for the Add Card form        ║
+// ║  WISHLIST           watchlist render, detail view, move-to-portfolio    ║
+// ║  NAV + MOBILE       page switching, mobile tabs, context-aware FAB      ║
+// ║  DATA               import / export and misc data                       ║
+// ║  CARD SCANNER       Vision scanner (slab & grade detection)             ║
+// ║  MODALS / UTILS     modal open/close, toasts, formatters                ║
+// ╚═══════════════════════════════════════════════════════════════════════╝
 // ═══ DEALS ═══
 function openDealModal(id){
   editingDealId=id||null;document.getElementById('deal-modal-title').textContent=id?'Edit Deal':'Log Deal';
@@ -3713,16 +3754,6 @@ function openDealModal(id){
 let dealSearchTimer = null;
 let dealSearchSelected = null;
 
-function onDealSearch(val) {
-  clearTimeout(dealSearchTimer);
-  const dd = document.getElementById('deal-dd');
-  dealSearchSelected = null;
-  document.getElementById('deal-selected').style.display = 'none';
-  if (!val.trim()) { dd.style.display = 'none'; return; }
-  dd.style.display = '';
-  dd.innerHTML = '<div style="padding:12px 14px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;"><div class="spinner"></div>Searching…</div>';
-  dealSearchTimer = setTimeout(() => runDealSearch(val), 320);
-}
 
 async function runDealSearch(q) {
   const dd = document.getElementById('deal-dd');
@@ -3834,7 +3865,6 @@ function saveDeal(){
   if(editingDealId)deals=deals.map(x=>x.id===editingDealId?data:x);else deals.push(data);
   save();closeModal('deal-modal');renderDeals();toast(editingDealId?'Deal updated':'Deal logged','green');
 }
-function deleteDeal(id){showConfirm('Remove deal?','Permanently removes this entry.',()=>{deals=deals.filter(x=>x.id!==id);save();renderDeals();toast('Deal removed','red');});}
 // ══════════════════════════════
 // DEAL PERFORMANCE CENTER
 // ══════════════════════════════
@@ -6543,6 +6573,8 @@ let scanSelectedCard = null;
 let scanCond = 'NM';
 let scanEdition = 'unlimited';
 let scanDetectedEdition = null;
+let scanGrade = '';
+let scanIsGraded = false;
 // Map Claude Vision's free-form edition read to our canonical value.
 function normalizeDetectedEdition(parsed){
   const raw = ((parsed && (parsed.edition||parsed.notes)) || '').toString().toLowerCase();
@@ -6563,6 +6595,13 @@ function setScanCond(val) {
   ['NM','LP','MP','HP'].forEach(c => {
     document.getElementById('scan-cond-'+c).classList.toggle('active', c === val);
   });
+}
+
+function setScanGrade() {
+  const grader = document.getElementById('scan-grader').value;
+  const g = document.getElementById('scan-grade-sel').value;
+  scanGrade = grader + ' ' + g;
+  if (scanSelectedCard) scanSelectedCard.grade = scanGrade;
 }
 
 // ── Pre-process image: auto-rotate + normalise to JPEG ──
@@ -6598,32 +6637,37 @@ async function preprocessImage(file) {
 
 async function callClaudeVision(base64, mediaType, loadingMsg) {
   document.getElementById('scan-loading-msg').textContent = loadingMsg || 'Identifying card…';
-  const PROMPT = `You are an expert Pokémon TCG card identifier. Analyse this image carefully.
+  const PROMPT = `You are a meticulous Pokémon TCG card identifier. Take your time and reason carefully — accuracy matters far more than speed.
 
-IMPORTANT: The card may be rotated (upside-down, sideways, at an angle) or photographed in low light or with glare. Use every visual clue available — artwork, card name text, set symbol, collector number, energy type, HP value, attack names — to identify it correctly regardless of orientation.
+The image may show either a RAW card or a card sealed in a GRADING SLAB (a hard plastic case with a printed label — PSA red label, BGS black/silver, CGC, SGC, or ACE). It may be rotated, tilted, dimly lit, or have glare off the plastic.
 
-Steps:
-1. Mentally correct any rotation or tilt.
-2. Read the card name from the top of the card.
-3. Read the collector number and total (e.g. "215/203") from the bottom-right corner.
-4. Identify the set from the set symbol or expansion logo near the bottom.
-5. Determine rarity (Common, Uncommon, Rare, Rare Holo, Ultra Rare, Secret Rare, etc.) from the rarity symbol (circle/diamond/star/crown).
-6. Determine the card type: standard, holo, reverse, ex (for ex/GX/V/VMAX/VSTAR), or graded.
-7. Detect the EDITION (critical for vintage WOTC-era cards, Base Set through Neo Destiny). Look for a black "Edition 1" / "1st Edition" stamp on the lower-left of the artwork → "1st_edition". For Base Set only, if there is NO drop shadow on the right/bottom edge of the artwork frame AND no 1st Edition stamp → "shadowless". Otherwise → "unlimited". Modern cards (2003+) have no edition → "unlimited".
-8. Estimate condition: NM (Near Mint — minimal wear), LP (Lightly Played — minor edge wear), MP (Moderately Played — visible scratches or whitening), HP (Heavily Played — significant damage).
+Work through these steps in order, reasoning about what you actually see at each one:
 
-Respond ONLY with a single JSON object on one line, no markdown fences, no explanation:
-{"name":"exact card name","set":"exact set name","number":"collector number only e.g. 4 or 215","rarity":"rarity string","type":"standard|holo|reverse|ex|graded","edition":"1st_edition|unlimited|shadowless","condition_estimate":"NM|LP|MP|HP","confidence":"high|medium|low","notes":"any relevant detail e.g. Japanese, promo"}
+STEP 1 — SLAB OR RAW? Look for a hard plastic holder and a printed label bar (usually across the top). PSA = red label; BGS = black/silver with subgrades; CGC = blue/white; SGC = black tuxedo border; ACE = white. Holder + label ⇒ this is a GRADED slab.
 
-If you genuinely cannot identify any text or artwork on the card, respond:
-{"error":"Cannot identify — please retake with better lighting"}`;
+STEP 2 — IF GRADED, READ THE LABEL FIRST. The label is the cleanest, most reliable text in the image — trust it over the card behind the plastic. From it extract: GRADER (PSA/BGS/CGC/SGC/ACE), GRADE number (e.g. 10, 9.5, 9), YEAR, SET name, CARD NAME, CARD NUMBER, and CERT number if visible. Vintage labels often read like "1999 POKEMON GAME" (= Base Set) or "JUNGLE 1ST EDITION". Set type = "graded".
+
+STEP 3 — IF RAW (no holder): mentally correct rotation, then read the name from the top, the collector number/total from the bottom-right (e.g. "215/203"), and the set from the symbol/logo near the bottom.
+
+STEP 4 — RARITY: from the symbol (circle=common, diamond=uncommon, star=rare, etc.) or the label.
+
+STEP 5 — TYPE: standard, holo, reverse, ex (ex/GX/V/VMAX/VSTAR), or graded (if slabbed).
+
+STEP 6 — EDITION (critical for vintage WOTC sets, Base Set→Neo Destiny, raw OR slabbed): a black "1st Edition" stamp on the lower-left artwork, or "1ST EDITION" on a slab label ⇒ "1st_edition". Base Set only, no drop-shadow on the art frame and no stamp ⇒ "shadowless". Otherwise ⇒ "unlimited". Modern cards (2003+) ⇒ "unlimited".
+
+STEP 7 — CONDITION (raw cards only; for slabs leave "NM"): NM, LP, MP, or HP from visible wear.
+
+Reason through the steps in a few short sentences. THEN, as the very last thing in your reply, output ONE flat JSON object on its own line (no markdown fences) with exactly these keys:
+{"name":"","set":"","number":"collector number only e.g. 4 or 215","rarity":"","type":"standard|holo|reverse|ex|graded","graded":false,"grader":"","grade":"","cert":"","edition":"1st_edition|unlimited|shadowless","condition_estimate":"NM|LP|MP|HP","confidence":"high|medium|low","notes":""}
+
+For a graded slab set "graded":true and fill grader/grade (and cert if seen). For a raw card set "graded":false and leave grader/grade/cert empty. If you truly cannot identify the card at all, make the last line exactly: {"error":"Cannot identify — please retake with better lighting"}`;
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 400,
+      max_tokens: 1024,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
         { type: 'text', text: PROMPT }
@@ -6634,9 +6678,12 @@ If you genuinely cannot identify any text or artwork on the card, respond:
   const data = await resp.json();
   if (data.error) throw new Error(data.error.message || 'API error');
   const text = (data.content || []).map(i => i.text || '').join('').trim();
-  // Strip any accidental markdown fences
-  const clean = text.replace(/^```[a-z]*\n?/,'').replace(/\n?```$/,'').trim();
-  return JSON.parse(clean);
+  // The model reasons first, then emits one flat JSON object last — pull it out.
+  let jsonStr = text;
+  const lb = text.lastIndexOf('{'), rb = text.lastIndexOf('}');
+  if (lb >= 0 && rb > lb) jsonStr = text.slice(lb, rb + 1);
+  jsonStr = jsonStr.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
+  return JSON.parse(jsonStr);
 }
 
 async function scanCard(input) {
@@ -6682,6 +6729,17 @@ async function scanCard(input) {
 
     // Step 3b — capture detected edition (applied in showScanResultCard once the set is known)
     scanDetectedEdition = normalizeDetectedEdition(parsed);
+
+    // Step 3c — capture graded slab info (grader + grade) read off the label
+    scanIsGraded = (parsed.graded === true || parsed.type === 'graded');
+    if (scanIsGraded) {
+      const grader = ((parsed.grader || 'PSA').toString().toUpperCase().trim()) || 'PSA';
+      let gnum = (parsed.grade || '').toString().trim();
+      gnum = gnum.replace(/[^0-9.]/g, '') || (/auth/i.test(parsed.grade || '') ? 'AUTH' : '10');
+      scanGrade = grader + ' ' + gnum;
+    } else {
+      scanGrade = '';
+    }
 
     // Step 4 — show confidence badge if low
     if (parsed.confidence === 'low') {
@@ -6753,6 +6811,28 @@ function showScanResultCard(card) {
   else if (r.includes('reverse')) type = 'reverse';
 
   scanSelectedCard = { id: card.id, name: card.name, set: card.set?.name || '', setId: card.set?.id || '', num: card.number || '', img: card.images?.large || card.images?.small || '', cardId: card.id, type, rarity };
+
+  // ── Graded slab: lock type to graded, show the grade selector, hide condition pills ──
+  const condRow = document.getElementById('scan-cond-row');
+  const gradeRow = document.getElementById('scan-grade-row');
+  if (scanIsGraded) {
+    scanSelectedCard.type = 'graded';
+    const parts = (scanGrade || 'PSA 10').split(' ');
+    const grader = parts[0] || 'PSA';
+    const gnum = parts.slice(1).join(' ') || '10';
+    const gSel = document.getElementById('scan-grader');
+    const nSel = document.getElementById('scan-grade-sel');
+    if ([...gSel.options].some(o => o.value === grader)) gSel.value = grader;
+    if ([...nSel.options].some(o => o.value === gnum)) nSel.value = gnum;
+    scanSelectedCard.grade = gSel.value + ' ' + nSel.value;
+    scanGrade = scanSelectedCard.grade;
+    document.getElementById('scan-grade-hint').textContent = '· auto-detected, confirm';
+    gradeRow.style.display = '';
+    condRow.style.display = 'none';
+  } else {
+    gradeRow.style.display = 'none';
+    condRow.style.display = '';
+  }
 
   // ── Edition: show selector only for eligible WOTC sets; pre-select Vision's read ──
   const elig = editionEligibility(scanSelectedCard);
@@ -6851,8 +6931,9 @@ function addScannedCard() {
 }
 
 function resetScanner() {
-  scanSelectedCard = null; scanCond = 'NM'; scanEdition = 'unlimited'; scanDetectedEdition = null;
-  ['scan-loading','scan-result','scan-preview-wrap','scan-added','scan-edition-row'].forEach(id => document.getElementById(id).style.display = 'none');
+  scanSelectedCard = null; scanCond = 'NM'; scanEdition = 'unlimited'; scanDetectedEdition = null; scanGrade = ''; scanIsGraded = false;
+  ['scan-loading','scan-result','scan-preview-wrap','scan-added','scan-edition-row','scan-grade-row'].forEach(id => document.getElementById(id).style.display = 'none');
+  const ccr = document.getElementById('scan-cond-row'); if (ccr) ccr.style.display = '';
   document.getElementById('scan-drop').style.display = '';
   document.getElementById('scan-file').value = '';
   document.getElementById('scan-paid').value = '';
