@@ -2087,13 +2087,13 @@ async function fetchLivePrices(card){
   const _ed = cardEdition(card);
   const _premiumVintage = (_ed === '1stEdition' || _ed === 'shadowless');
   result.premiumVintage = _premiumVintage;
-  const anchor = _premiumVintage ? (result.ebay || result.tcg) : (result.tcg || result.ebay);
-  if (!anchor) { const sim=simulate(card); return{...sim,img:result.img||sim.img}; }
-  if (!_premiumVintage) {
-    if (!result.ebay) result.ebay = parseFloat((anchor*(.85+Math.random()*.12)).toFixed(2));
-    if (!result.ppt)  result.ppt  = parseFloat((anchor*(.88+Math.random()*.10)).toFixed(2));
-  }
-  if (!result.psa && card.type==='graded') result.psa = result.ebay;
+  // Provenance (Stage 1): never fabricate. Every source value shown is REAL
+  // (TCGPlayer tier or eBay sold comps) or absent — a missing source renders blank
+  // rather than a synthesized number, so portfolio totals reflect only real data.
+  // If nothing resolved, the (empty) result returns and the UI shows "—".
+  // PriceCharting (ppt) stays null until a real fetch is wired up (Stage 2).
+  // A missing TCGPlayer price falls back to the eBay sold average inside analyzeRaw.
+  if (!result.psa && card.type==='graded') result.psa = result.ebay; // real eBay comp avg only; null stays null
 
   // ── For raw singles, fetch real PSA 10 comps from eBay worker ──
   if (card.type !== 'graded' && !result.psa && card.name) {
