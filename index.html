@@ -6982,7 +6982,7 @@ function importData(e){
       if(d.sealed)sealed=d.sealed;
       if(d.deals)deals=d.deals;
       if(d.history){localStorage.setItem(HISTORY_KEY,JSON.stringify(d.history));}
-      if(d.cashPosition){localStorage.setItem('pkv2_cash',d.cashPosition);}
+      if (Object.prototype.hasOwnProperty.call(d, 'cashPosition')) { const importedCash = parseFloat(d.cashPosition); _cashPosition = Number.isFinite(importedCash) && importedCash >= 0 ? importedCash : 0; localStorage.setItem('pkv2_cash', _cashPosition.toFixed(2)); }
       save();init();toast('Imported successfully — history restored','green');
     }catch{toast('Invalid JSON file','red');}
   };
