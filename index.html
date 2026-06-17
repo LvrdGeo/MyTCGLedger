@@ -2267,6 +2267,19 @@ function init() {
     const s2 = document.getElementById('s2');
     if (s2) s2.className = 'dot ' + (d.hasToken ? 'dot-on' : 'dot-warn');
   }).catch(()=>{});
+  // Restore the page the user was last on (so reload/pull-to-refresh stays put)
+  try {
+    const last = localStorage.getItem('pkv2_lastpage');
+    if (last && last !== 'dashboard' && document.getElementById('page-' + last)) {
+      // Find the matching sidebar nav button so it highlights correctly
+      const navBtn = Array.from(document.querySelectorAll('.nav-btn')).find(b => (b.getAttribute('onclick')||'').includes("goPage('" + last + "'"));
+      goPage(last, navBtn || null);
+      // Sync the mobile bottom-nav highlight too
+      const mobMap = { dashboard:'mt-dashboard', portfolio:'mt-portfolio', cardsearch:'mt-cardsearch', settings:'mt-account' };
+      if (mobMap[last]) updateMobTabs(mobMap[last]);
+      else if (typeof updateMobTabs === 'function') updateMobTabs('mt-more');
+    }
+  } catch(e) { console.warn('[init] restore page failed', e); }
 }
 function loadKeys(){document.getElementById('k-ptcg').value=keys.ptcg||'';document.getElementById('k-ppt').value=keys.ppt||'';document.getElementById('k-psa').value=keys.psa||'';}
 function saveKey(k){keys[k]=document.getElementById('k-'+k).value.trim();localStorage.setItem('pkv2_keys',JSON.stringify(keys));updateStatusDots();toast('Key saved','green');}
@@ -6974,6 +6987,7 @@ function updateFab(name){
 }
 function goPage(name,el){
   _currentPage=name;
+  try { localStorage.setItem('pkv2_lastpage', name); } catch(e){}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
