@@ -6229,7 +6229,7 @@ function renderWishlist(){
 
   // Calculate totals
   let totalVal=0;
-  wishlist.forEach(w=>{const p=pcache['wish_'+w.id]?.data;const bp=p?bestPrice(p,w.type==='graded'):0;totalVal+=bp;});
+  wishlist.forEach(w=>{const p=pcache['wish_'+w.id]?.data;const bp=p?bestPrice(p):0;totalVal+=bp;});
   document.getElementById('wish-cnt').textContent=wishlist.length+' cards';
   document.getElementById('wish-total').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'Loading…';
   document.getElementById('wish-if-bought').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'—';
