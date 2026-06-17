@@ -2884,22 +2884,24 @@ function makeHistoryChart(canvasId, datasets, labels) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
 
-  // Apply revamped style to each dataset
+  // Apply revamped style to each dataset — matched to the Portfolio Timeline look
   const styledDatasets = datasets.map((ds, i) => ({
     ...ds,
-    borderWidth: 2.5,
+    borderWidth: ds.borderWidth || 2.5,
     pointRadius: 0,
-    pointHoverRadius: 6,
+    pointHoverRadius: 7,
     pointHoverBackgroundColor: '#fff',
     pointHoverBorderColor: ds.borderColor,
-    pointHoverBorderWidth: 2,
+    pointHoverBorderWidth: 2.5,
     tension: 0.4,
     ...(ds.fill !== false ? {
       fill: true,
       backgroundColor: ctx => {
         const g = ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
         const col = ds.borderColor || '#2ecc80';
-        g.addColorStop(0, col+'30');
+        // Deep gradient with a mid fade, like the timeline
+        g.addColorStop(0, col+'28');
+        g.addColorStop(0.65, col+'08');
         g.addColorStop(1, col+'00');
         return g;
       }
@@ -2919,7 +2921,11 @@ function makeHistoryChart(canvasId, datasets, labels) {
           labels: { color: 'rgba(255,255,255,0.4)', font:{family:'monospace',size:10}, boxWidth:10, padding:12, usePointStyle:true }
         },
         tooltip: chartTooltip({ multiLine: datasets.length > 1,
-          callbacks: { label: ctx => (ctx.dataset.label?ctx.dataset.label+': ':'')+'$'+ctx.parsed.y.toLocaleString('en-US',{maximumFractionDigits:0}) }
+          callbacks: { label: ctx => {
+            const ds = datasets[ctx.datasetIndex];
+            if (ds && typeof ds._tooltip === 'function') return ds._tooltip(ctx);
+            return (ctx.dataset.label?ctx.dataset.label+': ':'')+'$'+ctx.parsed.y.toLocaleString('en-US',{maximumFractionDigits:0});
+          } }
         })
       },
       scales: chartScales({ xTicks: 8 }),
@@ -2929,23 +2935,27 @@ function makeHistoryChart(canvasId, datasets, labels) {
 }
 
 function renderHistoryCombined(history) {
-  const labels = history.map(s => s.date.slice(5)); // MM-DD
-  const valueData      = history.map(s => s.totalValue || 0);
-  const costData       = history.map(s => s.costBasis || 0);
-  const unrealizedData = history.map(s => s.unrealizedPnL || 0);
-  const realizedData   = history.map(s => s.realizedPnL || 0);
-  const totalPnLData   = history.map(s => (s.unrealizedPnL||0) + (s.realizedPnL||0));
+  // Prepend a $0 'Start' baseline so the line rises from zero — like the Portfolio Timeline.
+  const labels = ['Start', ...history.map(s => s.date.slice(5))]; // MM-DD
+  const valueData      = [0, ...history.map(s => s.totalValue || 0)];
+  const costData       = [0, ...history.map(s => s.costBasis || 0)];
+  const totalPnLData   = [0, ...history.map(s => (s.unrealizedPnL||0) + (s.realizedPnL||0))];
+  const firstVal = history[0]?.totalValue || 0;
 
   makeHistoryChart('ph-combined-chart', [
     {
       label: 'Portfolio Value',
       data: valueData,
-      borderColor: '#2ecc80', borderWidth: 2,
-      pointRadius: 0, pointHoverRadius: 5,
-      tension: 0.4, fill: true,
-      backgroundColor: ctx => {
-        const g = ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
-        g.addColorStop(0,'rgba(46,204,128,0.15)'); g.addColorStop(1,'rgba(46,204,128,0)'); return g;
+      borderColor: '#2ecc80',
+      fill: true,
+      // Richer tooltip: value + gain/loss vs first tracked day, with arrow + %
+      _tooltip: (ctx) => {
+        const v = ctx.parsed.y;
+        const diff = v - firstVal;
+        const pct = firstVal > 0 ? ((diff/firstVal)*100).toFixed(1) : null;
+        const sign = diff>=0?'+':''; const arrow = diff>=0?'▲':'▼';
+        return ['Portfolio Value: $'+v.toLocaleString('en-US',{maximumFractionDigits:0}),
+          pct ? `${arrow} ${sign}$${Math.abs(diff).toLocaleString('en-US',{maximumFractionDigits:0})} (${sign}${pct}%)` : ''].filter(Boolean);
       }
     },
     {
@@ -2953,16 +2963,14 @@ function renderHistoryCombined(history) {
       data: costData,
       borderColor: 'rgba(255,255,255,0.2)', borderWidth: 1.5,
       borderDash: [4,4],
-      pointRadius: 0, pointHoverRadius: 4,
-      tension: 0.3, fill: false,
+      fill: false,
       backgroundColor: 'transparent'
     },
     {
       label: 'Total P&L',
       data: totalPnLData,
       borderColor: '#f5c842', borderWidth: 1.5,
-      pointRadius: 0, pointHoverRadius: 4,
-      tension: 0.3, fill: false,
+      fill: false,
       backgroundColor: 'transparent'
     }
   ], labels);
