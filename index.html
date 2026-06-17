@@ -1735,6 +1735,48 @@ function safeRender(fn, name) {
 let keys       = JSON.parse(localStorage.getItem('pkv2_keys')  || '{"ptcg":"","ppt":"","psa":""}');
 let prefs      = JSON.parse(localStorage.getItem('pkv2_prefs') || '{"cond":"NM"}');
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
+
+// ══════════════════════════════════════════════════════════
+// PER-CARD PRICE HISTORY ENGINE
+// Records each card's price over time so we can show REAL trends.
+// Stored under pkv2_cardhist as { cacheKey: [{d:'YYYY-MM-DD', v:price}, ...] }
+// One point per day per card (last write wins for same day).
+// This is the foundation for investor-grade trend analysis.
+// ══════════════════════════════════════════════════════════
+let cardHistory = JSON.parse(localStorage.getItem('pkv2_cardhist') || '{}');
+
+function recordCardPrice(card, price) {
+  if (!price || price <= 0 || !isFinite(price)) return;
+  const key = cacheKey(card);
+  const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+  if (!cardHistory[key]) cardHistory[key] = [];
+  const series = cardHistory[key];
+  const last = series[series.length - 1];
+  if (last && last.d === today) {
+    last.v = +price.toFixed(2); // update today's point
+  } else {
+    series.push({ d: today, v: +price.toFixed(2) });
+  }
+  // Cap at ~400 points (over a year of daily data) to bound storage
+  if (series.length > 400) series.splice(0, series.length - 400);
+}
+
+let _cardHistDirty = false;
+function saveCardHistory() {
+  try { localStorage.setItem('pkv2_cardhist', JSON.stringify(cardHistory)); }
+  catch(e) { console.warn('[cardHistory] save failed', e); }
+}
+
+// Get a card's recorded history (array of {d, v}), optionally limited to N days
+function getCardHistory(card, days) {
+  const key = cacheKey(card);
+  let series = cardHistory[key] || [];
+  if (days && series.length) {
+    const cutoff = new Date(Date.now() - days*86400000).toISOString().slice(0,10);
+    series = series.filter(p => p.d >= cutoff);
+  }
+  return series;
+}
 let allSets=[], typeFilter='', sealedFilter='', sealedSetFilter='', sortBy='added';
 let editingId=null, editingSealedId=null, editingDealId=null, tlRange='all';
 let _pickerCard=null, _pickerEdition='unlimited', _pickerWatchKind='single', searchTimer=null;
@@ -1866,9 +1908,18 @@ function updateStatusDots(){document.getElementById('s1').className='dot '+(keys
 // ═══ PRICING ═══
 async function getPrices(card){
   const ck=cacheKey(card);const hit=pcache[ck];
-  if(hit&&(Date.now()-hit.ts)<CACHE_TTL) return hit.data;
+  if(hit&&(Date.now()-hit.ts)<CACHE_TTL){
+    // Still record today's point from cached data (one per day) so history stays current
+    recordCardPrice(card, bestPrice(hit.data, card.type==='graded'));
+    saveCardHistory();
+    return hit.data;
+  }
   const data=await fetchLivePrices(card);
-  pcache[ck]={ts:Date.now(),data};localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));return data;
+  pcache[ck]={ts:Date.now(),data};localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
+  // Record this fresh price into the per-card history series
+  recordCardPrice(card, bestPrice(data, card.type==='graded'));
+  saveCardHistory();
+  return data;
 }
 async function fetchEbaySold(card) {
   try {
@@ -3625,21 +3676,6 @@ function buildPriceStrip(p,card){
 // the one shared request instead of starting a duplicate. The entry is deleted on
 // success OR failure, so a failed card stays uncached and is retried on next render.
 const _priceInflight = {};
-
-// Single in-flight choke point shared by BOTH loaders.
-// Reuses the existing _priceInflight map, cacheKey(), and getPrices().
-// Prevents two loaders from firing duplicate network requests for the same key.
-async function getPricesShared(card){
-  const ck = cacheKey(card);
-  const hit = pcache[ck];
-  if(hit && (Date.now()-hit.ts) < CACHE_TTL) return hit.data; // fresh cache
-  if(_priceInflight[ck]) return await _priceInflight[ck];     // already fetching — share it
-  const req = getPrices(card);                                // unchanged pricing call
-  _priceInflight[ck] = req;
-  try { return await req; }
-  finally { delete _priceInflight[ck]; }
-}
-
 async function loadPricesForCards(cards){
   if(!Array.isArray(cards) || !cards.length) return;
   // Filter invalid/missing cards, skip already-cached, dedupe by cacheKey.
@@ -3662,8 +3698,17 @@ async function loadPricesForCards(cards){
     const batch = toFetch.slice(i, i+BATCH);
     await Promise.all(batch.map(async ({ card, ck }) => {
       try{
-        const data = await getPricesShared(card);   // shared in-flight dedupe (both loaders)
-        if(data) pcache[ck] = { ts: Date.now(), data };
+        let data;
+        if(pcache[ck]){
+          data = pcache[ck].data;            // cached by a concurrent caller meanwhile
+        } else if(_priceInflight[ck]){
+          data = await _priceInflight[ck];     // same card already in flight — share it
+        } else {
+          const req = getPrices(card);         // exact existing pricing call (writes pcache itself)
+          _priceInflight[ck] = req;
+          try { data = await req; pcache[ck] = { ts: Date.now(), data }; }
+          finally { delete _priceInflight[ck]; }
+        }
         if(!data) return;
         // Patch this card's visible price strip in place.
         const ps = document.getElementById('ps-'+card.id);
@@ -3742,7 +3787,7 @@ async function loadAllPrices(){
     await Promise.all(batch.map(async card => {
       const ck = cacheKey(card);
       try{
-        const data = await getPricesShared(card);
+        const data = await getPrices(card);
         pcache[ck] = {ts:Date.now(),data};
         cacheDirty = true;
         // Update just this card's price strip (cheap, targeted)
@@ -5162,8 +5207,9 @@ async function openDetail(id){
   const priceAnalysis=analyzePrice(p,card.type==='graded');
   const roi=card.paid?(best-parseFloat(card.paid)):null;
   const roiPct=card.paid&&best>0?((best/parseFloat(card.paid)-1)*100).toFixed(1):null;
-  // Sparkline
-  const pts=buildSparkline(best,p.trend30);const sparkSvg=renderSparklineSVG(pts);
+  // Real per-card price history (recorded over time)
+  const histSeries = getCardHistory(card, 30);
+  const trendBlock = buildCardTrendBlock(card, histSeries, best);
   // Build precise search strings including set name + number for each platform
   const nameNum  = [card.name, card.num].filter(Boolean).join(' ');
   const nameSet  = [card.name, card.set].filter(Boolean).join(' ');
@@ -5216,7 +5262,7 @@ async function openDetail(id){
           </div>
         </div>
       </div>
-      <div class="trend-area"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span class="sec-title-sm">30-Day Trend</span><span style="font-family:var(--mono);font-size:11px;color:${p.trend30!=null&&p.trend30>=0?'var(--green)':'var(--red)'};">${p.trend30!=null?fmtTrend(p.trend30)+' 30d':''}</span></div>${sparkSvg}</div>
+      ${trendBlock}
       ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price':s.k==='ebay'?'Recent sold':s.k==='ppt'?'PriceCharting':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
@@ -5234,6 +5280,8 @@ async function openDetail(id){
     </div>
     <div class="modal-ft" style="gap:8px;">${card._transient?(card._wishId?`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');moveWishToVault('${card._wishId}')">+ Add to Portfolio</button>`:`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');dealPickCard(window._detailTransient)">＄ Log a Deal</button>`):`<button class="btn btn-danger btn-sm" onclick="closeModal('detail-modal');delCard('${card.id}');" style="margin-right:auto;">🗑 Delete</button><button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');editCard('${card.id}')">✏️ Edit</button>`}</div>`;
   openModal('detail-modal');
+  // Render the real interactive price-history chart (after modal is in the DOM)
+  setTimeout(()=>renderCardTrendChart(card, histSeries, best), 80);
   if(card.type==='graded') setTimeout(()=>loadActiveListings(card), 100);
 async function loadActiveListings(card) {
   const panel = document.getElementById('al-panel-' + card.id);
@@ -5310,7 +5358,100 @@ async function loadActiveListings(card) {
 }
 
 }
-function buildSparkline(current,trend30){const pts=[];const change=trend30?trend30/100:(Math.random()*.3-.1);const start=current/(1+change);for(let i=0;i<30;i++){const t=i/29;const noise=(Math.random()-.5)*.08*current;pts.push(start+(current-start)*t+noise);}pts[29]=current;return pts;}
+// ── REAL per-card price-history chart ──
+// Builds the trend-area HTML. Shows an interactive chart when we have 2+ real
+// data points, otherwise an honest "building history" state.
+function buildCardTrendBlock(card, series, currentPrice){
+  const enough = series && series.length >= 2;
+  let changeLabel = '';
+  if (enough) {
+    const first = series[0].v, last = series[series.length-1].v;
+    if (first > 0) {
+      const pct = ((last-first)/first*100);
+      const col = pct>=0 ? 'var(--green)' : 'var(--red)';
+      changeLabel = `<span style="font-family:var(--mono);font-size:11px;color:${col};">${pct>=0?'▲ +':'▼ '}${Math.abs(pct).toFixed(1)}% · ${series.length}d</span>`;
+    }
+  }
+  const body = enough
+    ? `<canvas id="card-trend-canvas" height="120" style="width:100%;display:block;"></canvas>
+       <div id="card-trend-label" style="display:flex;justify-content:space-between;margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--muted);"></div>`
+    : `<div style="padding:24px 12px;text-align:center;">
+         <div style="font-size:13px;color:var(--muted);margin-bottom:4px;">📈 Building price history…</div>
+         <div style="font-size:11px;color:var(--muted2);">We've recorded ${series?series.length:0} day${(series&&series.length===1)?'':'s'} so far. Your real trend chart appears once there are 2+ days of data. Check back tomorrow.</div>
+       </div>`;
+  return `<div class="trend-area">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span class="sec-title-sm">Price History</span>${changeLabel}
+    </div>${body}</div>`;
+}
+
+let _cardTrendChart = null;
+function renderCardTrendChart(card, series, currentPrice){
+  if (!series || series.length < 2) return;
+  const canvas = document.getElementById('card-trend-canvas');
+  if (!canvas) return;
+  if (typeof Chart === 'undefined') {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
+    s.onload = () => setTimeout(()=>renderCardTrendChart(card, series, currentPrice), 60);
+    document.head.appendChild(s);
+    return;
+  }
+  if (_cardTrendChart) { _cardTrendChart.destroy(); _cardTrendChart = null; }
+
+  const labels = series.map(p => p.d);
+  const values = series.map(p => p.v);
+  const up = values[values.length-1] >= values[0];
+  const col = up ? '#2ecc80' : '#ff4d6d';
+
+  _cardTrendChart = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets: [{
+      data: values,
+      borderColor: col,
+      borderWidth: 2.5,
+      pointRadius: 0,
+      pointHoverRadius: 6,
+      pointHoverBackgroundColor: '#fff',
+      pointHoverBorderColor: col,
+      pointHoverBorderWidth: 2,
+      tension: 0.35,
+      fill: true,
+      backgroundColor: (ctx) => {
+        const g = ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
+        g.addColorStop(0, up?'rgba(46,204,128,0.20)':'rgba(255,77,109,0.20)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        return g;
+      }
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          mode:'index', intersect:false,
+          backgroundColor:'rgba(10,10,18,0.97)', borderColor:col, borderWidth:1,
+          titleColor:'rgba(255,255,255,0.45)', bodyColor:'#fff',
+          bodyFont:{family:'monospace',size:14,weight:'700'}, titleFont:{family:'monospace',size:10},
+          padding:12, displayColors:false, cornerRadius:10,
+          callbacks:{ label: ctx => '$'+ctx.parsed.y.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) }
+        }
+      },
+      scales: {
+        x: { grid:{color:'rgba(255,255,255,0.03)',drawBorder:false}, ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:9},maxTicksLimit:5,maxRotation:0}, border:{display:false} },
+        y: { grid:{color:'rgba(255,255,255,0.03)',drawBorder:false}, ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:9},maxTicksLimit:4,callback:v=>v>=1000?'$'+(v/1000).toFixed(1)+'k':'$'+Math.round(v)}, border:{display:false} }
+      },
+      interaction: { mode:'index', intersect:false }
+    }
+  });
+
+  // Update the min/max footer label
+  const lbl = document.getElementById('card-trend-label');
+  if (lbl) {
+    const min = Math.min(...values), max = Math.max(...values);
+    lbl.innerHTML = `<span>Low $${min.toFixed(2)}</span><span>${series.length} days tracked</span><span>High $${max.toFixed(2)}</span>`;
+  }
+}
 function renderSparklineSVG(pts){const w=520,h=54,pad=4;const min=Math.min(...pts),max=Math.max(...pts);const range=max-min||1;const toX=i=>(i/(pts.length-1))*(w-pad*2)+pad;const toY=v=>h-pad-(v-min)/range*(h-pad*2);const d='M'+pts.map((v,i)=>toX(i)+','+toY(v)).join('L');const fill=d+`L${toX(pts.length-1)},${h}L${pad},${h}Z`;const up=pts[pts.length-1]>=pts[0];const col=up?'#2ecc80':'#ff4d6d';return `<div class="sparkline-wrap"><svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${col}" stop-opacity=".25"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><path d="${fill}" fill="url(#sg)"/><path d="${d}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${toX(pts.length-1)}" cy="${toY(pts[pts.length-1])}" r="3" fill="${col}"/></svg></div>`;}
 function simulateEbaySales(anchor){const sales=[];const now=new Date();for(let i=0;i<5;i++){const d=new Date(now);d.setDate(d.getDate()-Math.floor(Math.random()*14));const conds=['NM','LP','NM','LP','MP'];const mult={NM:1,LP:.8,MP:.6}[conds[i]];sales.push({date:d.toLocaleDateString('en-US',{month:'short',day:'numeric'}),cond:conds[i],price:+(anchor*mult*(1+(Math.random()-.5)*.12)).toFixed(2)});}return sales.sort((a,b)=>new Date(b.date)-new Date(a.date));}
 
@@ -7022,7 +7163,7 @@ function save(){
 }
 function exportData(){
   const history = JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');
-  const data = {collection,wishlist,sealed,deals,history,cashPosition:AppState.cashPosition,exported:new Date().toISOString(),version:'5.0'};
+  const data = {collection,wishlist,sealed,deals,history,cardHistory,cashPosition:AppState.cashPosition,exported:new Date().toISOString(),version:'5.0'};
   const b=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mytcgledger-v6-export.json';a.click();
   toast('Export includes full portfolio history','green');
@@ -7038,13 +7179,14 @@ function importData(e){
       if(d.sealed)sealed=d.sealed;
       if(d.deals)deals=d.deals;
       if(d.history){localStorage.setItem(HISTORY_KEY,JSON.stringify(d.history));}
+      if(d.cardHistory){cardHistory=d.cardHistory;localStorage.setItem('pkv2_cardhist',JSON.stringify(cardHistory));}
       if (Object.prototype.hasOwnProperty.call(d, 'cashPosition')) { const importedCash = parseFloat(d.cashPosition); _cashPosition = Number.isFinite(importedCash) && importedCash >= 0 ? importedCash : 0; localStorage.setItem('pkv2_cash', _cashPosition.toFixed(2)); }
       save();init();toast('Imported successfully — history restored','green');
     }catch{toast('Invalid JSON file','red');}
   };
   r.readAsText(f);
 }
-function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache'].forEach(k=>localStorage.removeItem(k));init();toast('All data cleared','red');}
+function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};cardHistory={};['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_cardhist'].forEach(k=>localStorage.removeItem(k));init();toast('All data cleared','red');}
 function refreshPrices(){
   pcache = {};
   localStorage.removeItem('pkv2_pcache');
