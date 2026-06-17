@@ -3625,6 +3625,21 @@ function buildPriceStrip(p,card){
 // the one shared request instead of starting a duplicate. The entry is deleted on
 // success OR failure, so a failed card stays uncached and is retried on next render.
 const _priceInflight = {};
+
+// Single in-flight choke point shared by BOTH loaders.
+// Reuses the existing _priceInflight map, cacheKey(), and getPrices().
+// Prevents two loaders from firing duplicate network requests for the same key.
+async function getPricesShared(card){
+  const ck = cacheKey(card);
+  const hit = pcache[ck];
+  if(hit && (Date.now()-hit.ts) < CACHE_TTL) return hit.data; // fresh cache
+  if(_priceInflight[ck]) return await _priceInflight[ck];     // already fetching — share it
+  const req = getPrices(card);                                // unchanged pricing call
+  _priceInflight[ck] = req;
+  try { return await req; }
+  finally { delete _priceInflight[ck]; }
+}
+
 async function loadPricesForCards(cards){
   if(!Array.isArray(cards) || !cards.length) return;
   // Filter invalid/missing cards, skip already-cached, dedupe by cacheKey.
@@ -3647,17 +3662,8 @@ async function loadPricesForCards(cards){
     const batch = toFetch.slice(i, i+BATCH);
     await Promise.all(batch.map(async ({ card, ck }) => {
       try{
-        let data;
-        if(pcache[ck]){
-          data = pcache[ck].data;            // cached by a concurrent caller meanwhile
-        } else if(_priceInflight[ck]){
-          data = await _priceInflight[ck];     // same card already in flight — share it
-        } else {
-          const req = getPrices(card);         // exact existing pricing call (writes pcache itself)
-          _priceInflight[ck] = req;
-          try { data = await req; pcache[ck] = { ts: Date.now(), data }; }
-          finally { delete _priceInflight[ck]; }
-        }
+        const data = await getPricesShared(card);   // shared in-flight dedupe (both loaders)
+        if(data) pcache[ck] = { ts: Date.now(), data };
         if(!data) return;
         // Patch this card's visible price strip in place.
         const ps = document.getElementById('ps-'+card.id);
@@ -3736,7 +3742,7 @@ async function loadAllPrices(){
     await Promise.all(batch.map(async card => {
       const ck = cacheKey(card);
       try{
-        const data = await getPrices(card);
+        const data = await getPricesShared(card);
         pcache[ck] = {ts:Date.now(),data};
         cacheDirty = true;
         // Update just this card's price strip (cheap, targeted)
