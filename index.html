@@ -4718,13 +4718,18 @@ function renderDBNegotiation() {
   }
 }
 
-function saveDealLog() {
+function saveDealLog(dealStatus) {
+  const _status = dealStatus || 'closed';
   // For trade mode — either cards OR cash is valid on each side
   const cashOutVal = parseFloat(document.getElementById('dl-cash-out')?.value||0);
   const cashInVal  = parseFloat(document.getElementById('dl-cash-in-trade')?.value||0);
   const cashInSale = parseFloat(document.getElementById('dl-cash-in')?.value||0);
 
-  if (_dealType === 'sale') {
+  // Pending drafts can be incomplete — only require SOMETHING so we don't save a blank.
+  if (_status === 'open') {
+    const anything = _dlCardsOut.length || _dlCardsIn.length || cashOutVal || cashInVal || cashInSale;
+    if (!anything) { toast('Add at least one card or amount to save a pending deal', 'red'); return; }
+  } else if (_dealType === 'sale') {
     if (!_dlCardsOut.length) { toast('Add at least one card you are selling', 'red'); return; }
     if (!cashInSale) { toast('Enter the cash you received', 'red'); return; }
   } else {
@@ -4756,7 +4761,7 @@ function saveDealLog() {
     myOffer:    parseFloat(document.getElementById('dl-my-offer')?.value||0)||null,
     finalPrice: parseFloat(document.getElementById('dl-final-price')?.value||0)||null,
     notes:      document.getElementById('dl-notes').value.trim(),
-    status:     'closed',
+    status:     _status,
     added:      _editingDealLogId ? (deals.find(x=>x.id===_editingDealLogId)||{}).added : new Date().toISOString(),
     // Legacy compat fields for renderDeals stats
     buyPrice:   outTotal,
@@ -4772,7 +4777,8 @@ function saveDealLog() {
   save();
   closeModal('deal-log-modal');
   renderDeals();
-  toast(_editingDealLogId?'Deal updated':'Deal saved ✓','green');
+  if (_status === 'open') toast('Saved as pending — find it under Open Deals','gold');
+  else toast(_editingDealLogId?'Deal updated':'Deal saved ✓','green');
 }
 
 function deleteDeal(id) {
@@ -7745,7 +7751,11 @@ init();
 
     <div class="modal-ft">
       <button class="btn btn-ghost" onclick="closeModal('deal-log-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveDealLog()">
+      <button class="btn btn-ghost" onclick="saveDealLog('open')" title="Save unfinished — resume later from Open Deals">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+        Save as Pending
+      </button>
+      <button class="btn btn-primary" onclick="saveDealLog('closed')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><polyline points="20 6 9 17 4 12"/></svg>
         Save Deal
       </button>
