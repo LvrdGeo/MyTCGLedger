@@ -3620,27 +3620,77 @@ function buildPriceStrip(p,card){
   return rows+`<hr class="ps-divider"><div class="ps-summary"><span>Best: <b style="color:var(--green);font-family:var(--mono)">${fmtPrice(best)}</b></span>${trend}</div>`;
 }
 
+// In-flight guard keyed by cacheKey: if the same card is already being priced
+// (by a concurrent caller or a re-render that fires during loading), callers await
+// the one shared request instead of starting a duplicate. The entry is deleted on
+// success OR failure, so a failed card stays uncached and is retried on next render.
+const _priceInflight = {};
 async function loadPricesForCards(cards){
+  if(!Array.isArray(cards) || !cards.length) return;
+  // Filter invalid/missing cards, skip already-cached, dedupe by cacheKey.
+  const seen = new Set();
+  const toFetch = [];
   for(const card of cards){
-    const ck=cacheKey(card);
-    if(!pcache[ck]){
-      const data=await getPrices(card);
-      pcache[ck]={ts:Date.now(),data};
-      localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-      AppState._dirty=true;
-      // Patch price strip in-place if visible
-      const ps=document.getElementById('ps-'+card.id);
-      if(ps) ps.innerHTML=buildPriceStrip(data,card);
-      // Update image if we got one
-      if(data.img&&!card.img){card.img=data.img;save();}
-      // Re-render every view that shows prices
-      renderPortfolio();
-      renderPSA();
-      renderSingles();
-      renderWishlist();
-      renderAnalyzer();
-    }
+    if(!card || !card.id) continue;
+    const ck = cacheKey(card);
+    if(pcache[ck]) continue;
+    if(seen.has(ck)) continue;
+    seen.add(ck);
+    toFetch.push({ card, ck });
   }
+  if(!toFetch.length) return;
+
+  let imagesChanged = false;
+  const BATCH = 5; // same safe batch size loadAllPrices() uses
+
+  for(let i=0; i<toFetch.length; i+=BATCH){
+    const batch = toFetch.slice(i, i+BATCH);
+    await Promise.all(batch.map(async ({ card, ck }) => {
+      try{
+        let data;
+        if(pcache[ck]){
+          data = pcache[ck].data;            // cached by a concurrent caller meanwhile
+        } else if(_priceInflight[ck]){
+          data = await _priceInflight[ck];     // same card already in flight — share it
+        } else {
+          const req = getPrices(card);         // exact existing pricing call (writes pcache itself)
+          _priceInflight[ck] = req;
+          try { data = await req; pcache[ck] = { ts: Date.now(), data }; }
+          finally { delete _priceInflight[ck]; }
+        }
+        if(!data) return;
+        // Patch this card's visible price strip in place.
+        const ps = document.getElementById('ps-'+card.id);
+        if(ps) ps.innerHTML = buildPriceStrip(data, card);
+        // Image enrichment → write to the real collection record (persisted once at end).
+        if(data.img){
+          const rec = collection.find(c => c.id === card.id);
+          if(rec && !rec.img){ rec.img = data.img; imagesChanged = true; }
+        }
+      }catch(e){
+        console.warn('[loadPricesForCards] price failed for', card && card.name, e);
+        // Clear the spinner so the card is never stuck on "Fetching…"; leave it
+        // uncached so the next render retries it. No simulated price is created here.
+        const ps = document.getElementById('ps-'+card.id);
+        if(ps) ps.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0;">Price unavailable</div>';
+      }
+    }));
+    // Persist cache once per completed batch (not once per card).
+    localStorage.setItem('pkv2_pcache', JSON.stringify(pcache));
+  }
+
+  // Persist any discovered images to the collection once.
+  if(imagesChanged) save();
+
+  // One final state + render cycle. Per-card strips were already patched above, so
+  // we refresh only the views that show aggregate totals (Portfolio + Dashboard).
+  // We deliberately do NOT re-render Singles/PSA/Wishlist here — those call
+  // loadPricesForCards again; the in-flight guard + cached-skip make that a no-op,
+  // but skipping the call avoids the loop entirely. renderAll() is never called.
+  AppState._dirty = true;
+  AppState.update();
+  renderPortfolio();
+  renderDashboard();
 }
 
 // Build a flat list of every card/slab/wishlist item that needs a price
