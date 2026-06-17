@@ -19,8 +19,8 @@
 html{font-size:14px}
 body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh}
 .shell{display:flex;height:100vh;overflow:hidden}
-.sidebar{width:200px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
-.main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0}
+.sidebar{width:calc(200px + env(safe-area-inset-left,0px));flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;padding-left:env(safe-area-inset-left,0px);box-sizing:border-box}
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0;padding-right:env(safe-area-inset-right,0px)}
 .logo{padding:20px 16px 16px;border-bottom:1px solid var(--border)}
 .logo-mark{font-family:var(--disp);font-size:19px;font-weight:800;color:var(--gold);letter-spacing:-.5px}
 .logo-sub{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
