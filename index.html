@@ -1794,20 +1794,51 @@ let _authMode = 'signin'; // 'signin' | 'signup'
 function initAuth() {
   try {
     if (!window.supabase || !window.SUPABASE_URL) { console.warn('[Auth] Supabase not loaded'); return; }
-    supa = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-    // Restore existing session if present
+    // Explicit auth options so the email-confirmation redirect is handled reliably.
+    supa = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, {
+      auth: {
+        detectSessionInUrl: true,   // parse the token in the URL after email-confirm redirect
+        persistSession: true,       // keep the session across refreshes/app reopens
+        autoRefreshToken: true,     // keep the session alive
+        flowType: 'pkce'            // modern, secure confirmation flow
+      }
+    });
+
+    // Restore existing session if present (already-logged-in users)
     supa.auth.getSession().then(({ data }) => {
       currentUser = data?.session?.user || null;
       renderAccountSection();
       updateAuthUI();
+      // If we just arrived from an email-confirmation/login redirect, clean the URL
+      // so a refresh doesn't try to re-process a one-time token.
+      if (currentUser && (location.hash.includes('access_token') || location.search.includes('code='))) {
+        cleanAuthUrl();
+        toast('Signed in as ' + (currentUser.email || 'your account'), 'green');
+      }
     });
-    // React to login/logout
-    supa.auth.onAuthStateChange((_event, session) => {
+
+    // React to login/logout/confirmation in real time
+    supa.auth.onAuthStateChange((event, session) => {
       currentUser = session?.user || null;
       renderAccountSection();
       updateAuthUI();
+      if (event === 'SIGNED_IN' && (location.hash.includes('access_token') || location.search.includes('code='))) {
+        cleanAuthUrl();
+        // Close the auth modal if it happens to be open
+        const m = document.getElementById('auth-modal');
+        if (m && m.classList.contains('open')) closeModal('auth-modal');
+        toast('Account confirmed — you are signed in', 'green');
+      }
     });
   } catch (e) { console.error('[Auth] init failed', e); }
+}
+
+// Remove auth tokens from the address bar after they're processed (cosmetic + safety)
+function cleanAuthUrl() {
+  try {
+    const clean = location.origin + location.pathname;
+    history.replaceState(null, '', clean);
+  } catch (e) { /* non-critical */ }
 }
 
 function openAuthModal() {
@@ -1846,11 +1877,11 @@ async function authSubmit() {
   try {
     let result;
     if (_authMode === 'signup') {
-      result = await supa.auth.signUp({ email, password: pass });
+      result = await supa.auth.signUp({ email, password: pass, options: { emailRedirectTo: location.origin + location.pathname } });
       if (result.error) throw result.error;
       if (!result.data.session) {
         errEl.style.color = 'var(--green)';
-        errEl.textContent = 'Check your email to confirm your account, then sign in.';
+        errEl.textContent = '✓ Account created! Check your email and click the confirmation link — it brings you right back here, signed in.';
         btn.disabled = false; btn.textContent = orig;
         return;
       }
