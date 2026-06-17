@@ -7503,9 +7503,33 @@ function refreshPrices(){
   localStorage.removeItem('pkv2_pcache');
   localStorage.setItem('pkv2_pcache', '{}');
   AppState._dirty = true;
-  toast('Refreshing all prices…','gold');
-  renderAll();
-  loadAllPrices();
+  AppState.update();
+  toast('Refreshing prices…','gold');
+  // Reset render caches so the current page rebuilds with fresh data
+  ['page-singles','page-psa','page-sealed','page-wishlist','page-deals'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el._rendered=false;
+  });
+  // Re-render and reprice ONLY the page you're on — stay put, don't jump home.
+  refreshCurrentPage();
+}
+
+// Re-render the current page in place and reload its prices (mirrors goPage's
+// per-page logic but without switching pages).
+function refreshCurrentPage(){
+  const name = _currentPage || 'dashboard';
+  switch(name){
+    case 'dashboard': renderDashboard(); loadAllPrices(); break;
+    case 'portfolio': renderPortfolio(); loadAllPrices(); break;
+    case 'singles':   renderSingles();   document.getElementById('page-singles')._rendered=true; break;
+    case 'psa':       renderPSA();       document.getElementById('page-psa')._rendered=true; break;
+    case 'sealed':    renderSealed();    document.getElementById('page-sealed')._rendered=true; break;
+    case 'wishlist':  renderWishlist();  document.getElementById('page-wishlist')._rendered=true; break;
+    case 'deals':     renderDeals();     document.getElementById('page-deals')._rendered=true; break;
+    case 'analyzer':  renderAnalyzer(); break;
+    case 'cardsearch': /* search results are user-driven; nothing to reprice */ break;
+    case 'settings':  renderAccountSection(); updateAuthUI(); break;
+    default:          renderDashboard(); loadAllPrices();
+  }
 }
 
 // ═══ MODALS / UTILS ═══
