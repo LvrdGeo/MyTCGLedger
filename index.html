@@ -1815,6 +1815,8 @@ function initAuth() {
         cleanAuthUrl();
         toast('Signed in as ' + (currentUser.email || 'your account'), 'green');
       }
+      // If already signed in on app open, reconcile cloud ↔ local
+      if (currentUser) syncReconcile();
     });
 
     // React to login/logout/confirmation in real time
@@ -1822,12 +1824,15 @@ function initAuth() {
       currentUser = session?.user || null;
       renderAccountSection();
       updateAuthUI();
-      if (event === 'SIGNED_IN' && (location.hash.includes('access_token') || location.search.includes('code='))) {
-        cleanAuthUrl();
-        // Close the auth modal if it happens to be open
-        const m = document.getElementById('auth-modal');
-        if (m && m.classList.contains('open')) closeModal('auth-modal');
-        toast('Account confirmed — you are signed in', 'green');
+      if (event === 'SIGNED_IN') {
+        if (location.hash.includes('access_token') || location.search.includes('code=')) {
+          cleanAuthUrl();
+          const m = document.getElementById('auth-modal');
+          if (m && m.classList.contains('open')) closeModal('auth-modal');
+          toast('Account confirmed — you are signed in', 'green');
+        }
+        // Pull cloud + merge local on every sign-in
+        syncReconcile();
       }
     });
   } catch (e) { console.error('[Auth] init failed', e); }
@@ -1920,6 +1925,174 @@ async function authSignOut() {
   catch (e) { console.error('[Auth] signout', e); }
 }
 
+// ══════════════════════════════════════════════════════════
+// STAGE 2 — PORTFOLIO SYNC (offline-first)
+// localStorage stays the working layer. Supabase is the backup/sync layer.
+//   • Signed out → pure local, nothing changes.
+//   • Sign in    → pull cloud, merge with local (nothing lost), push result.
+//   • On change  → save local now, debounced push to cloud in background.
+//   • On open    → pull latest, reconcile by timestamp.
+//   • Offline    → works locally; pending changes flush on reconnect.
+// One JSON row per user in user_app_state. Last-write-wins by updated_at.
+// ══════════════════════════════════════════════════════════
+let _syncState = 'idle';        // idle | syncing | synced | offline | error
+let _syncPushTimer = null;
+let _syncPending = false;
+let _lastLocalChange = 0;       // ms timestamp of last local mutation
+
+// Gather everything we sync into one plain object
+function collectAppData() {
+  return {
+    collection,
+    wishlist,
+    sealed,
+    deals,
+    soldHistory,
+    cardHistory: (typeof cardHistory !== 'undefined' ? cardHistory : JSON.parse(localStorage.getItem('pkv2_cardhist')||'{}')),
+    portfolioHistory: JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'),
+    wishHistory: JSON.parse(localStorage.getItem(WISH_HISTORY_KEY) || '[]'),
+    cashPosition: parseFloat(localStorage.getItem('pkv2_cash') || '0'),
+    _localChange: _lastLocalChange || Date.now()
+  };
+}
+
+// Write a pulled cloud object back into local state + localStorage
+function applyAppData(d) {
+  if (!d || typeof d !== 'object') return;
+  if (Array.isArray(d.collection))  { collection  = d.collection;  localStorage.setItem('pkv2_col',    JSON.stringify(collection)); }
+  if (Array.isArray(d.wishlist))    { wishlist    = d.wishlist;    localStorage.setItem('pkv2_wish',   JSON.stringify(wishlist)); }
+  if (Array.isArray(d.sealed))      { sealed      = d.sealed;      localStorage.setItem('pkv2_sealed', JSON.stringify(sealed)); }
+  if (Array.isArray(d.deals))       { deals       = d.deals;       localStorage.setItem('pkv2_deals',  JSON.stringify(deals)); }
+  if (Array.isArray(d.soldHistory)) { soldHistory = d.soldHistory; localStorage.setItem('pkv2_sold',   JSON.stringify(soldHistory)); }
+  if (d.cardHistory && typeof d.cardHistory==='object') { localStorage.setItem('pkv2_cardhist', JSON.stringify(d.cardHistory)); if(typeof cardHistory!=='undefined') cardHistory = d.cardHistory; }
+  if (Array.isArray(d.portfolioHistory)) localStorage.setItem(HISTORY_KEY, JSON.stringify(d.portfolioHistory));
+  if (Array.isArray(d.wishHistory))      localStorage.setItem(WISH_HISTORY_KEY, JSON.stringify(d.wishHistory));
+  if (typeof d.cashPosition === 'number') { localStorage.setItem('pkv2_cash', d.cashPosition.toFixed(2)); if(typeof _cashPosition!=='undefined') _cashPosition = d.cashPosition; }
+}
+
+// Merge cloud + local so the FIRST sign-in never loses anything.
+// Arrays merge by id (union, local wins on id clash since it's the device in hand).
+function mergeAppData(localD, cloudD) {
+  const mergeById = (a=[], b=[]) => {
+    const map = new Map();
+    (b||[]).forEach(x => { if(x && x.id!=null) map.set(x.id, x); });
+    (a||[]).forEach(x => { if(x && x.id!=null) map.set(x.id, x); }); // local overrides
+    // include any id-less items just in case
+    const extras = [...(a||[]), ...(b||[])].filter(x => !x || x.id==null);
+    return [...map.values(), ...extras];
+  };
+  const mergedCardHist = Object.assign({}, cloudD.cardHistory||{}, localD.cardHistory||{});
+  return {
+    collection:  mergeById(localD.collection,  cloudD.collection),
+    wishlist:    mergeById(localD.wishlist,    cloudD.wishlist),
+    sealed:      mergeById(localD.sealed,      cloudD.sealed),
+    deals:       mergeById(localD.deals,       cloudD.deals),
+    soldHistory: mergeById(localD.soldHistory, cloudD.soldHistory),
+    cardHistory: mergedCardHist,
+    // histories: take whichever is longer (more data)
+    portfolioHistory: (localD.portfolioHistory||[]).length >= (cloudD.portfolioHistory||[]).length ? localD.portfolioHistory : cloudD.portfolioHistory,
+    wishHistory:      (localD.wishHistory||[]).length >= (cloudD.wishHistory||[]).length ? localD.wishHistory : cloudD.wishHistory,
+    cashPosition: (typeof localD.cashPosition==='number' && localD.cashPosition>0) ? localD.cashPosition : (cloudD.cashPosition||0),
+    _localChange: Date.now()
+  };
+}
+
+function setSyncStatus(state) {
+  _syncState = state;
+  renderAccountSection();
+  updateAuthUI();
+}
+
+// Pull the user's cloud row
+async function syncPull() {
+  if (!supa || !currentUser) return null;
+  const { data, error } = await supa
+    .from('user_app_state')
+    .select('data, updated_at')
+    .eq('user_id', currentUser.id)
+    .maybeSingle();
+  if (error) { console.warn('[Sync] pull error', error.message); return null; }
+  return data; // { data:{...}, updated_at } or null
+}
+
+// Push current local state to cloud
+async function syncPush() {
+  if (!supa || !currentUser) return false;
+  const payload = collectAppData();
+  const { error } = await supa
+    .from('user_app_state')
+    .upsert({ user_id: currentUser.id, data: payload, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  if (error) { console.warn('[Sync] push error', error.message); setSyncStatus('error'); return false; }
+  return true;
+}
+
+// First reconcile after sign-in / app open
+async function syncReconcile() {
+  if (!supa || !currentUser) return;
+  if (!navigator.onLine) { setSyncStatus('offline'); return; }
+  setSyncStatus('syncing');
+  try {
+    const cloud = await syncPull();
+    const localD = collectAppData();
+    const localHasData = (collection.length + wishlist.length + sealed.length + deals.length + soldHistory.length) > 0;
+
+    if (!cloud) {
+      // No cloud row yet → first sign-in. Push local up (your migration).
+      await syncPush();
+      setSyncStatus('synced');
+      return;
+    }
+
+    const cloudD = cloud.data || {};
+    const cloudChange = new Date(cloud.updated_at).getTime();
+    const localChange = localD._localChange || 0;
+    const cloudHasData = ((cloudD.collection||[]).length + (cloudD.wishlist||[]).length + (cloudD.sealed||[]).length + (cloudD.deals||[]).length + (cloudD.soldHistory||[]).length) > 0;
+
+    if (localHasData && cloudHasData) {
+      // Both have data → MERGE on first reconcile so nothing is ever lost.
+      const merged = mergeAppData(localD, cloudD);
+      applyAppData(merged);
+      await syncPush();
+    } else if (cloudHasData && !localHasData) {
+      // Fresh device → pull cloud down.
+      applyAppData(cloudD);
+    } else {
+      // Local has data, cloud empty → push up.
+      await syncPush();
+    }
+    if (typeof renderAll === 'function') renderAll();
+    setSyncStatus('synced');
+  } catch (e) {
+    console.error('[Sync] reconcile failed', e);
+    setSyncStatus('error');
+  }
+}
+
+// Called by save() — debounced background push
+function syncQueuePush() {
+  _lastLocalChange = Date.now();
+  if (!supa || !currentUser) return;       // signed out → local only
+  if (!navigator.onLine) { _syncPending = true; setSyncStatus('offline'); return; }
+  clearTimeout(_syncPushTimer);
+  setSyncStatus('syncing');
+  _syncPushTimer = setTimeout(async () => {
+    const ok = await syncPush();
+    setSyncStatus(ok ? 'synced' : 'error');
+  }, 1500); // debounce — wait for edits to settle
+}
+
+// Flush pending changes when connection returns
+window.addEventListener('online', () => {
+  if (currentUser && _syncPending) {
+    _syncPending = false;
+    syncQueuePush();
+  }
+});
+window.addEventListener('offline', () => {
+  if (currentUser) setSyncStatus('offline');
+});
+
+
 // Reflect auth state in the sidebar status + account section
 function updateAuthUI() {
   const el = document.getElementById('auth-status-pill');
@@ -1937,13 +2110,24 @@ function renderAccountSection() {
   const box = document.getElementById('account-section');
   if (!box) return;
   if (currentUser) {
+    const syncMap = {
+      idle:    { c:'var(--muted2)', t:'Connected' },
+      syncing: { c:'var(--gold)',   t:'Syncing…' },
+      synced:  { c:'var(--green)',  t:'✓ Synced to cloud' },
+      offline: { c:'var(--gold)',   t:'Offline · will sync when online' },
+      error:   { c:'var(--red)',    t:'Sync error · will retry' }
+    };
+    const s = syncMap[_syncState] || syncMap.idle;
     box.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <div>
           <div style="font-size:13px;font-weight:600;">${currentUser.email || 'Signed in'}</div>
-          <div style="font-size:11px;color:var(--green);font-family:var(--mono);margin-top:2px;">● Signed in · sync coming in Stage 2</div>
+          <div style="font-size:11px;color:${s.c};font-family:var(--mono);margin-top:2px;">● ${s.t}</div>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="authSignOut()">Sign Out</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-ghost btn-sm" onclick="syncReconcile()" title="Sync now">↻</button>
+          <button class="btn btn-ghost btn-sm" onclick="authSignOut()">Sign Out</button>
+        </div>
       </div>`;
   } else {
     box.innerHTML = `
@@ -7286,6 +7470,8 @@ function save(){
   });
   AppState._dirty = true;
   setTimeout(captureHistorySnapshot, 500); // capture after state updates
+  // Background push to cloud (no-op if signed out / offline)
+  if (typeof syncQueuePush === 'function') syncQueuePush();
 }
 function exportData(){
   const history = JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');
