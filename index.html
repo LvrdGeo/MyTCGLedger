@@ -2223,7 +2223,7 @@ let _pickerCard=null, _pickerEdition='unlimited', _pickerWatchKind='single', sea
 const SOURCES=[
   {k:'tcg', label:'TCGPlayer', color:'#f5c842'},
   {k:'ebay',label:'eBay Sold', color:'#4f8ef7'},
-  {k:'ppt', label:'PriceCharting',color:'#0fd4b0'},
+  {k:'ppt', label:'PokePrice',color:'#0fd4b0'},
   {k:'psa', label:'PSA Market',color:'#b06ef5'},
 ];
 const SEALED_TYPES={
@@ -2512,6 +2512,37 @@ function fetchLivePricesFromData(d, card, result) {
   return result;
 }
 
+// PokePrice = PokemonPriceTracker aggregated market price → fills the "ppt" slot.
+// Prefers the resolved pokemontcg.io id (their tcgPlayerId); else searches by name and
+// matches on card number. 6s timeout, returns a positive number or null, never throws —
+// so a CORS block or rate-limit just leaves the PokePrice row empty.
+async function fetchPokePrice(card, tcgKey){
+  if (!keys.ppt) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const base = 'https://www.pokemonpricetracker.com/api/v2/cards';
+    const url = tcgKey
+      ? `${base}?tcgPlayerId=${encodeURIComponent(tcgKey)}`
+      : `${base}?search=${encodeURIComponent(card.name||'')}&limit=5`;
+    const r = await fetch(url, { headers:{ 'Authorization':'Bearer '+keys.ppt }, signal:ctrl.signal });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const rows = Array.isArray(j.data) ? j.data : [];
+    if (!rows.length) return null;
+    let row = rows[0];
+    if (!tcgKey && card.num) {
+      const want = String(card.num).split('/')[0].trim();
+      row = rows.find(x => String(x.cardNumber||'').trim() === want) || rows[0];
+    }
+    const mk = row && row.prices ? row.prices.market : null;
+    return (typeof mk === 'number' && mk > 0) ? parseFloat(mk.toFixed(2)) : null;
+  } catch(e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function fetchLivePrices(card){
   let result={tcg:null,ebay:null,ppt:null,psa:null,img:card.img||null,trend7:null,trend30:null,ebay_sales:[]};
   const tcgKey=card.cardId||await lookupCardId(card);
@@ -2643,6 +2674,13 @@ async function fetchLivePrices(card){
         if (ps) result.psa = ps;
       }
     } catch(e) {}
+  }
+
+  // PokePrice (PokemonPriceTracker) aggregated market price → ppt slot. fetchPokePrice is
+  // fully isolated (timeout + try/catch → null), so this never blocks or breaks the load.
+  if (keys.ppt) {
+    const pp = await fetchPokePrice(card, tcgKey);
+    if (pp > 0) result.ppt = pp;
   }
 
   return result;
@@ -6053,9 +6091,10 @@ async function openDetail(id){
         </div>
       </div>
       ${trendBlock}
-      ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price':s.k==='ebay'?'Recent sold':s.k==='ppt'?'PriceCharting':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
+      ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?'Recent sold listings':s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
+      ${(()=>{const bars=SOURCES.map(s=>({label:s.label,color:s.color,v:p[s.k]})).filter(b=>b.v>0);if(bars.length<2)return '';const mx=Math.max(...bars.map(b=>b.v));return `<div style="margin-bottom:18px;"><div class="sec-title-sm">Price Bar Chart</div><div style="display:flex;flex-direction:column;gap:9px;">${bars.map(b=>`<div style="display:flex;align-items:center;gap:10px;"><div style="width:96px;flex-shrink:0;font-size:12px;color:var(--muted2);display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${b.color};display:inline-block;flex-shrink:0;"></span>${b.label}</div><div style="flex:1;height:9px;background:var(--bg3);border-radius:5px;overflow:hidden;"><div style="width:${Math.max(4,Math.round(b.v/mx*100))}%;height:100%;background:${b.color};border-radius:5px;"></div></div><div style="width:74px;flex-shrink:0;text-align:right;font-family:var(--mono);font-size:12px;font-weight:700;color:${b.v===best?'var(--green)':(b.v===worst&&worst>best?'var(--red)':'var(--text)')};">${fmtPrice(b.v)}</div></div>`).join('')}</div></div>`;})()}
       <div style="margin-bottom:18px;"><div class="sec-title-sm">eBay Recent Sold</div><div>${eSales}</div></div>
       ${card.type!=='graded'&&best>0?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">PSA Grading Value Estimates<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">Estimated from market price</span></div><div class="psa-row">${[6,7,8,9,10].map(g=>{const mult={6:.45,7:.7,8:1.25,9:1.75,10:3.0}[g];const est=(best*mult).toFixed(0);const hl=g===10?' hl':'';const realPsa10=g===10&&p.psa&&p.psa>0;const dispPrice=realPsa10?p.psa.toFixed(0):est;const isReal=realPsa10;return `<div class="psa-cell${hl}"><div class="psa-gnum">${g}</div><div class="psa-gprice" style="${g===10?'color:var(--gold);font-weight:700;':''}">${dispPrice>0?'$'+dispPrice:'—'}</div>${isReal?'<div style="font-size:8px;color:var(--green);font-family:var(--mono);margin-top:1px;">live</div>':''}</div>`;}).join('')}</div><div style="font-size:10px;color:var(--muted);margin-top:6px;">PSA 10 typically 3× market · <a href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name+' '+(card.num||'')+' PSA 10')}&LH_Sold=1" target="_blank" style="color:var(--blue);">Check real PSA 10 sold →</a></div></div>`:''}
       ${card.source?`<div style="display:inline-flex;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" style=\"width:10px;height:10px;\"><path d=\"M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/></svg>Purchased from ${card.source}</div>`:''}
