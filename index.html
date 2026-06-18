@@ -4393,6 +4393,7 @@ let _dlPickerCard = null;
 let _dlPickerTimer = null;
 let _dlCardsOut = []; // cards going out
 let _dlCardsIn  = []; // cards coming in (trade mode)
+let _dlApplyPortfolio = true; // whether saving this deal updates the collection
 
 function setDealType(type, el) {
   _dealType = type;
@@ -4403,6 +4404,7 @@ function setDealType(type, el) {
   document.getElementById('dl-trade-section').style.display    = type === 'trade'    ? '' : 'none';
   dlRenderCards();
   dlUpdatePnL();
+  renderPortfolioToggle();
 }
 
 function openDealLogModal(id) {
@@ -4443,6 +4445,9 @@ function openDealLogModal(id) {
 
   dlRenderCards();
   dlUpdatePnL();
+  // Default: apply to portfolio for NEW deals; for edits of already-applied deals, default OFF to avoid double-applying.
+  _dlApplyPortfolio = d ? !d.portfolioApplied : true;
+  renderPortfolioToggle();
   openModal('deal-log-modal');
 }
 
@@ -4564,6 +4569,40 @@ function dlUpdatePnL() {
   document.getElementById('dl-pnl-roi').style.color    = col;
 }
 
+
+function dlTogglePortfolio() {
+  _dlApplyPortfolio = !_dlApplyPortfolio;
+  renderPortfolioToggle();
+}
+
+function renderPortfolioToggle() {
+  const check = document.getElementById('dl-portfolio-check');
+  const label = document.getElementById('dl-portfolio-label');
+  const sub   = document.getElementById('dl-portfolio-sub');
+  const box   = document.getElementById('dl-portfolio-toggle');
+  if (!check || !label) return;
+  // Update label per deal type
+  const map = {
+    purchase: { l:'Add to my collection',        s:'Cards you buy will be added to your portfolio with this cost basis' },
+    sale:     { l:'Remove from my collection',   s:'Cards you sell will be removed and logged to Sold History' },
+    trade:    { l:'Update my collection',        s:'Cards you give are removed; cards you get are added (cost basis carries over)' }
+  };
+  const m = map[_dealType] || map.purchase;
+  label.textContent = m.l;
+  sub.textContent = m.s;
+  // Visual on/off
+  if (_dlApplyPortfolio) {
+    check.style.background = 'var(--gold)';
+    check.style.border = 'none';
+    check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#08090e" stroke-width="3" style="width:14px;height:14px;"><polyline points="20 6 9 17 4 12"/></svg>';
+    if (box) { box.style.background='rgba(245,200,66,0.06)'; box.style.borderColor='rgba(245,200,66,0.2)'; }
+  } else {
+    check.style.background = 'transparent';
+    check.style.border = '2px solid var(--muted2)';
+    check.innerHTML = '';
+    if (box) { box.style.background='transparent'; box.style.borderColor='var(--border)'; }
+  }
+}
 
 function dlAddCash(side) {
   const displayId = side === 'out' ? 'dl-cash-out-display' : 'dl-cash-in-display';
@@ -4895,15 +4934,143 @@ function saveDealLog(dealStatus) {
     buyPlatform:  document.getElementById('dl-platform').value,
     cardName:   _dealType === 'purchase' ? _dlCardsIn.map(c=>c.name).join(', ') : _dlCardsOut.map(c=>c.name).join(', '),
     img:        _dealType === 'purchase' ? (_dlCardsIn[0]?.img||'') : (_dlCardsOut[0]?.img||''),
+    portfolioApplied: (_editingDealLogId ? (deals.find(x=>x.id===_editingDealLogId)||{}).portfolioApplied : false) || false,
   };
+
+  // ── PORTFOLIO CONNECTION ──
+  // Apply to collection only when: closed deal + toggle ON + not already applied.
+  let portfolioMsg = '';
+  if (_status === 'closed' && _dlApplyPortfolio && !data.portfolioApplied) {
+    portfolioMsg = applyDealToPortfolio(data);
+    data.portfolioApplied = true;
+  }
 
   if (_editingDealLogId) deals = deals.map(x=>x.id===_editingDealLogId?data:x);
   else deals.push(data);
   save();
   closeModal('deal-log-modal');
-  renderDeals();
+  renderAll();
   if (_status === 'open') toast('Saved as pending — find it under Open Deals','gold');
-  else toast(_editingDealLogId?'Deal updated':'Deal saved ✓','green');
+  else toast((portfolioMsg || (_editingDealLogId?'Deal updated':'Deal saved ✓')),'green');
+}
+
+// Apply a closed deal's effect to the user's collection.
+// Returns a short status message for the toast.
+function applyDealToPortfolio(deal) {
+  try {
+    if (deal.dealType === 'purchase') {
+      // Add each bought card to the collection with cost basis split from cash paid.
+      const cards = deal.cardsIn || [];
+      if (!cards.length) return '';
+      const totalMkt = cards.reduce((s,c)=>s+(c.value||0),0);
+      const cashPaid = parseFloat(deal.cashPaid||deal.buyPrice||0);
+      cards.forEach(card => {
+        // Cost basis = proportional share of cash paid (by market value); fallback even split.
+        let basis;
+        if (totalMkt > 0) basis = cashPaid * ((card.value||0)/totalMkt);
+        else basis = cashPaid / cards.length;
+        collection.push(makeCardFromDeal(card, basis));
+      });
+      return `Added ${cards.length} card${cards.length>1?'s':''} to your collection`;
+    }
+
+    if (deal.dealType === 'sale') {
+      // Remove each sold card; log to Sold History with realized P&L.
+      const cards = deal.cardsOut || [];
+      const proceeds = parseFloat(deal.sellPrice||0);
+      const totalMkt = cards.reduce((s,c)=>s+(c.value||0),0);
+      let removed = 0;
+      cards.forEach(card => {
+        // Find the owned card (for true cost basis) before removing.
+        let owned = null;
+        if (card.ownedId) owned = collection.find(x=>x.id===card.ownedId);
+        if (!owned) {
+          const nm=(card.name||'').toLowerCase(), num=(card.num||'').toLowerCase();
+          owned = collection.find(c => (c.name||'').toLowerCase()===nm && (c.num||'').toLowerCase()===num);
+        }
+        const paidBasis = owned ? (parseFloat(owned.paid)||0) : 0;
+        // Sale proceeds for this card = proportional share of total proceeds by market value.
+        let cardProceeds;
+        if (totalMkt > 0) cardProceeds = proceeds * ((card.value||0)/totalMkt);
+        else cardProceeds = cards.length ? proceeds/cards.length : 0;
+        // Log to Sold History
+        soldHistory.unshift({
+          id: 'sold'+Date.now()+Math.random().toString(36).slice(2,5),
+          cardId: card.id||'', name: card.name, set: card.set||'', num: card.num||'',
+          img: card.img||'', type: card.grade?'graded':'standard', grade: card.grade||'', cond: card.cond||'',
+          paid: paidBasis, soldPrice: +cardProceeds.toFixed(2), marketPrice: card.value||0,
+          realizedPnL: +(cardProceeds - paidBasis).toFixed(2), qty: 1,
+          soldDate: new Date().toISOString(),
+          origCard: owned ? {...owned} : null
+        });
+        if (removeCardFromCollection(card)) removed++;
+      });
+      localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
+      return removed ? `Sold ${removed} card${removed>1?'s':''} · logged to Sold History` : '';
+    }
+
+    if (deal.dealType === 'trade') {
+      // Remove given cards; carry their total paid cost onto the received cards.
+      const given = deal.cardsOut || [];
+      const got   = deal.cardsIn  || [];
+      // Sum the cost basis of the cards we're giving up (their original paid price if owned).
+      let carriedCost = 0;
+      given.forEach(card => {
+        const owned = card.ownedId ? collection.find(x=>x.id===card.ownedId) : null;
+        carriedCost += owned ? (parseFloat(owned.paid)||0) : (card.value||0);
+        removeCardFromCollection(card);
+      });
+      // Add cash we paid into the carried cost (cash out is part of our investment).
+      carriedCost += parseFloat(deal.cashOut||0);
+      // Distribute carried cost across received cards, proportional to market value.
+      const totalGotMkt = got.reduce((s,c)=>s+(c.value||0),0);
+      got.forEach(card => {
+        let basis;
+        if (totalGotMkt > 0) basis = carriedCost * ((card.value||0)/totalGotMkt);
+        else basis = got.length ? carriedCost/got.length : 0;
+        collection.push(makeCardFromDeal(card, basis));
+      });
+      return `Updated your collection (−${given.length} / +${got.length})`;
+    }
+  } catch(e) {
+    console.error('[Deal] portfolio apply failed', e);
+    return '';
+  }
+  return '';
+}
+
+// Build a collection card record from a deal card entry + cost basis.
+function makeCardFromDeal(card, basis) {
+  return {
+    id: 'c'+Date.now()+Math.random().toString(36).slice(2,6),
+    name: card.name || 'Unknown',
+    set: card.set || '',
+    num: card.num || '',
+    cardId: card.id || '',
+    type: card.grade ? 'graded' : 'standard',
+    cond: card.cond || 'NM',
+    grade: card.grade || '',
+    cert: '',
+    qty: 1,
+    paid: +(basis||0).toFixed(2),
+    source: 'deal',
+    notes: '',
+    img: card.img || '',
+    rarity: '',
+    added: new Date().toISOString()
+  };
+}
+
+// Remove a card from the collection. Prefer exact ownedId match; fall back to name+num.
+function removeCardFromCollection(card) {
+  let idx = -1;
+  if (card.ownedId) idx = collection.findIndex(c => c.id === card.ownedId);
+  if (idx < 0) {
+    const nm = (card.name||'').toLowerCase(), num = (card.num||'').toLowerCase();
+    idx = collection.findIndex(c => (c.name||'').toLowerCase()===nm && (c.num||'').toLowerCase()===num);
+  }
+  if (idx >= 0) { collection.splice(idx, 1); return true; }
+  return false;
 }
 
 function deleteDeal(id) {
@@ -7883,6 +8050,17 @@ init();
           <div style="width:1px;height:30px;background:var(--border);"></div>
           <div style="text-align:center;"><div id="dl-pnl-profit-label" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">Profit</div><div id="dl-pnl-profit" style="font-family:var(--mono);font-size:16px;font-weight:700;">—</div></div>
           <div style="text-align:center;"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">ROI</div><div id="dl-pnl-roi" style="font-family:var(--mono);font-size:13px;font-weight:700;">—</div></div>
+        </div>
+      </div>
+
+      <!-- Portfolio connection toggle -->
+      <div id="dl-portfolio-toggle" style="background:rgba(245,200,66,0.06);border:1px solid rgba(245,200,66,0.2);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="dlTogglePortfolio()">
+        <div id="dl-portfolio-check" style="width:22px;height:22px;border-radius:6px;background:var(--gold);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#08090e" stroke-width="3" style="width:14px;height:14px;"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div style="flex:1;">
+          <div id="dl-portfolio-label" style="font-size:13px;font-weight:600;">Add to my collection</div>
+          <div id="dl-portfolio-sub" style="font-size:11px;color:var(--muted);margin-top:1px;">Cards you buy will appear in your portfolio with this cost basis</div>
         </div>
       </div>
 
