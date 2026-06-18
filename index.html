@@ -2143,6 +2143,33 @@ function renderAccountSection() {
 
 let prefs      = JSON.parse(localStorage.getItem('pkv2_prefs') || '{"cond":"NM"}');
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
+
+// ── PER-CARD PRICE HISTORY ENGINE ──
+// Records each card's price over time → real trend charts. {cacheKey: [{d,v}]}
+let cardHistory = JSON.parse(localStorage.getItem('pkv2_cardhist') || '{}');
+function recordCardPrice(card, price) {
+  if (!price || price <= 0 || !isFinite(price)) return;
+  const key = cacheKey(card);
+  const today = new Date().toISOString().slice(0,10);
+  if (!cardHistory[key]) cardHistory[key] = [];
+  const s = cardHistory[key];
+  const last = s[s.length-1];
+  if (last && last.d === today) last.v = +price.toFixed(2);
+  else s.push({ d: today, v: +price.toFixed(2) });
+  if (s.length > 400) s.splice(0, s.length - 400);
+}
+function saveCardHistory() {
+  try { localStorage.setItem('pkv2_cardhist', JSON.stringify(cardHistory)); } catch(e){}
+}
+function getCardHistory(card, days) {
+  const key = cacheKey(card);
+  let s = cardHistory[key] || [];
+  if (days && s.length) {
+    const cut = new Date(Date.now()-days*86400000).toISOString().slice(0,10);
+    s = s.filter(p => p.d >= cut);
+  }
+  return s;
+}
 let allSets=[], typeFilter='', sealedFilter='', sealedSetFilter='', sortBy='added';
 let editingId=null, editingSealedId=null, editingDealId=null, tlRange='all';
 let _pickerCard=null, _pickerEdition='unlimited', _pickerWatchKind='single', searchTimer=null;
@@ -2288,10 +2315,29 @@ function updateStatusDots(){document.getElementById('s1').className='dot '+(keys
 // ═══ PRICING ═══
 async function getPrices(card){
   const ck=cacheKey(card);const hit=pcache[ck];
-  if(hit&&(Date.now()-hit.ts)<CACHE_TTL) return hit.data;
+  if(hit&&(Date.now()-hit.ts)<CACHE_TTL){
+    recordCardPrice(card, bestPrice(hit.data, card.type==='graded')); saveCardHistory();
+    return hit.data;
+  }
   const data=await fetchLivePrices(card);
-  pcache[ck]={ts:Date.now(),data};localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));return data;
+  pcache[ck]={ts:Date.now(),data};localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
+  recordCardPrice(card, bestPrice(data, card.type==='graded')); saveCardHistory();
+  return data;
 }
+
+// Shared in-flight choke point — both loaders use this so the same card key
+// is never fetched twice at once (fixes mobile slowdown on Refresh).
+async function getPricesShared(card){
+  const ck = cacheKey(card);
+  const hit = pcache[ck];
+  if (hit && (Date.now()-hit.ts) < CACHE_TTL) return hit.data;
+  if (_priceInflightShared[ck]) return await _priceInflightShared[ck];
+  const req = getPrices(card);
+  _priceInflightShared[ck] = req;
+  try { return await req; }
+  finally { delete _priceInflightShared[ck]; }
+}
+const _priceInflightShared = {};
 async function fetchEbaySold(card) {
   try {
     let endpoint;
@@ -4077,17 +4123,8 @@ async function loadPricesForCards(cards){
     const batch = toFetch.slice(i, i+BATCH);
     await Promise.all(batch.map(async ({ card, ck }) => {
       try{
-        let data;
-        if(pcache[ck]){
-          data = pcache[ck].data;            // cached by a concurrent caller meanwhile
-        } else if(_priceInflight[ck]){
-          data = await _priceInflight[ck];     // same card already in flight — share it
-        } else {
-          const req = getPrices(card);         // exact existing pricing call (writes pcache itself)
-          _priceInflight[ck] = req;
-          try { data = await req; pcache[ck] = { ts: Date.now(), data }; }
-          finally { delete _priceInflight[ck]; }
-        }
+        const data = await getPricesShared(card);   // shared in-flight dedupe (both loaders)
+        if(data) pcache[ck] = { ts: Date.now(), data };
         if(!data) return;
         // Patch this card's visible price strip in place.
         const ps = document.getElementById('ps-'+card.id);
@@ -4166,7 +4203,7 @@ async function loadAllPrices(){
     await Promise.all(batch.map(async card => {
       const ck = cacheKey(card);
       try{
-        const data = await getPrices(card);
+        const data = await getPricesShared(card);
         pcache[ck] = {ts:Date.now(),data};
         cacheDirty = true;
         // Update just this card's price strip (cheap, targeted)
@@ -4361,8 +4398,10 @@ function setDealType(type, el) {
   _dealType = type;
   document.querySelectorAll('#deal-log-modal .type-pill').forEach(b => b.classList.remove('active'));
   if (el) el.classList.add('active');
-  document.getElementById('dl-sale-section').style.display  = type === 'sale'  ? '' : 'none';
-  document.getElementById('dl-trade-section').style.display = type === 'trade' ? '' : 'none';
+  document.getElementById('dl-purchase-section').style.display = type === 'purchase' ? '' : 'none';
+  document.getElementById('dl-sale-section').style.display     = type === 'sale'     ? '' : 'none';
+  document.getElementById('dl-trade-section').style.display    = type === 'trade'    ? '' : 'none';
+  dlRenderCards();
   dlUpdatePnL();
 }
 
@@ -4374,7 +4413,7 @@ function openDealLogModal(id) {
   // Reset
   _dlCardsOut = d ? (d.cardsOut || []) : [];
   _dlCardsIn  = d ? (d.cardsIn  || []) : [];
-  _dealType   = d ? (d.dealType || 'sale') : 'sale';
+  _dealType   = d ? (d.dealType || 'purchase') : 'purchase';
 
   document.getElementById('dl-date').value     = d ? d.date||'' : new Date().toISOString().slice(0,10);
   document.getElementById('dl-platform').value = d ? d.platform||'' : '';
@@ -4382,6 +4421,7 @@ function openDealLogModal(id) {
   document.getElementById('dl-cash-in').value  = d ? d.cashIn||'' : '';
   document.getElementById('dl-cash-out').value = d ? d.cashOut||'' : '';
   document.getElementById('dl-cash-in-trade').value = d ? d.cashInTrade||'' : '';
+  const cashPaidEl = document.getElementById('dl-cash-paid'); if (cashPaidEl) cashPaidEl.value = d ? (d.cashPaid||'') : '';
   // Show/hide cash rows based on whether values exist
   const showCashOut = d && parseFloat(d.cashOut||0) > 0;
   const showCashIn  = d && parseFloat(d.cashInTrade||0) > 0;
@@ -4397,8 +4437,9 @@ function openDealLogModal(id) {
   // Set type
   document.querySelectorAll('#deal-log-modal .type-pill').forEach(b => b.classList.remove('active'));
   document.getElementById('dl-type-' + _dealType)?.classList.add('active');
-  document.getElementById('dl-sale-section').style.display  = _dealType === 'sale'  ? '' : 'none';
-  document.getElementById('dl-trade-section').style.display = _dealType === 'trade' ? '' : 'none';
+  document.getElementById('dl-purchase-section').style.display = _dealType === 'purchase' ? '' : 'none';
+  document.getElementById('dl-sale-section').style.display     = _dealType === 'sale'     ? '' : 'none';
+  document.getElementById('dl-trade-section').style.display    = _dealType === 'trade'    ? '' : 'none';
 
   dlRenderCards();
   dlUpdatePnL();
@@ -4406,6 +4447,23 @@ function openDealLogModal(id) {
 }
 
 function dlRenderCards() {
+  // Purchase mode — cards being bought (stored in _dlCardsIn)
+  const buyEl  = document.getElementById('dl-buy-list');
+  const buyEmp = document.getElementById('dl-buy-empty');
+  if (buyEl) {
+    if (!_dlCardsIn.length) { buyEl.innerHTML=''; if(buyEmp) buyEmp.style.display=''; }
+    else {
+      if(buyEmp) buyEmp.style.display='none';
+      buyEl.innerHTML = _dlCardsIn.map((c,i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+          ${c.img?`<img src="${c.img}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;">⟡</div>'}
+          <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div><div style="font-size:9px;color:var(--muted);font-family:var(--mono);">${c.set||''}</div></div>
+          <input type="number" step="0.01" min="0" value="${c.value||''}" placeholder="$0.00" style="width:80px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:12px;padding:4px 6px;text-align:right;" oninput="_dlCardsIn[${i}].value=parseFloat(this.value)||0;dlUpdatePnL()">
+          <button onclick="_dlCardsIn.splice(${i},1);dlRenderCards();dlUpdatePnL();" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;">✕</button>
+        </div>`).join('');
+    }
+  }
+
   // Sale mode — cards out
   const outEl  = document.getElementById('dl-out-list');
   const outEmp = document.getElementById('dl-out-empty');
@@ -4455,14 +4513,43 @@ function dlRenderCards() {
 }
 
 function dlUpdatePnL() {
+  const lblOut = document.getElementById('dl-pnl-out-label');
+  const lblIn  = document.getElementById('dl-pnl-in-label');
+  const lblPro = document.getElementById('dl-pnl-profit-label');
+
+  if (_dealType === 'purchase') {
+    // Purchase: you pay cash (out), you get cards worth market value (in).
+    const cashPaid  = parseFloat(document.getElementById('dl-cash-paid')?.value||0);
+    const mktValue  = _dlCardsIn.reduce((s,c)=>s+(c.value||0),0);
+    const instant   = mktValue - cashPaid; // instant equity vs what you paid
+    const col       = instant >= 0 ? 'var(--green)' : 'var(--red)';
+    if (lblOut) lblOut.textContent = 'You Pay';
+    if (lblIn)  lblIn.textContent  = 'Market Value';
+    if (lblPro) lblPro.textContent = 'Instant Equity';
+    document.getElementById('dl-pnl-out').textContent    = '$'+cashPaid.toFixed(2);
+    document.getElementById('dl-pnl-in').textContent     = '$'+mktValue.toFixed(2);
+    document.getElementById('dl-pnl-profit').textContent = (cashPaid>0||mktValue>0)?(instant>=0?'+':'')+'$'+Math.abs(instant).toFixed(2):'—';
+    document.getElementById('dl-pnl-profit').style.color = col;
+    const roi = cashPaid>0 ? ((instant/cashPaid)*100).toFixed(1) : null;
+    document.getElementById('dl-pnl-roi').textContent = roi ? (roi>=0?'+':'')+roi+'%' : '—';
+    document.getElementById('dl-pnl-roi').style.color = col;
+    return;
+  }
+
   let outTotal = _dlCardsOut.reduce((s,c)=>s+(c.value||0),0);
   let inTotal  = _dlCardsIn.reduce((s,c)=>s+(c.value||0),0);
 
   if (_dealType === 'sale') {
     inTotal = parseFloat(document.getElementById('dl-cash-in')?.value||0);
+    if (lblOut) lblOut.textContent = 'Cost (Cards)';
+    if (lblIn)  lblIn.textContent  = 'You Receive';
+    if (lblPro) lblPro.textContent = 'Profit';
   } else {
     outTotal += parseFloat(document.getElementById('dl-cash-out')?.value||0);
     inTotal  += parseFloat(document.getElementById('dl-cash-in-trade')?.value||0);
+    if (lblOut) lblOut.textContent = 'You Give';
+    if (lblIn)  lblIn.textContent  = 'You Get';
+    if (lblPro) lblPro.textContent = 'Net Gain';
   }
 
   const profit = inTotal - outTotal;
@@ -4513,7 +4600,10 @@ function dlUpdateCashDisplay(side) {
 function dlAddCard(side) {
   _dlPickerSide = side;
   _dlPickerCard = null;
-  document.getElementById('dl-picker-title').textContent = side === 'out' ? 'Add Card — You Give' : 'Add Card — You Receive';
+  let pickerTitle;
+  if (side === 'out') pickerTitle = _dealType === 'sale' ? 'Add Card — You Are Selling' : 'Add Card — You Give';
+  else pickerTitle = _dealType === 'purchase' ? 'Add Card — You Are Buying' : 'Add Card — You Receive';
+  document.getElementById('dl-picker-title').textContent = pickerTitle;
   document.getElementById('dl-picker-search').value = '';
   document.getElementById('dl-picker-results').innerHTML = '';
   document.getElementById('dl-picker-name').textContent = 'Select a card';
@@ -4536,8 +4626,31 @@ function onDLPickerSearch(val) {
     res.innerHTML = `<div style="padding:8px;font-size:11px;color:var(--muted);">${isNum ? 'Searching by card number…' : 'Keep typing… ('+(minLen - val.trim().length)+' more characters)'}</div>`;
     return;
   }
+  // Show matching cards from YOUR collection first (most relevant when selling/trading away)
+  let collectionHtml = '';
+  if (_dlPickerSide === 'out') {
+    const q = val.trim().toLowerCase();
+    const owned = collection.filter(c => (c.name||'').toLowerCase().includes(q) || (c.num||'').toLowerCase()===q);
+    if (owned.length) {
+      window._dlpCards = window._dlpCards || {};
+      collectionHtml = '<div style="padding:6px 10px 4px;font-family:var(--mono);font-size:9px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;">Your Collection</div>' +
+        owned.slice(0,8).map(c => {
+          const key='dlpc_'+c.id;
+          const p = pcache[cacheKey(c)]?.data;
+          const mkt = p ? bestPrice(p, c.type==='graded') : null;
+          window._dlpCards[key] = {id:c.cardId||c.id, name:c.name, set:c.set||'', num:c.num||'', img:c.img||'', mkt, ownedId:c.id, grade:c.grade||'', cond:c.cond||'', paid:c.paid||0};
+          return `<div onclick="dlPickerSelectCard(window._dlpCards['${key}'])" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:6px;background:rgba(245,200,66,0.04);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='rgba(245,200,66,0.04)'">
+            ${c.img?`<img src="${c.img}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
+            <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;">${c.name} ${c.grade?`<span style="color:var(--gold);font-size:9px;">${c.grade}</span>`:''}</div><div style="font-size:10px;color:var(--muted);">${c.set||''} · #${c.num||'?'} · owned</div></div>
+            ${mkt?`<div style="font-family:var(--mono);font-size:11px;color:var(--green);flex-shrink:0;">$${mkt.toFixed(2)}</div>`:''}
+          </div>`;
+        }).join('') +
+        '<div style="padding:6px 10px 4px;font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-top:1px solid var(--border);margin-top:4px;">All Cards</div>';
+    }
+  }
+
   _dlPickerTimer = setTimeout(async ()=>{
-    res.innerHTML = '<div style="padding:8px;font-size:11px;color:var(--muted);">Searching…</div>';
+    res.innerHTML = collectionHtml + '<div style="padding:8px;font-size:11px;color:var(--muted);">Searching…</div>';
     try {
       const hdrs = keys.ptcg ? {'X-Api-Key':keys.ptcg} : {};
       const dexNum = getPokemonDexNumber(val);
@@ -4552,8 +4665,8 @@ function onDLPickerSearch(val) {
       }
       const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=20`,{headers:hdrs});
       const j = await r.json();
-      if (!j.data?.length){res.innerHTML='<div style="padding:8px;font-size:11px;color:var(--muted);">No results.</div>';return;}
-      res.innerHTML = j.data.map(card=>{
+      if (!j.data?.length){res.innerHTML=collectionHtml||'<div style="padding:8px;font-size:11px;color:var(--muted);">No results.</div>';return;}
+      res.innerHTML = collectionHtml + j.data.map(card=>{
         const tier=card.tcgplayer?.prices?Object.values(card.tcgplayer.prices)[0]:null;
         const mkt=tier?.market||null;
         const key='dlp_'+card.id.replace(/[^a-z0-9]/gi,'_');
@@ -4565,7 +4678,7 @@ function onDLPickerSearch(val) {
           ${mkt?`<div style="font-family:var(--mono);font-size:11px;color:var(--green);flex-shrink:0;">$${mkt.toFixed(2)}</div>`:''}
         </div>`;
       }).join('');
-    } catch(e){res.innerHTML='<div style="padding:8px;font-size:11px;color:var(--muted);">Search failed.</div>';}
+    } catch(e){res.innerHTML=collectionHtml+'<div style="padding:8px;font-size:11px;color:var(--muted);">Search failed.</div>';}
   },400);
 }
 
@@ -4725,10 +4838,15 @@ function saveDealLog(dealStatus) {
   const cashInVal  = parseFloat(document.getElementById('dl-cash-in-trade')?.value||0);
   const cashInSale = parseFloat(document.getElementById('dl-cash-in')?.value||0);
 
+  const cashPaid = parseFloat(document.getElementById('dl-cash-paid')?.value||0);
+
   // Pending drafts can be incomplete — only require SOMETHING so we don't save a blank.
   if (_status === 'open') {
-    const anything = _dlCardsOut.length || _dlCardsIn.length || cashOutVal || cashInVal || cashInSale;
+    const anything = _dlCardsOut.length || _dlCardsIn.length || cashOutVal || cashInVal || cashInSale || cashPaid;
     if (!anything) { toast('Add at least one card or amount to save a pending deal', 'red'); return; }
+  } else if (_dealType === 'purchase') {
+    if (!_dlCardsIn.length) { toast('Add at least one card you are buying', 'red'); return; }
+    if (!cashPaid) { toast('Enter the cash you paid', 'red'); return; }
   } else if (_dealType === 'sale') {
     if (!_dlCardsOut.length) { toast('Add at least one card you are selling', 'red'); return; }
     if (!cashInSale) { toast('Enter the cash you received', 'red'); return; }
@@ -4740,10 +4858,14 @@ function saveDealLog(dealStatus) {
     if (!hasIn)  { toast('Add what you are receiving — cards or cash', 'red'); return; }
   }
 
-  const outTotal = _dlCardsOut.reduce((s,c)=>s+(c.value||0),0) + (_dealType==='trade' ? cashOutVal : 0);
+  const outTotal = _dealType === 'purchase'
+    ? cashPaid
+    : _dlCardsOut.reduce((s,c)=>s+(c.value||0),0) + (_dealType==='trade' ? cashOutVal : 0);
   let   inTotal  = _dealType === 'sale'
     ? cashInSale
-    : _dlCardsIn.reduce((s,c)=>s+(c.value||0),0) + cashInVal;
+    : _dealType === 'purchase'
+      ? _dlCardsIn.reduce((s,c)=>s+(c.value||0),0)
+      : _dlCardsIn.reduce((s,c)=>s+(c.value||0),0) + cashInVal;
 
   const data = {
     id:         _editingDealLogId || 'dl'+Date.now(),
@@ -4765,11 +4887,14 @@ function saveDealLog(dealStatus) {
     added:      _editingDealLogId ? (deals.find(x=>x.id===_editingDealLogId)||{}).added : new Date().toISOString(),
     // Legacy compat fields for renderDeals stats
     buyPrice:   outTotal,
-    sellPrice:  _dealType === 'sale' ? parseFloat(document.getElementById('dl-cash-in').value||0) : _dlCardsIn.reduce((s,c)=>s+(c.value||0),0) + parseFloat(document.getElementById('dl-cash-in-trade').value||0),
+    sellPrice:  _dealType === 'sale' ? parseFloat(document.getElementById('dl-cash-in').value||0)
+              : _dealType === 'purchase' ? 0
+              : _dlCardsIn.reduce((s,c)=>s+(c.value||0),0) + parseFloat(document.getElementById('dl-cash-in-trade').value||0),
+    cashPaid:   _dealType === 'purchase' ? cashPaid : '',
     sellPlatform: document.getElementById('dl-platform').value,
     buyPlatform:  document.getElementById('dl-platform').value,
-    cardName:   _dlCardsOut.map(c=>c.name).join(', '),
-    img:        _dlCardsOut[0]?.img||'',
+    cardName:   _dealType === 'purchase' ? _dlCardsIn.map(c=>c.name).join(', ') : _dlCardsOut.map(c=>c.name).join(', '),
+    img:        _dealType === 'purchase' ? (_dlCardsIn[0]?.img||'') : (_dlCardsOut[0]?.img||''),
   };
 
   if (_editingDealLogId) deals = deals.map(x=>x.id===_editingDealLogId?data:x);
@@ -5069,9 +5194,10 @@ function renderDeals() {
       const profit = parseFloat(d.sellPrice||0) - parseFloat(d.buyPrice||0);
       const roi = parseFloat(d.buyPrice) > 0 ? ((profit/parseFloat(d.buyPrice))*100).toFixed(1) : null;
       const col = profit >= 0 ? 'var(--green)' : 'var(--red)';
-      const isTradeType = d.dealType === 'trade';
-      const badge = isTradeType
+      const badge = d.dealType === 'trade'
         ? '<span style="font-family:var(--mono);font-size:9px;background:rgba(59,139,255,.15);color:#3b8bff;border:1px solid rgba(59,139,255,.3);padding:1px 6px;border-radius:10px;margin-right:4px;">🔄 Trade</span>'
+        : d.dealType === 'purchase'
+        ? '<span style="font-family:var(--mono);font-size:9px;background:rgba(245,200,66,.12);color:var(--gold);border:1px solid rgba(245,200,66,.3);padding:1px 6px;border-radius:10px;margin-right:4px;">💳 Purchase</span>'
         : '<span style="font-family:var(--mono);font-size:9px;background:rgba(46,204,128,.1);color:var(--green);border:1px solid rgba(46,204,128,.25);padding:1px 6px;border-radius:10px;margin-right:4px;">💰 Sale</span>';
       const names = (d.cardsOut||[]).map(c=>c.name).filter(Boolean).join(', ') || d.cardName || '—';
 
@@ -5092,8 +5218,10 @@ function renderDeals() {
         </div>`;
       };
 
-      const outStrip  = buildCardStrip(d.cardsOut, 'You Gave', 'var(--red)');
-      const inStrip   = buildCardStrip(d.cardsIn,  'You Got',  'var(--green)');
+      const outStrip  = d.dealType === 'purchase' ? '' : buildCardStrip(d.cardsOut, d.dealType==='sale'?'You Sold':'You Gave', 'var(--red)');
+      const inStrip   = d.dealType === 'purchase'
+        ? buildCardStrip(d.cardsIn, 'You Bought', 'var(--gold)')
+        : buildCardStrip(d.cardsIn,  'You Got',  'var(--green)');
       const cashOut   = parseFloat(d.cashOut||0);
       const cashInT   = parseFloat(d.cashInTrade||0);
 
@@ -5593,7 +5721,7 @@ async function openDetail(id){
   const roi=card.paid?(best-parseFloat(card.paid)):null;
   const roiPct=card.paid&&best>0?((best/parseFloat(card.paid)-1)*100).toFixed(1):null;
   // Sparkline
-  const pts=buildSparkline(best,p.trend30);const sparkSvg=renderSparklineSVG(pts);
+  const histSeries=getCardHistory(card,30);const trendBlock=buildCardTrendBlock(card,histSeries,best);
   // Build precise search strings including set name + number for each platform
   const nameNum  = [card.name, card.num].filter(Boolean).join(' ');
   const nameSet  = [card.name, card.set].filter(Boolean).join(' ');
@@ -5646,7 +5774,7 @@ async function openDetail(id){
           </div>
         </div>
       </div>
-      <div class="trend-area"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span class="sec-title-sm">30-Day Trend</span><span style="font-family:var(--mono);font-size:11px;color:${p.trend30!=null&&p.trend30>=0?'var(--green)':'var(--red)'};">${p.trend30!=null?fmtTrend(p.trend30)+' 30d':''}</span></div>${sparkSvg}</div>
+      ${trendBlock}
       ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price':s.k==='ebay'?'Recent sold':s.k==='ppt'?'PriceCharting':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
@@ -5664,6 +5792,7 @@ async function openDetail(id){
     </div>
     <div class="modal-ft" style="gap:8px;">${card._transient?(card._wishId?`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');moveWishToVault('${card._wishId}')">+ Add to Portfolio</button>`:`<button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')" style="margin-right:auto;">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');dealPickCard(window._detailTransient)">＄ Log a Deal</button>`):`<button class="btn btn-danger btn-sm" onclick="closeModal('detail-modal');delCard('${card.id}');" style="margin-right:auto;">🗑 Delete</button><button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')">Close</button><button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');editCard('${card.id}')">✏️ Edit</button>`}</div>`;
   openModal('detail-modal');
+  setTimeout(()=>renderCardTrendChart(card, histSeries), 80);
   if(card.type==='graded') setTimeout(()=>loadActiveListings(card), 100);
 async function loadActiveListings(card) {
   const panel = document.getElementById('al-panel-' + card.id);
@@ -5740,7 +5869,40 @@ async function loadActiveListings(card) {
 }
 
 }
-function buildSparkline(current,trend30){const pts=[];const change=trend30?trend30/100:(Math.random()*.3-.1);const start=current/(1+change);for(let i=0;i<30;i++){const t=i/29;const noise=(Math.random()-.5)*.08*current;pts.push(start+(current-start)*t+noise);}pts[29]=current;return pts;}
+function buildCardTrendBlock(card, series, currentPrice){
+  const enough = series && series.length >= 2;
+  let changeLabel = '';
+  if (enough) {
+    const first = series[0].v, last = series[series.length-1].v;
+    if (first > 0) {
+      const pct = ((last-first)/first*100);
+      const col = pct>=0 ? 'var(--green)' : 'var(--red)';
+      changeLabel = `<span style="font-family:var(--mono);font-size:11px;color:${col};">${pct>=0?'▲ +':'▼ '}${Math.abs(pct).toFixed(1)}% · ${series.length}d</span>`;
+    }
+  }
+  const body = enough
+    ? `<canvas id="card-trend-canvas" height="120" style="width:100%;display:block;"></canvas><div id="card-trend-label" style="display:flex;justify-content:space-between;margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--muted);"></div>`
+    : `<div style="padding:24px 12px;text-align:center;"><div style="font-size:13px;color:var(--muted);margin-bottom:4px;">📈 Building price history…</div><div style="font-size:11px;color:var(--muted2);">Recorded ${series?series.length:0} day${(series&&series.length===1)?'':'s'} so far. Your real trend chart appears once there are 2+ days of data.</div></div>`;
+  return `<div class="trend-area"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span class="sec-title-sm">Price History</span>${changeLabel}</div>${body}</div>`;
+}
+let _cardTrendChart = null;
+function renderCardTrendChart(card, series){
+  if (!series || series.length < 2) return;
+  const canvas = document.getElementById('card-trend-canvas');
+  if (!canvas) return;
+  if (typeof Chart === 'undefined') {
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
+    s.onload=()=>setTimeout(()=>renderCardTrendChart(card,series),60);
+    document.head.appendChild(s); return;
+  }
+  if (_cardTrendChart){ _cardTrendChart.destroy(); _cardTrendChart=null; }
+  const labels=series.map(p=>p.d), values=series.map(p=>p.v);
+  const up=values[values.length-1]>=values[0], col=up?'#2ecc80':'#ff4d6d';
+  _cardTrendChart=new Chart(canvas,{type:'line',data:{labels,datasets:[{data:values,borderColor:col,borderWidth:2.5,pointRadius:0,pointHoverRadius:7,pointHoverBackgroundColor:'#fff',pointHoverBorderColor:col,pointHoverBorderWidth:2.5,tension:0.4,fill:true,backgroundColor:ctx=>{const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);g.addColorStop(0,up?'rgba(46,204,128,0.22)':'rgba(255,77,109,0.22)');g.addColorStop(0.65,up?'rgba(46,204,128,0.05)':'rgba(255,77,109,0.05)');g.addColorStop(1,'rgba(0,0,0,0)');return g;}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,backgroundColor:'rgba(10,10,18,0.97)',borderColor:col,borderWidth:1,titleColor:'rgba(255,255,255,0.45)',bodyColor:'#fff',bodyFont:{family:'monospace',size:14,weight:'700'},titleFont:{family:'monospace',size:10},padding:12,displayColors:false,cornerRadius:10,callbacks:{label:ctx=>'$'+ctx.parsed.y.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}}},scales:{x:{grid:{color:'rgba(255,255,255,0.03)',drawBorder:false},ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:9},maxTicksLimit:5,maxRotation:0},border:{display:false}},y:{grid:{color:'rgba(255,255,255,0.03)',drawBorder:false},ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:9},maxTicksLimit:4,callback:v=>v>=1000?'$'+(v/1000).toFixed(1)+'k':'$'+Math.round(v)},border:{display:false}}},interaction:{mode:'index',intersect:false}}});
+  const lbl=document.getElementById('card-trend-label');
+  if(lbl){const mn=Math.min(...values),mx=Math.max(...values);lbl.innerHTML=`<span>Low $${mn.toFixed(2)}</span><span>${series.length} days tracked</span><span>High $${mx.toFixed(2)}</span>`;}
+}
 function renderSparklineSVG(pts){const w=520,h=54,pad=4;const min=Math.min(...pts),max=Math.max(...pts);const range=max-min||1;const toX=i=>(i/(pts.length-1))*(w-pad*2)+pad;const toY=v=>h-pad-(v-min)/range*(h-pad*2);const d='M'+pts.map((v,i)=>toX(i)+','+toY(v)).join('L');const fill=d+`L${toX(pts.length-1)},${h}L${pad},${h}Z`;const up=pts[pts.length-1]>=pts[0];const col=up?'#2ecc80':'#ff4d6d';return `<div class="sparkline-wrap"><svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${col}" stop-opacity=".25"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><path d="${fill}" fill="url(#sg)"/><path d="${d}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${toX(pts.length-1)}" cy="${toY(pts[pts.length-1])}" r="3" fill="${col}"/></svg></div>`;}
 function simulateEbaySales(anchor){const sales=[];const now=new Date();for(let i=0;i<5;i++){const d=new Date(now);d.setDate(d.getDate()-Math.floor(Math.random()*14));const conds=['NM','LP','NM','LP','MP'];const mult={NM:1,LP:.8,MP:.6}[conds[i]];sales.push({date:d.toLocaleDateString('en-US',{month:'short',day:'numeric'}),cond:conds[i],price:+(anchor*mult*(1+(Math.random()-.5)*.12)).toFixed(2)});}return sales.sort((a,b)=>new Date(b.date)-new Date(a.date));}
 
@@ -6977,7 +7139,7 @@ let _currentPage='dashboard';
 // The mobile FAB is context-aware: it adds a card everywhere, but creates a new
 // deal while in the Deal Center (with a distinct look so the action is obvious).
 function fabAction(){
-  if(_currentPage==='deals') openDealModal();
+  if(_currentPage==='deals') openDealLogModal();
   else openAddModal();
 }
 function updateFab(name){
@@ -7503,7 +7665,7 @@ function save(){
 }
 function exportData(){
   const history = JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');
-  const data = {collection,wishlist,sealed,deals,history,cashPosition:AppState.cashPosition,exported:new Date().toISOString(),version:'5.0'};
+  const data = {collection,wishlist,sealed,deals,history,cardHistory,cashPosition:AppState.cashPosition,exported:new Date().toISOString(),version:'5.0'};
   const b=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mytcgledger-v6-export.json';a.click();
   toast('Export includes full portfolio history','green');
@@ -7601,7 +7763,8 @@ init();
 
     <!-- Deal type toggle -->
     <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;">
-      <button class="type-pill active" id="dl-type-sale" onclick="setDealType('sale',this)">💰 Sale</button>
+      <button class="type-pill active" id="dl-type-purchase" onclick="setDealType('purchase',this)">💳 Purchase</button>
+      <button class="type-pill" id="dl-type-sale" onclick="setDealType('sale',this)">💰 Sale</button>
       <button class="type-pill" id="dl-type-trade" onclick="setDealType('trade',this)">🔄 Trade</button>
     </div>
 
@@ -7623,6 +7786,22 @@ init();
             <option>Local Card Show</option><option>LGS</option>
             <option>Private Sale</option><option>Other</option>
           </select>
+        </div>
+      </div>
+
+      <!-- PURCHASE MODE -->
+      <div id="dl-purchase-section">
+        <div style="background:var(--bg3);border-radius:var(--r);padding:14px;margin-bottom:10px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;">Cards You Are Buying</div>
+            <button class="btn btn-ghost btn-xs" onclick="dlAddCard('in')">+ Add Card</button>
+          </div>
+          <div id="dl-buy-list"></div>
+          <div id="dl-buy-empty" style="font-size:11px;color:var(--muted);text-align:center;padding:8px;">No cards added yet</div>
+        </div>
+        <div style="background:var(--bg3);border-radius:var(--r);padding:14px;margin-bottom:10px;">
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Cash You Are Paying</div>
+          <input class="input" id="dl-cash-paid" type="number" step="0.01" min="0" placeholder="Total cash paid ($)" oninput="dlUpdatePnL()">
         </div>
       </div>
 
@@ -7698,11 +7877,11 @@ init();
       <div id="dl-pnl-bar" style="background:var(--bg3);border-radius:var(--r);padding:12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;">Deal P&L</div>
         <div style="display:flex;gap:16px;align-items:center;">
-          <div style="text-align:center;"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">OUT</div><div id="dl-pnl-out" style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--red);">$0.00</div></div>
+          <div style="text-align:center;"><div id="dl-pnl-out-label" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">OUT</div><div id="dl-pnl-out" style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--red);">$0.00</div></div>
           <div style="font-size:18px;color:var(--muted);">→</div>
-          <div style="text-align:center;"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">IN</div><div id="dl-pnl-in" style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green);">$0.00</div></div>
+          <div style="text-align:center;"><div id="dl-pnl-in-label" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">IN</div><div id="dl-pnl-in" style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green);">$0.00</div></div>
           <div style="width:1px;height:30px;background:var(--border);"></div>
-          <div style="text-align:center;"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">Profit</div><div id="dl-pnl-profit" style="font-family:var(--mono);font-size:16px;font-weight:700;">—</div></div>
+          <div style="text-align:center;"><div id="dl-pnl-profit-label" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">Profit</div><div id="dl-pnl-profit" style="font-family:var(--mono);font-size:16px;font-weight:700;">—</div></div>
           <div style="text-align:center;"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:2px;">ROI</div><div id="dl-pnl-roi" style="font-family:var(--mono);font-size:13px;font-weight:700;">—</div></div>
         </div>
       </div>
