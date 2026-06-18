@@ -2761,11 +2761,17 @@ function analyzeGraded(p) {
   // Headline = the average of the eBay "{grade} Sold" page (p.psa carries that mean).
   if (p.psa > 0) {
     const n = p.ebayN || 0;
-    const conf = n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low';
-    return { price: +p.psa.toFixed(2), confidence: conf,
-             reason: n ? `Average of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
-                       : 'eBay sold comp for this grade',
-             sources };
+    let conf = n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low';
+    let reason = n ? `Average of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
+                   : 'eBay sold comp for this grade';
+    // SANITY CHECK: a graded slab should be worth at least as much as the raw card.
+    // If the graded comp is well BELOW the raw TCGPlayer price, the comps are likely
+    // polluted (cheap junk matched). Flag it so the user knows to verify.
+    if (p.tcg > 0 && p.psa < p.tcg * 0.9) {
+      conf = 'low';
+      reason = `⚠️ Graded comp ($${p.psa.toFixed(0)}) is below the raw price ($${p.tcg.toFixed(0)}) — likely a bad match. Verify on eBay sold.`;
+    }
+    return { price: +p.psa.toFixed(2), confidence: conf, reason, sources };
   }
   if (p.ebay > 0) return { price: +p.ebay.toFixed(2), confidence: 'low', reason: 'eBay sold', sources };
   return { price: +p.ppt.toFixed(2), confidence: 'low', reason: 'Estimate only', sources };
