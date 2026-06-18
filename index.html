@@ -1644,7 +1644,10 @@ const AppState = {
 
       collection.forEach(card => {
         const p    = pcache[cacheKey(card)]?.data;
-        const bp   = p ? bestPrice(p, card.type==='graded') : 0;
+        // Freshest: live pcache. Fallback: synced lastMarketValue (so a just-synced
+        // device shows the same value before its own fetch finishes).
+        const bp   = p ? bestPrice(p, card.type==='graded')
+                       : (card.lastMarketValue > 0 ? card.lastMarketValue : 0);
         const paid = parseFloat(card.paid || 0);
 
         if (bp > 0) {
@@ -1981,9 +1984,36 @@ function mergeAppData(localD, cloudD) {
     const extras = [...(a||[]), ...(b||[])].filter(x => !x || x.id==null);
     return [...map.values(), ...extras];
   };
+  // Collection merge is price-aware: keep the local record, but adopt whichever
+  // side has the NEWER lastPricedAt for the price fallback fields. This makes two
+  // devices converge to the same (freshest) market value.
+  const mergeCollection = (a=[], b=[]) => {
+    const cloudMap = new Map();
+    (b||[]).forEach(x => { if(x && x.id!=null) cloudMap.set(x.id, x); });
+    const seen = new Set();
+    const out = [];
+    (a||[]).forEach(local => {
+      if (!local || local.id==null) { out.push(local); return; }
+      seen.add(local.id);
+      const cloud = cloudMap.get(local.id);
+      if (cloud && (cloud.lastPricedAt||0) > (local.lastPricedAt||0)) {
+        // Cloud priced this card more recently → adopt its price fields only.
+        out.push({ ...local,
+          lastMarketValue: cloud.lastMarketValue,
+          lastPricedAt: cloud.lastPricedAt,
+          lastPriceConfidence: cloud.lastPriceConfidence,
+          lastPriceSource: cloud.lastPriceSource });
+      } else {
+        out.push(local);
+      }
+    });
+    // Cards that exist only in the cloud (added on another device)
+    (b||[]).forEach(cloud => { if(cloud && cloud.id!=null && !seen.has(cloud.id)) out.push(cloud); });
+    return out;
+  };
   const mergedCardHist = Object.assign({}, cloudD.cardHistory||{}, localD.cardHistory||{});
   return {
-    collection:  mergeById(localD.collection,  cloudD.collection),
+    collection:  mergeCollection(localD.collection,  cloudD.collection),
     wishlist:    mergeById(localD.wishlist,    cloudD.wishlist),
     sealed:      mergeById(localD.sealed,      cloudD.sealed),
     deals:       mergeById(localD.deals,       cloudD.deals),
@@ -2313,15 +2343,38 @@ function saveKey(k){keys[k]=document.getElementById('k-'+k).value.trim();localSt
 function updateStatusDots(){document.getElementById('s1').className='dot '+(keys.ptcg?'dot-on':'dot-warn');document.getElementById('s2').className='dot '+(keys.ppt?'dot-on':'dot-off');document.getElementById('s3').className='dot '+(keys.psa?'dot-on':'dot-off');}
 
 // ═══ PRICING ═══
+// Stamp a device-independent "last known value" onto the OWNED collection record
+// so a freshly-synced device shows the same value before its own fetch completes.
+// Never touches pcache or the pricing engine; just persists a fallback number.
+let _stampSaveTimer = null;
+function stampLastValue(card, data){
+  try {
+    if (!card || !card.id) return;
+    const rec = collection.find(c => c.id === card.id);   // only owned cards
+    if (!rec) return;                                      // ignore wishlist/pseudo cards
+    const a = analyzePrice(data, card.type==='graded');
+    if (!a || !(a.price > 0)) return;
+    rec.lastMarketValue     = +a.price.toFixed(2);
+    rec.lastPricedAt        = Date.now();
+    rec.lastPriceConfidence = a.confidence || 'medium';
+    rec.lastPriceSource     = a.sources ? Object.keys(a.sources).join('+') : '';
+    // Debounced save so a batch refresh doesn't spam sync.
+    clearTimeout(_stampSaveTimer);
+    _stampSaveTimer = setTimeout(() => { save(); }, 1200);
+  } catch(e) { /* non-critical */ }
+}
+
 async function getPrices(card){
   const ck=cacheKey(card);const hit=pcache[ck];
   if(hit&&(Date.now()-hit.ts)<CACHE_TTL){
     recordCardPrice(card, bestPrice(hit.data, card.type==='graded')); saveCardHistory();
+    stampLastValue(card, hit.data);
     return hit.data;
   }
   const data=await fetchLivePrices(card);
   pcache[ck]={ts:Date.now(),data};localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
   recordCardPrice(card, bestPrice(data, card.type==='graded')); saveCardHistory();
+  stampLastValue(card, data);
   return data;
 }
 
@@ -2767,7 +2820,7 @@ function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);re
 function fmtPrice(v){return(v==null||!isFinite(v)||v<=0)?'—':'$'+v.toFixed(2);}
 function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
 function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
-function getBestCached(card){const p=pcache[cacheKey(card)]?.data;return p?bestPrice(p,card.type==='graded'):0;}
+function getBestCached(card){const p=pcache[cacheKey(card)]?.data;return p?bestPrice(p,card.type==='graded'):(card.lastMarketValue>0?card.lastMarketValue:0);}
 
 // ═══ PORTFOLIO ═══
 
