@@ -1645,9 +1645,11 @@ const AppState = {
       collection.forEach(card => {
         const p    = pcache[cacheKey(card)]?.data;
         // Freshest: live pcache. Fallback: synced lastMarketValue (so a just-synced
-        // device shows the same value before its own fetch finishes).
+        // device shows a real value before its own fetch finishes).
+        // Only trust the fallback if it was priced within the last 14 days.
+        const stampFresh = card.lastPricedAt && (Date.now() - card.lastPricedAt) < 14*86400000;
         const bp   = p ? bestPrice(p, card.type==='graded')
-                       : (card.lastMarketValue > 0 ? card.lastMarketValue : 0);
+                       : (stampFresh && card.lastMarketValue > 0 ? card.lastMarketValue : 0);
         const paid = parseFloat(card.paid || 0);
 
         if (bp > 0) {
@@ -1748,11 +1750,25 @@ const AppState = {
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
-const SCHEMA_VERSION = '6.7';
+const SCHEMA_VERSION = '6.8';
 if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
-  console.log('[Schema] Version mismatch — clearing price cache');
+  console.log('[Schema] Version mismatch — clearing price cache + stale graded values');
   localStorage.removeItem('pkv2_pcache');
   localStorage.setItem('pkv2_pcache', '{}');
+  // Clear stale lastMarketValue on ALL cards so bad synced prices (e.g. the old
+  // junk-comp graded prices) get re-fetched fresh instead of stuck as a fallback.
+  try {
+    const _c = JSON.parse(localStorage.getItem('pkv2_col') || '[]');
+    let _cleared = 0;
+    _c.forEach(card => {
+      if (card.lastMarketValue != null) {
+        delete card.lastMarketValue; delete card.lastPricedAt;
+        delete card.lastPriceConfidence; delete card.lastPriceSource;
+        _cleared++;
+      }
+    });
+    if (_cleared) { localStorage.setItem('pkv2_col', JSON.stringify(_c)); console.log('[Schema] Cleared '+_cleared+' stale price stamps'); }
+  } catch(e) {}
   localStorage.setItem('pkv2_schema', SCHEMA_VERSION);
 }
 
