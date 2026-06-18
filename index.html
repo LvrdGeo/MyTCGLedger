@@ -1796,7 +1796,10 @@ function safeRender(fn, name) {
   try { fn(); }
   catch(err) { console.error('[Render] ' + name + ' failed:', err); }
 }
-let keys       = JSON.parse(localStorage.getItem('pkv2_keys')  || '{"ptcg":"","ppt":"","psa":""}');
+let keys       = JSON.parse(localStorage.getItem('pkv2_keys')  || '{"ptcg":"83d3cfd0-e05d-4fc0-9a4d-efef50602756","ppt":"","psa":""}');
+// Backfill the pokemontcg.io key if it was never set or was cleared, so TCGPlayer
+// lookups stay authenticated (unauthenticated requests are rate-limited → missing TCG prices).
+if (!keys.ptcg) { keys.ptcg = '83d3cfd0-e05d-4fc0-9a4d-efef50602756'; localStorage.setItem('pkv2_keys', JSON.stringify(keys)); }
 
 // ══════════════════════════════════════════════════════════
 // STAGE 1 — AUTHENTICATION (Supabase)
