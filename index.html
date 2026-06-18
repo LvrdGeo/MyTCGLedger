@@ -2535,8 +2535,12 @@ async function fetchPokePrice(card, tcgKey){
       const want = String(card.num).split('/')[0].trim();
       row = rows.find(x => String(x.cardNumber||'').trim() === want) || rows[0];
     }
-    const mk = row && row.prices ? row.prices.market : null;
-    return (typeof mk === 'number' && mk > 0) ? parseFloat(mk.toFixed(2)) : null;
+    const mk  = row && row.prices ? row.prices.market : null;
+    const p10 = row && row.ebay && row.ebay.psa10 ? row.ebay.psa10.avg : null;
+    return {
+      market: (typeof mk  === 'number' && mk  > 0) ? parseFloat(mk.toFixed(2))  : null,
+      psa10:  (typeof p10 === 'number' && p10 > 0) ? parseFloat(p10.toFixed(2)) : null,
+    };
   } catch(e) {
     return null;
   } finally {
@@ -2676,11 +2680,22 @@ async function fetchLivePrices(card){
     } catch(e) {}
   }
 
-  // PokePrice (PokemonPriceTracker) aggregated market price → ppt slot. fetchPokePrice is
-  // fully isolated (timeout + try/catch → null), so this never blocks or breaks the load.
+  // PokePrice (PokemonPriceTracker): fills the "ppt" comparison slot with the aggregated
+  // market price, and supplies a real eBay PSA-10 sold average. fetchPokePrice is fully
+  // isolated (timeout + try/catch → null), so this never blocks or breaks the load.
   if (keys.ppt) {
     const pp = await fetchPokePrice(card, tcgKey);
-    if (pp > 0) result.ppt = pp;
+    if (pp) {
+      if (pp.market > 0) result.ppt = pp.market;
+      // PSA 10 value: only when we have no card-specific comp yet, and only for a PSA-10
+      // slab or a raw card (psa10.avg is PSA-10 specific — never apply it to a PSA 9, etc.).
+      if (!result.psa && pp.psa10 > 0) {
+        const gradeNum = parseFloat(((card.grade||'').match(/[\d.]+/)||['0'])[0]);
+        const isGradedPsa10 = card.type==='graded' && gradeNum === 10;
+        const isRaw = card.type !== 'graded';
+        if (isGradedPsa10 || isRaw) result.psa = pp.psa10;
+      }
+    }
   }
 
   return result;
