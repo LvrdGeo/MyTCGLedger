@@ -2667,6 +2667,31 @@ async function fetchLivePrices(card){
   // A missing TCGPlayer price falls back to the eBay sold average inside analyzeRaw.
   if (!result.psa && card.type==='graded') result.psa = result.ebay; // real eBay comp avg only; null stays null
 
+  // ── Graded fallback: when /graded returns no comps, use the broad eBay keyword sold
+  //    search (the SAME query the "Sold →" link opens) and average those sales — this is
+  //    why the link is full of sales but the card was blank (/graded was too strict). ──
+  if (card.type === 'graded' && !result.psa && card.name) {
+    try {
+      const gq = [card.name, card.num, card.set, card.grade].filter(Boolean).join(' ');
+      const gr = await fetch(`${EBAY_WORKER}/sold?q=${encodeURIComponent(gq)}&limit=12`);
+      if (gr.ok) {
+        const gd = await gr.json();
+        const gprices = (gd.items||[]).map(i=>i.price).filter(v=>typeof v==='number'&&v>0);
+        let gpp = (gd.stats && (gd.stats.median||gd.stats.avg)) || (gprices.length ? gprices.reduce((a,b)=>a+b,0)/gprices.length : null);
+        if (gpp > 0) {
+          result.psa = parseFloat(gpp.toFixed(2));
+          if (gprices.length) result.ebayN = gprices.length;
+          if ((gd.items||[]).length && (!result.ebay_sales || !result.ebay_sales.length)) {
+            result.ebay_sales = gd.items.slice(0,6).map(i=>({
+              date: i.soldDate ? new Date(i.soldDate).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : 'Recent',
+              price: i.price, condition: card.grade || 'Graded', url: i.url,
+            }));
+          }
+        }
+      }
+    } catch(e) {}
+  }
+
   // ── For raw singles, fetch real PSA 10 comps from eBay worker ──
   if (card.type !== 'graded' && !result.psa && card.name) {
     try {
