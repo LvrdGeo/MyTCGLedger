@@ -2666,11 +2666,12 @@ async function fetchLivePrices(card){
   // PriceCharting (ppt) stays null until a real fetch is wired up (Stage 2).
   // A missing TCGPlayer price falls back to the eBay sold average inside analyzeRaw.
   if (!result.psa && card.type==='graded') result.psa = result.ebay; // real eBay comp avg only; null stays null
+  if (card.type==='graded' || card.grade) result._diag = '/graded:' + (result.psa!=null ? '$'+Math.round(result.psa) : 'empty');
 
   // ── Graded fallback: when /graded returns no comps, use the broad eBay keyword sold
   //    search (the SAME query the "Sold →" link opens) and average those sales — this is
   //    why the link is full of sales but the card was blank (/graded was too strict). ──
-  if (card.type === 'graded' && !result.psa && card.name) {
+  if ((card.type === 'graded' || card.grade) && !result.psa && card.name) {
     try {
       const gq = [card.name, card.num, card.set, card.grade].filter(Boolean).join(' ');
       const gr = await fetch(`${EBAY_WORKER}/sold?q=${encodeURIComponent(gq)}&limit=12`);
@@ -2678,6 +2679,7 @@ async function fetchLivePrices(card){
         const gd = await gr.json();
         const gprices = (gd.items||[]).map(i=>i.price).filter(v=>typeof v==='number'&&v>0);
         let gpp = (gd.stats && (gd.stats.median||gd.stats.avg)) || (gprices.length ? gprices.reduce((a,b)=>a+b,0)/gprices.length : null);
+        result._diag = (result._diag||'') + ' /sold:'+gprices.length+'i'+(gpp>0?'=$'+Math.round(gpp):'');
         if (gpp > 0) {
           result.psa = parseFloat(gpp.toFixed(2));
           if (gprices.length) result.ebayN = gprices.length;
@@ -2688,8 +2690,8 @@ async function fetchLivePrices(card){
             }));
           }
         }
-      }
-    } catch(e) {}
+      } else { result._diag = (result._diag||'') + ' /sold:http'+gr.status; }
+    } catch(e) { result._diag = (result._diag||'') + ' /sold:err'; }
   }
 
   // ── For raw singles, fetch real PSA 10 comps from eBay worker ──
@@ -2710,6 +2712,7 @@ async function fetchLivePrices(card){
   // isolated (timeout + try/catch → null), so this never blocks or breaks the load.
   if (keys.ppt) {
     const pp = await fetchPokePrice(card, tcgKey);
+    result._diag = (result._diag||'') + ' pp:' + (pp ? ('mkt'+(pp.market!=null?pp.market:'-')+'/psa10:'+(pp.psa10!=null?pp.psa10:'-')) : 'null/blocked');
     if (pp) {
       if (pp.market > 0) result.ppt = pp.market;
       // PSA 10 value: only when we have no card-specific comp yet, and only for a PSA-10
@@ -6069,6 +6072,12 @@ function closeCostEditor() {
   renderAnalyzer();
 }
 
+async function repriceCard(id){
+  const card = collection.find(c=>c.id===id);
+  if(card){ try{ delete pcache[cacheKey(card)]; localStorage.setItem('pkv2_pcache', JSON.stringify(pcache)); }catch(e){} }
+  closeModal('detail-modal');
+  setTimeout(()=>openDetail(id), 60);
+}
 async function openDetail(id){
   const card=collection.find(c=>c.id===id)||((window._detailTransient&&window._detailTransient.id===id)?window._detailTransient:null);if(!card)return;
   const p=pcache[cacheKey(card)]?.data||await getPrices(card);
@@ -6131,6 +6140,7 @@ async function openDetail(id){
         </div>
       </div>
       ${trendBlock}
+      ${(card.grade||card.type==='graded')?`<div style="font-size:10px;font-family:var(--mono);color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.7;">diag · type:${card.type||'?'} · grade:${card.grade||'none'} · id:${card.cardId||'unresolved'}<br>tcg:${p.tcg!=null?'$'+p.tcg:'—'} · ebay:${p.ebay!=null?'$'+p.ebay:'—'} · ppt:${p.ppt!=null?'$'+p.ppt:'—'} · psa:${p.psa!=null?'$'+p.psa:'—'} · comps:${p.ebayN||0}<br>fetch · ${p._diag||'(cached — tap re-fetch)'}<a onclick="repriceCard('${card.id}')" style="color:var(--blue);cursor:pointer;margin-left:8px;text-decoration:underline;">↻ re-fetch</a></div>`:''}
       ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?'Recent sold listings':s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
@@ -8044,7 +8054,7 @@ function importData(e){
   };
   r.readAsText(f);
 }
-function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache'].forEach(k=>localStorage.removeItem(k));init();toast('All data cleared','red');}
+function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};if(typeof soldHistory!=='undefined')soldHistory=[];if(typeof cardHistory!=='undefined')cardHistory={};if(typeof _cashPosition!=='undefined')_cashPosition=0;['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_sold','pkv2_ph2','pkv2_wh','pkv2_vh','pkv2_cardhist','pkv2_cash'].forEach(k=>localStorage.removeItem(k));init();toast('All data cleared','red');}
 function refreshPrices(){
   pcache = {};
   localStorage.removeItem('pkv2_pcache');
