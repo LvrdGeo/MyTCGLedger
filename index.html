@@ -5731,7 +5731,7 @@ function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.ge
 // ═══ CARD CRUD ═══
 function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -8038,6 +8038,67 @@ function renderAll(){
   safeRender(renderAnalyzer,   'renderAnalyzer');
   safeRender(renderDashboard,  'renderDashboard');
 }
+// ══════════════════════════════════════════════════════════
+// STRUCTURED ANALYTICS WRITES (Supabase — Phase 2)
+// ──────────────────────────────────────────────────────────
+// Additive long-term analytics store. localStorage + user_app_state remain the
+// source of truth; these writes are fire-and-forget and must NEVER block the UI
+// or throw. dbWrite() silently no-ops when signed out, offline, or if Supabase
+// is unavailable, so a write failure can never corrupt or interrupt a save.
+// ══════════════════════════════════════════════════════════
+async function dbWrite(fn){
+  try{
+    if(!supa || !currentUser || !navigator.onLine) return null;
+    return await fn(supa, currentUser);
+  }catch(e){
+    console.warn('[db] structured write skipped:', e && e.message);
+    return null;
+  }
+}
+
+// Upsert one holding row — current-state mirror, keyed by (user_id, client_id).
+// market_value comes from the LIVE price cache only (never a stored/synced
+// fallback), matching AppState.update — so a stale value can't pollute the row.
+// If no live price exists yet, market_value is left null (never invented).
+function saveHoldingToDatabase(card){
+  if(!card || !card.id) return;
+  return dbWrite(async (db, user) => {
+    const hit     = pcache[cacheKey(card)];
+    const p       = hit?.data;
+    const bp      = p ? bestPrice(p, card.type==='graded') : null;
+    const hasLive = bp != null && isFinite(bp) && bp > 0;
+    const cb      = parseFloat(card.paid);
+    const row = {
+      user_id:            user.id,
+      client_id:          card.id,
+      name:               card.name || null,
+      card_set:           card.set || null,
+      card_number:        card.num || null,
+      card_id:            card.cardId || null,
+      item_type:          card.type || null,
+      condition:          card.cond || null,
+      edition:            card.edition || null,
+      grade:              card.grade || null,
+      cert:               card.cert || null,
+      rarity:             card.rarity || null,
+      quantity:           parseInt(card.qty, 10) || 1,
+      cost_basis:         (isFinite(cb) && cb >= 0) ? cb : null,
+      acquisition_source: card.source || null,
+      image_url:          card.img || null,
+      notes:              card.notes || null,
+      market_value:       hasLive ? bp : null,
+      price_confidence:   card.lastPriceConfidence || null,
+      price_source:       card.lastPriceSource || null,
+      priced_at:          (hasLive && hit && hit.ts) ? new Date(hit.ts).toISOString()
+                            : (card.lastPricedAt ? new Date(card.lastPricedAt).toISOString() : null),
+      acquired_at:        card.added || null,
+      updated_at:         new Date().toISOString()
+    };
+    const { error } = await db.from('holdings').upsert(row, { onConflict: 'user_id,client_id' });
+    if(error) console.warn('[db] holdings upsert error:', error.message);
+  });
+}
+
 function save(){
   localStorage.setItem('pkv2_col',JSON.stringify(collection));
   localStorage.setItem('pkv2_wish',JSON.stringify(wishlist));
