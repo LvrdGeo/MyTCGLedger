@@ -8054,7 +8054,7 @@ function importData(e){
   };
   r.readAsText(f);
 }
-function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};if(typeof soldHistory!=='undefined')soldHistory=[];if(typeof cardHistory!=='undefined')cardHistory={};if(typeof _cashPosition!=='undefined')_cashPosition=0;['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_sold','pkv2_ph2','pkv2_wh','pkv2_vh','pkv2_cardhist','pkv2_cash'].forEach(k=>localStorage.removeItem(k));init();toast('All data cleared','red');}
+async function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};if(typeof soldHistory!=='undefined')soldHistory=[];if(typeof cardHistory!=='undefined')cardHistory={};if(typeof _cashPosition!=='undefined')_cashPosition=0;['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_sold','pkv2_ph2','pkv2_wh','pkv2_vh','pkv2_cardhist','pkv2_cash'].forEach(k=>localStorage.removeItem(k));try{if(typeof syncPush==='function')await syncPush();}catch(e){}init();toast('All data cleared','red');}
 function refreshPrices(){
   pcache = {};
   localStorage.removeItem('pkv2_pcache');
