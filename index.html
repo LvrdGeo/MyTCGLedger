@@ -1578,6 +1578,13 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
     <div class="confirm-btns"><button class="btn btn-ghost btn-sm" onclick="closeConfirm()">Cancel</button><button class="btn btn-danger btn-sm" id="confirm-ok">Confirm</button></div>
   </div>
 </div>
+<div class="confirm-bg" id="remove-bg">
+  <div class="confirm-box">
+    <div class="confirm-title">Remove this card?</div>
+    <div class="confirm-msg" id="remove-msg"></div>
+    <div class="confirm-btns" style="flex-wrap:wrap;"><button class="btn btn-ghost btn-sm" onclick="closeRemove()">Cancel</button><button class="btn btn-danger btn-sm" onclick="removeNoSale()">🗑 Just remove</button><button class="btn btn-primary btn-sm" onclick="removeAsSold()">💰 I sold it</button></div>
+  </div>
+</div>
 <div class="toast" id="toast"><div class="dot" id="toast-dot"></div><span id="toast-msg"></span></div>
 <script>
 // ╔═══════════════════════════════════════════════════════════════════════╗
@@ -5788,11 +5795,17 @@ function renderSoldHistory(){
   }).join('');
 }
 
+let _removeCardId = null;
 function delCard(id){
   const card = collection.find(c=>c.id===id);
   if(!card){ return; }
-  openSellModal(card);
+  _removeCardId = id;
+  document.getElementById('remove-msg').textContent = card.name + (card.num?' · #'+card.num:'') + (card.grade?' · '+card.grade:'');
+  document.getElementById('remove-bg').classList.add('open');
 }
+function closeRemove(){ document.getElementById('remove-bg').classList.remove('open'); _removeCardId = null; }
+function removeAsSold(){ const id = _removeCardId; closeRemove(); const card = collection.find(c=>c.id===id); if(card) openSellModal(card); }
+function removeNoSale(){ const id = _removeCardId; const card = collection.find(c=>c.id===id); closeRemove(); if(!card) return; collection = collection.filter(c=>c.id!==id); save(); renderAll(); toast((card.name||'Card') + ' removed (not sold)','red'); }
 
 function openSellModal(card){
   window._sellCardId = card.id;
