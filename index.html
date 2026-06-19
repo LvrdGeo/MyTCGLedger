@@ -1585,7 +1585,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
     <div class="confirm-btns" style="flex-wrap:wrap;"><button class="btn btn-ghost btn-sm" onclick="closeRemove()">Cancel</button><button class="btn btn-danger btn-sm" onclick="removeNoSale()">🗑 Just remove</button><button class="btn btn-primary btn-sm" onclick="removeAsSold()">💰 I sold it</button></div>
   </div>
 </div>
-<div class="toast" id="toast"><div class="dot" id="toast-dot"></div><span id="toast-msg"></span></div>
+<div class="toast" id="toast"><div class="dot" id="toast-dot"></div><span id="toast-msg"></span><button id="toast-undo" style="display:none;pointer-events:auto;background:none;border:none;color:var(--blue);font-weight:600;font-size:12.5px;cursor:pointer;padding:0 0 0 8px;">Undo</button></div>
 <script>
 // ╔═══════════════════════════════════════════════════════════════════════╗
 // ║  MyTCGLedger  ·  SCRIPT 1 of 2  ·  SECTION MAP                          ║
@@ -5805,7 +5805,9 @@ function delCard(id){
 }
 function closeRemove(){ document.getElementById('remove-bg').classList.remove('open'); _removeCardId = null; }
 function removeAsSold(){ const id = _removeCardId; closeRemove(); const card = collection.find(c=>c.id===id); if(card) openSellModal(card); }
-function removeNoSale(){ const id = _removeCardId; const card = collection.find(c=>c.id===id); closeRemove(); if(!card) return; collection = collection.filter(c=>c.id!==id); save(); renderAll(); toast((card.name||'Card') + ' removed (not sold)','red'); }
+let _lastRemoved = null;
+function removeNoSale(){ const id = _removeCardId; const idx = collection.findIndex(c=>c.id===id); const card = idx>=0 ? collection[idx] : null; closeRemove(); if(!card) return; _lastRemoved = { card:{...card}, idx }; collection = collection.filter(c=>c.id!==id); save(); renderAll(); toast((card.name||'Card') + ' removed', 'red', undoRemove); }
+function undoRemove(){ if(!_lastRemoved) return; const {card, idx} = _lastRemoved; _lastRemoved = null; if(collection.some(c=>c.id===card.id)){ renderAll(); return; } if(idx>=0 && idx<=collection.length) collection.splice(idx,0,card); else collection.push(card); save(); renderAll(); toast((card.name||'Card') + ' restored','green'); }
 
 function openSellModal(card){
   window._sellCardId = card.id;
@@ -8117,7 +8119,7 @@ let confirmCb=null;
 function showConfirm(title,msg,cb){document.getElementById('confirm-title').textContent=title;document.getElementById('confirm-msg').textContent=msg;confirmCb=cb;document.getElementById('confirm-bg').classList.add('open');}
 function closeConfirm(){document.getElementById('confirm-bg').classList.remove('open');confirmCb=null;}
 document.getElementById('confirm-ok').onclick=()=>{if(confirmCb)confirmCb();closeConfirm();};
-function toast(msg,color='green'){const t=document.getElementById('toast');document.getElementById('toast-msg').textContent=msg;document.getElementById('toast-dot').style.background=color==='green'?'var(--green)':color==='red'?'var(--red)':'var(--gold)';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800);}
+function toast(msg,color='green',undoCb=null){const t=document.getElementById('toast');document.getElementById('toast-msg').textContent=msg;document.getElementById('toast-dot').style.background=color==='green'?'var(--green)':color==='red'?'var(--red)':'var(--gold)';const ub=document.getElementById('toast-undo');if(ub){if(undoCb){ub.style.display='';ub.onclick=()=>{t.classList.remove('show');try{undoCb();}catch(e){}};}else{ub.style.display='none';ub.onclick=null;}}t.classList.add('show');if(window._toastTimer)clearTimeout(window._toastTimer);window._toastTimer=setTimeout(()=>t.classList.remove('show'),undoCb?6000:2800);}
 
 init();
 </script>
