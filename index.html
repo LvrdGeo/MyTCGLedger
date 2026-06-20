@@ -2524,10 +2524,8 @@ function fetchLivePricesFromData(d, card, result) {
 // matches on card number. 6s timeout, returns a positive number or null, never throws —
 // so a CORS block or rate-limit just leaves the PokePrice row empty.
 async function fetchPokePrice(card, tcgKey){
-  if (!keys.ppt) return { market:null, psa10:null, _reason:'no-key' };
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 6000);
-  const base = 'https://www.pokemonpricetracker.com/api/v2/cards';
+  const timer = setTimeout(() => ctrl.abort(), 8000);
   const parse = (rows) => {
     if (!rows || !rows.length) return null;
     let row = rows[0];
@@ -2540,19 +2538,21 @@ async function fetchPokePrice(card, tcgKey){
     };
   };
   try {
-    const urls = [];
-    if (tcgKey)    urls.push(`${base}?tcgPlayerId=${encodeURIComponent(tcgKey)}`);
-    if (card.name) urls.push(`${base}?search=${encodeURIComponent(card.name)}&limit=8`);
-    for (const url of urls) {
-      const r = await fetch(url, { headers:{ 'Authorization':'Bearer '+keys.ppt }, signal:ctrl.signal });
-      if (!r.ok) return { market:null, psa10:null, _reason:'http'+r.status };
-      const j = await r.json();
-      const got = parse(Array.isArray(j.data) ? j.data : []);
-      if (got && (got.market || got.psa10)) return { market:got.market, psa10:got.psa10, _reason:'ok' };
-    }
+    // Routed through the eBay worker (/pokeprice) so the PokePrice token stays
+    // server-side — this removes the browser CORS block that left ppt empty.
+    // One request: the worker tries tcgPlayerId first, then a name search.
+    const params = [];
+    if (tcgKey)    params.push('tcgPlayerId=' + encodeURIComponent(tcgKey));
+    if (card.name) params.push('search=' + encodeURIComponent(card.name));
+    if (!params.length) return { market:null, psa10:null, _reason:'no-id' };
+    const r = await fetch(`${EBAY_WORKER}/pokeprice?${params.join('&')}&limit=8`, { signal:ctrl.signal });
+    if (!r.ok) return { market:null, psa10:null, _reason:'http'+r.status };
+    const j = await r.json();
+    const got = parse(Array.isArray(j.data) ? j.data : []);
+    if (got && (got.market || got.psa10)) return { market:got.market, psa10:got.psa10, _reason:'ok' };
     return { market:null, psa10:null, _reason:'empty' };
   } catch(e) {
-    return { market:null, psa10:null, _reason:(e && e.name==='AbortError') ? 'timeout' : 'cors/net' };
+    return { market:null, psa10:null, _reason:(e && e.name==='AbortError') ? 'timeout' : 'net' };
   } finally {
     clearTimeout(timer);
   }
