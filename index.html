@@ -4332,6 +4332,7 @@ async function loadPricesForCards(cards){
   renderPortfolio();
   renderDashboard();
   flushPriceAnalytics(priced);
+  calculateMarketSignal();   // signals fire on any-page refresh, not just dashboard/portfolio
 }
 
 // Build a flat list of every card/slab/wishlist item that needs a price
