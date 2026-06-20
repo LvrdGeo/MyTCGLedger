@@ -4415,6 +4415,7 @@ async function loadAllPrices(){
   flushPriceAnalytics(priced);
   _loadingPrices = false;
   captureHistorySnapshot(); // capture after prices are fresh
+  calculateMarketSignal();  // recompute + persist intelligence signals
 }
 
 function setTypeFilter(f,el){typeFilter=f;document.querySelectorAll('#page-singles .filter-chip:not([id^="stab"])').forEach(c=>c.classList.remove('active'));el.classList.add('active');renderSingles();}
@@ -8225,6 +8226,131 @@ function savePortfolioSnapshot(){
     const { error } = await db.from('portfolio_snapshots').upsert(row, { onConflict: 'user_id,snapshot_date' });
     if(error) console.warn('[db] portfolio_snapshots upsert error:', error.message);
   });
+}
+
+// ── Market signals ─────────────────────────────────────────────────────────
+// Computes per-card intelligence from data already in memory: live cache price,
+// cost basis, eBay comps (analyzePrice), and the LOCAL 7-day price history
+// (cardHistory). Returns a categorized structure for the Intelligence page AND
+// persists rows to market_signals (bulk, owned-only, one per card/type/day).
+// Thresholds are the approved defaults — tune them here in one place.
+const SIGNAL_CFG = { overheatedPct: 25, overheatedDays: 7, liquidHigh: 5, liquidMed: 2, rankCap: 50 };
+
+function signalConfidence(priceConf, comps){
+  const c = comps || 0;
+  if(priceConf === 'high' && c >= SIGNAL_CFG.liquidHigh) return 'high';
+  if((priceConf === 'high' || priceConf === 'medium') && c >= SIGNAL_CFG.liquidMed) return 'medium';
+  return 'low';
+}
+
+function calculateMarketSignal(){
+  const today = new Date().toISOString().slice(0,10);
+  const rows = [];
+  let priceSum = 0, priceN = 0;
+
+  // Pass 1 — live metrics for every owned, priced card (live cache only).
+  for(const card of collection){
+    const data = pcache[cacheKey(card)]?.data;
+    if(!data) continue;
+    const isG = card.type==='graded';
+    const bp  = bestPrice(data, isG);
+    if(!(bp > 0)) continue;
+    const a       = analyzePrice(data, isG);
+    const comps   = parseInt(data.ebayN, 10) || 0;
+    const paid    = parseFloat(card.paid);
+    const qty     = card.qty || 1;
+    const hasPaid = isFinite(paid) && paid > 0;
+    const gain    = hasPaid ? (bp - paid) * qty : null;
+    const gainPct = hasPaid ? ((bp - paid) / paid) * 100 : null;
+    // 7-day baseline from LOCAL history, excluding today's point for fairness.
+    const hist = getCardHistory(card, SIGNAL_CFG.overheatedDays).filter(p => p.d !== today && p.v > 0);
+    const avg7 = hist.length ? hist.reduce((s,p)=>s+p.v,0)/hist.length : null;
+    const overheatedPct = (avg7 && avg7 > 0) ? ((bp - avg7) / avg7) * 100 : null;
+    rows.push({ card, bp, comps, paid, qty, hasPaid, gain, gainPct, conf: a.confidence, overheatedPct });
+    priceSum += bp; priceN++;
+  }
+
+  const marketAverage = priceN ? priceSum / priceN : 0;
+  const signals = [];
+  const push = (r, signal_type, signal, score, metric_value, rationale) => signals.push({
+    client_id: r.card.id, card_name: r.card.name || null,
+    signal_type, signal,
+    score:        (score!=null && isFinite(score)) ? +score.toFixed(2) : null,
+    metric_value: (metric_value!=null && isFinite(metric_value)) ? +metric_value.toFixed(2) : null,
+    confidence:   signalConfidence(r.conf, r.comps),
+    rationale
+  });
+
+  // Pass 2 — derive signals.
+  const gainers = [], losers = [], liquids = [], overheateds = [];
+  for(const r of rows){
+    const overheated = r.overheatedPct != null && r.overheatedPct > SIGNAL_CFG.overheatedPct;
+    const inProfit   = r.gain != null && r.gain > 0;
+    const liquid     = r.comps >= SIGNAL_CFG.liquidMed;
+
+    let verdict = 'hold';
+    if(overheated && inProfit)                            verdict = 'sell';
+    else if(overheated && r.comps < SIGNAL_CFG.liquidMed) verdict = 'watch';
+    else if(r.gainPct != null && r.gainPct < 0 && liquid) verdict = 'buy';
+
+    const bits = [];
+    if(r.gainPct != null) bits.push(`${r.gainPct>=0?'+':''}${r.gainPct.toFixed(1)}% vs cost`);
+    bits.push(`${r.comps} comp${r.comps===1?'':'s'}`);
+    if(overheated) bits.push(`+${r.overheatedPct.toFixed(0)}% over ${SIGNAL_CFG.overheatedDays}-day avg`);
+    push(r, 'verdict', verdict, r.gainPct != null ? Math.abs(r.gainPct) : 0, r.gainPct, bits.join(' · '));
+
+    if(r.hasPaid && r.bp < r.paid)
+      push(r, 'below_cost', 'buy', -r.gainPct, r.gainPct, `Below cost: ${r.gainPct.toFixed(1)}%`);
+    if(marketAverage > 0 && r.bp > marketAverage)
+      push(r, 'above_market_average', 'watch', r.bp/marketAverage, r.bp, `$${r.bp.toFixed(2)} vs $${marketAverage.toFixed(2)} collection avg`);
+
+    if(r.gainPct != null && r.gainPct > 0) gainers.push(r);
+    if(r.gainPct != null && r.gainPct < 0) losers.push(r);
+    if(r.comps >= SIGNAL_CFG.liquidHigh)   liquids.push(r);
+    if(overheated)                         overheateds.push(r);
+  }
+
+  // Ranked categories (capped so "biggest/worst/most" stay meaningful).
+  gainers.sort((a,b)=>b.gainPct-a.gainPct).slice(0, SIGNAL_CFG.rankCap)
+    .forEach(r => push(r,'gainer','hold',r.gainPct,r.gainPct,`Up ${r.gainPct.toFixed(1)}% from cost`));
+  losers.sort((a,b)=>a.gainPct-b.gainPct).slice(0, SIGNAL_CFG.rankCap)
+    .forEach(r => push(r,'worst_performer','watch',-r.gainPct,r.gainPct,`Down ${Math.abs(r.gainPct).toFixed(1)}% from cost`));
+  liquids.sort((a,b)=>b.comps-a.comps).slice(0, SIGNAL_CFG.rankCap)
+    .forEach(r => push(r,'liquid','hold',r.comps,r.comps,`${r.comps} sold comps — highly liquid`));
+  overheateds.sort((a,b)=>b.overheatedPct-a.overheatedPct).slice(0, SIGNAL_CFG.rankCap)
+    .forEach(r => push(r,'overheated',(r.gain!=null&&r.gain>0)?'sell':'watch',r.overheatedPct,r.overheatedPct,`+${r.overheatedPct.toFixed(0)}% over ${SIGNAL_CFG.overheatedDays}-day avg`));
+
+  // Persist — fire-and-forget, deduped by client_id+signal_type (a single upsert
+  // can't touch the same conflict key twice). Owned items only (from collection).
+  if(signals.length){
+    dbWrite(async (db, user) => {
+      const seen = new Set(), dbRows = [];
+      for(const s of signals){
+        const k = s.client_id + '|' + s.signal_type;
+        if(seen.has(k)) continue; seen.add(k);
+        dbRows.push({ user_id: user.id, signal_date: today, ...s });
+      }
+      const { error } = await db.from('market_signals').upsert(dbRows, { onConflict: 'user_id,client_id,signal_type,signal_date' });
+      if(error) console.warn('[db] market_signals bulk upsert error:', error.message);
+    });
+  }
+
+  // Categorized structure for the Intelligence page (live; no DB read needed).
+  const ofType = t => signals.filter(s => s.signal_type === t);
+  return {
+    generatedAt: new Date().toISOString(),
+    marketAverage,
+    signals,
+    byType: {
+      best_buy:             ofType('verdict').filter(s=>s.signal==='buy').sort((a,b)=>b.score-a.score),
+      overheated:           ofType('overheated'),
+      liquid:               ofType('liquid'),
+      worst_performer:      ofType('worst_performer'),
+      gainer:               ofType('gainer'),
+      below_cost:           ofType('below_cost').sort((a,b)=>b.score-a.score),
+      above_market_average: ofType('above_market_average').sort((a,b)=>b.score-a.score)
+    }
+  };
 }
 
 // Append-only event log — one immutable INSERT per add / edit / sell event.
