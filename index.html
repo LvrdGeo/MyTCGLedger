@@ -2989,6 +2989,7 @@ function captureHistorySnapshot() {
     }
 
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    savePortfolioSnapshot();   // mirror the daily snapshot to structured analytics
     return history;
   } catch(err) {
     console.error('[History] Snapshot failed:', err);
@@ -4287,6 +4288,7 @@ async function loadPricesForCards(cards){
   if(!toFetch.length) return;
 
   let imagesChanged = false;
+  const priced = [];   // {card, data} pairs → structured analytics flush at end
   const BATCH = 5; // same safe batch size loadAllPrices() uses
 
   for(let i=0; i<toFetch.length; i+=BATCH){
@@ -4295,6 +4297,7 @@ async function loadPricesForCards(cards){
       try{
         const data = await getPricesShared(card);   // shared in-flight dedupe (both loaders)
         if(data) pcache[ck] = { ts: Date.now(), data };
+        if(data) priced.push({ card, data });
         if(!data) return;
         // Patch this card's visible price strip in place.
         const ps = document.getElementById('ps-'+card.id);
@@ -4328,6 +4331,7 @@ async function loadPricesForCards(cards){
   AppState.update();
   renderPortfolio();
   renderDashboard();
+  flushPriceAnalytics(priced);
 }
 
 // Build a flat list of every card/slab/wishlist item that needs a price
@@ -4365,6 +4369,7 @@ async function loadAllPrices(){
   let loaded = 0;
   const total = toFetch.length;
   let cacheDirty = false;
+  const priced = [];   // {card, data} pairs → structured analytics flush at end
 
   // Fetch in PARALLEL batches of 5 for speed (instead of one-at-a-time)
   const BATCH = 5;
@@ -4375,6 +4380,7 @@ async function loadAllPrices(){
       try{
         const data = await getPricesShared(card);
         pcache[ck] = {ts:Date.now(),data};
+        if(data) priced.push({ card, data });
         cacheDirty = true;
         // Update just this card's price strip (cheap, targeted)
         const ps = document.getElementById('ps-'+card.id);
@@ -4406,6 +4412,7 @@ async function loadAllPrices(){
 
   if(loadEl) loadEl.style.display = 'none';
   if(updEl)  updEl.textContent = 'Updated '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  flushPriceAnalytics(priced);
   _loadingPrices = false;
   captureHistorySnapshot(); // capture after prices are fresh
 }
@@ -5209,6 +5216,18 @@ function applyDealToPortfolio(deal) {
           soldDate: new Date().toISOString(),
           origCard: owned ? {...owned} : null
         });
+        saveTransactionToDatabase({
+          client_id:    (owned && owned.id) || card.id || null,
+          txn_type:     'sell',
+          card_name:    card.name || null,
+          quantity:     1,
+          unit_price:   +cardProceeds.toFixed(2),
+          total_amount: +cardProceeds.toFixed(2),
+          cost_basis:   paidBasis,
+          realized_pnl: +(cardProceeds - paidBasis).toFixed(2),
+          source:       deal.platform || null,
+          occurred_at:  new Date().toISOString()
+        });
         if (removeCardFromCollection(card)) removed++;
       });
       localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
@@ -5731,7 +5750,7 @@ function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.ge
 // ═══ CARD CRUD ═══
 function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||'c'+Date.now(),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:editingId?'edit':'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:editingId?null:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -5883,6 +5902,17 @@ function confirmSell(){
     qty: card.qty||1,
     soldDate: new Date().toISOString(),
     origCard: {...card}  // store full card so we can restore it
+  });
+  saveTransactionToDatabase({
+    client_id:    card.id || null,
+    txn_type:     'sell',
+    card_name:    card.name || null,
+    quantity:     card.qty || 1,
+    unit_price:   salePrice,
+    total_amount: salePrice * (card.qty || 1),
+    cost_basis:   paid,
+    realized_pnl: (salePrice - paid) * (card.qty || 1),
+    occurred_at:  new Date().toISOString()
   });
   localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
 
@@ -8056,46 +8086,174 @@ async function dbWrite(fn){
   }
 }
 
-// Upsert one holding row — current-state mirror, keyed by (user_id, client_id).
-// market_value comes from the LIVE price cache only (never a stored/synced
-// fallback), matching AppState.update — so a stale value can't pollute the row.
-// If no live price exists yet, market_value is left null (never invented).
+// Build a complete holdings row from a collection card. market_value comes from
+// the LIVE price cache only (never a stored/synced fallback), matching
+// AppState.update — so a stale value can't pollute the row. With no live price,
+// market_value / price_source / confidence are null (never invented).
+function buildHoldingRow(card, userId){
+  const hit     = pcache[cacheKey(card)];
+  const p       = hit?.data;
+  const isG     = card.type==='graded';
+  const bp      = p ? bestPrice(p, isG) : null;
+  const hasLive = bp != null && isFinite(bp) && bp > 0;
+  const a       = (hasLive && p) ? analyzePrice(p, isG) : null;   // {price, confidence, sources}
+  const src     = (a && a.sources && Object.keys(a.sources).length) ? Object.keys(a.sources).join('+') : null;
+  const cb      = parseFloat(card.paid);
+  return {
+    user_id:            userId,
+    client_id:          card.id,
+    name:               card.name || null,
+    card_set:           card.set || null,
+    card_number:        card.num || null,
+    card_id:            card.cardId || null,
+    item_type:          card.type || null,
+    condition:          card.cond || null,
+    edition:            card.edition || null,
+    grade:              card.grade || null,
+    cert:               card.cert || null,
+    rarity:             card.rarity || null,
+    quantity:           parseInt(card.qty, 10) || 1,
+    cost_basis:         (isFinite(cb) && cb >= 0) ? cb : null,
+    acquisition_source: card.source || null,
+    image_url:          card.img || null,
+    notes:              card.notes || null,
+    market_value:       hasLive ? bp : null,
+    price_confidence:   a ? a.confidence : (card.lastPriceConfidence || null),
+    price_source:       src || card.lastPriceSource || null,
+    priced_at:          (hasLive && hit && hit.ts) ? new Date(hit.ts).toISOString()
+                          : (card.lastPricedAt ? new Date(card.lastPricedAt).toISOString() : null),
+    acquired_at:        card.added || null,
+    updated_at:         new Date().toISOString()
+  };
+}
+
+// Upsert one holding (current-state mirror), keyed by (user_id, client_id).
 function saveHoldingToDatabase(card){
   if(!card || !card.id) return;
   return dbWrite(async (db, user) => {
-    const hit     = pcache[cacheKey(card)];
-    const p       = hit?.data;
-    const bp      = p ? bestPrice(p, card.type==='graded') : null;
-    const hasLive = bp != null && isFinite(bp) && bp > 0;
-    const cb      = parseFloat(card.paid);
-    const row = {
-      user_id:            user.id,
-      client_id:          card.id,
-      name:               card.name || null,
-      card_set:           card.set || null,
-      card_number:        card.num || null,
-      card_id:            card.cardId || null,
-      item_type:          card.type || null,
-      condition:          card.cond || null,
-      edition:            card.edition || null,
-      grade:              card.grade || null,
-      cert:               card.cert || null,
-      rarity:             card.rarity || null,
-      quantity:           parseInt(card.qty, 10) || 1,
-      cost_basis:         (isFinite(cb) && cb >= 0) ? cb : null,
-      acquisition_source: card.source || null,
-      image_url:          card.img || null,
-      notes:              card.notes || null,
-      market_value:       hasLive ? bp : null,
-      price_confidence:   card.lastPriceConfidence || null,
-      price_source:       card.lastPriceSource || null,
-      priced_at:          (hasLive && hit && hit.ts) ? new Date(hit.ts).toISOString()
-                            : (card.lastPricedAt ? new Date(card.lastPricedAt).toISOString() : null),
-      acquired_at:        card.added || null,
-      updated_at:         new Date().toISOString()
-    };
-    const { error } = await db.from('holdings').upsert(row, { onConflict: 'user_id,client_id' });
+    const { error } = await db.from('holdings').upsert(buildHoldingRow(card, user.id), { onConflict: 'user_id,client_id' });
     if(error) console.warn('[db] holdings upsert error:', error.message);
+  });
+}
+
+// Build one price-snapshot row: resolved best price + per-source breakdown +
+// comps + confidence, all from real price fields. Missing values => null.
+function buildSnapshotRow(card, data, userId){
+  const a     = analyzePrice(data, card.type==='graded');   // {price, confidence, sources}
+  const num   = v => (v != null && isFinite(parseFloat(v))) ? parseFloat(v) : null;
+  const comps = parseInt(data && data.ebayN, 10);
+  const mp    = (a && isFinite(a.price) && a.price > 0) ? a.price : null;
+  const src   = (a && a.sources && Object.keys(a.sources).length) ? Object.keys(a.sources).join('+') : null;
+  return {
+    user_id:       userId,
+    client_id:     card.id,
+    card_name:     card.name || null,
+    snapshot_date: new Date().toISOString().slice(0,10),   // YYYY-MM-DD (UTC)
+    market_price:  mp,
+    price_source:  src,
+    comps_count:   Number.isFinite(comps) ? comps : null,
+    confidence:    (a && a.confidence) || null,
+    tcg_price:     num(data && data.tcg),
+    ebay_price:    num(data && data.ebay),
+    ppt_price:     num(data && data.ppt),
+    psa_price:     num(data && data.psa),
+    updated_at:    new Date().toISOString()
+  };
+}
+
+// Upsert one price snapshot for a single card (one row per card per day;
+// same-day re-fetches overwrite that day's row via the unique constraint).
+function savePriceSnapshot(card, data){
+  if(!card || !card.id || !data) return;
+  return dbWrite(async (db, user) => {
+    const { error } = await db.from('price_snapshots').upsert(buildSnapshotRow(card, data, user.id), { onConflict: 'user_id,client_id,snapshot_date' });
+    if(error) console.warn('[db] price_snapshots upsert error:', error.message);
+  });
+}
+
+// After a price load, bulk-write snapshots + refresh holding market_value in just
+// TWO upserts (not per card). Owned items only — wishlist pseudo-cards and items
+// no longer in the collection are skipped so structured rows stay aligned. Rows
+// are de-duped by client_id (a single upsert can't touch the same key twice).
+function flushPriceAnalytics(pairs){
+  if(!Array.isArray(pairs) || !pairs.length) return;
+  return dbWrite(async (db, user) => {
+    const ownedIds = new Set(collection.map(c => c.id));
+    const snapRows = [], holdRows = [], seen = new Set();
+    for(const { card, data } of pairs){
+      if(!card || !card.id || !data) continue;
+      if(!ownedIds.has(card.id)) continue;   // owned holdings only
+      if(seen.has(card.id)) continue;        // one row per card per flush
+      seen.add(card.id);
+      snapRows.push(buildSnapshotRow(card, data, user.id));
+      holdRows.push(buildHoldingRow(card, user.id));
+    }
+    if(snapRows.length){
+      const { error } = await db.from('price_snapshots').upsert(snapRows, { onConflict: 'user_id,client_id,snapshot_date' });
+      if(error) console.warn('[db] price_snapshots bulk upsert error:', error.message);
+    }
+    if(holdRows.length){
+      const { error } = await db.from('holdings').upsert(holdRows, { onConflict: 'user_id,client_id' });
+      if(error) console.warn('[db] holdings bulk price refresh error:', error.message);
+    }
+  });
+}
+
+// Upsert one account-level portfolio snapshot per day (unique user_id+date).
+// Reads the app's own freshly-computed AppState totals, so the row matches the
+// on-screen numbers exactly — no parallel recomputation. Same-day updates
+// overwrite that day's row. client_id stays null here (account-level).
+function savePortfolioSnapshot(){
+  return dbWrite(async (db, user) => {
+    if (AppState._dirty) AppState.update();
+    const n = v => (v != null && isFinite(v)) ? v : null;
+    const cnt = v => Number.isFinite(v) ? v : null;
+    const row = {
+      user_id:        user.id,
+      snapshot_date:  new Date().toISOString().slice(0,10),   // YYYY-MM-DD (UTC)
+      total_value:    n(AppState.totalValue),
+      total_cost:     n(AppState.totalCost),
+      total_pnl:      n(AppState.totalPnL),
+      total_pnl_pct:  n(AppState.totalPnLPct),
+      cash_position:  n(AppState.cashPosition),
+      singles_count:  cnt(AppState.singlesCount),
+      slabs_count:    cnt(AppState.slabsCount),
+      sealed_count:   cnt(AppState.sealedCount),
+      holdings_count: collection.length + sealed.length,      // all owned line items
+      updated_at:     new Date().toISOString()
+    };
+    const { error } = await db.from('portfolio_snapshots').upsert(row, { onConflict: 'user_id,snapshot_date' });
+    if(error) console.warn('[db] portfolio_snapshots upsert error:', error.message);
+  });
+}
+
+// Append-only event log — one immutable INSERT per add / edit / sell event.
+// All numerics are guarded: a bad/empty value becomes null, never NaN.
+function saveTransactionToDatabase(txn){
+  if(!txn || !txn.txn_type) return;
+  return dbWrite(async (db, user) => {
+    const qty = parseInt(txn.quantity, 10);
+    const up  = parseFloat(txn.unit_price);
+    const cb  = parseFloat(txn.cost_basis);
+    const rp  = parseFloat(txn.realized_pnl);
+    const ta  = (txn.total_amount != null) ? parseFloat(txn.total_amount)
+                  : (Number.isFinite(up) && Number.isFinite(qty) ? up * qty : NaN);
+    const row = {
+      user_id:      user.id,
+      client_id:    txn.client_id || null,
+      txn_type:     txn.txn_type,
+      card_name:    txn.card_name || null,
+      quantity:     Number.isFinite(qty) ? qty : null,
+      unit_price:   Number.isFinite(up) ? up : null,
+      total_amount: Number.isFinite(ta) ? ta : null,
+      cost_basis:   Number.isFinite(cb) ? cb : null,
+      realized_pnl: Number.isFinite(rp) ? rp : null,
+      source:       txn.source || null,
+      notes:        txn.notes || null,
+      occurred_at:  txn.occurred_at ? new Date(txn.occurred_at).toISOString() : new Date().toISOString()
+    };
+    const { error } = await db.from('transactions').insert(row);
+    if(error) console.warn('[db] transactions insert error:', error.message);
   });
 }
 
