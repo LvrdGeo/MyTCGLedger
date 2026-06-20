@@ -276,9 +276,11 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .mob-more-row:active{background:var(--bg3);}
 .mob-more-row svg{width:20px;height:20px;color:var(--muted);flex-shrink:0;}
 .mob-fab{display:none;position:fixed;bottom:calc(72px + env(safe-area-inset-bottom,16px));right:16px;z-index:101;width:46px;height:46px;border-radius:50%;background:rgba(245,200,66,0.75);color:#08090e;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(245,200,66,.3);align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
+.mob-account-btn{display:none;position:fixed;top:9px;right:12px;z-index:60;width:34px;height:34px;border-radius:50%;background:var(--bg3);color:var(--text);border:1px solid var(--border);cursor:pointer;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}
+.mob-account-btn svg{width:18px;height:18px;}
 @media(max-width:768px){
-  .sidebar{display:none!important}.mobile-tabs{display:grid}.mob-fab{display:flex}
-  .toast{bottom:80px}.topbar{padding:10px 14px;gap:8px}
+  .sidebar{display:none!important}.mobile-tabs{display:grid}.mob-fab{display:flex}.mob-account-btn{display:flex}
+  .toast{bottom:80px}.topbar{padding:10px 52px 10px 14px;gap:8px}
   .page-title small{display:none}.topbar .btn-ghost{display:none}.topbar .btn-primary{display:none}.topbar .topbar-sold-btn{display:inline-flex!important}
   .port-hero{padding:16px 14px 0}.port-total{font-size:32px}
   .kpi-row{grid-template-columns:1fr 1fr 1fr}.kpi{padding:10px 12px}.kpi-val{font-size:14px}
@@ -331,6 +333,12 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .era-pill:hover{border-color:var(--border2);color:var(--text);}
 .era-pill.active{background:rgba(245,200,66,.12);border-color:var(--gold);color:var(--gold);}
 .set-tile{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;}
+/* perf: skip layout/paint for off-screen cards in big grids. Harmless no-op on
+   browsers without support; the `auto` intrinsic size self-corrects after a card
+   renders once, so the scrollbar doesn't jump. */
+.cs-card{content-visibility:auto;contain-intrinsic-size:auto 190px;}
+.card-tile{content-visibility:auto;contain-intrinsic-size:auto 240px;}
+.set-tile{content-visibility:auto;contain-intrinsic-size:auto 130px;}
 .set-tile:hover{border-color:var(--gold);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4);}
 .set-tile-logo{height:70px;display:flex;align-items:center;justify-content:center;padding:12px;background:var(--bg3);}
 .set-tile-logo img{max-height:48px;max-width:120px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4));}
@@ -449,6 +457,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
     <button class="nav-btn" onclick="goPage('cardsearch',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/></svg>Card Search</button>
     <button class="nav-btn" onclick="goPage('deals',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Deal Center<span class="nav-count" id="nb-deals">0</span></button>
     <button class="nav-btn" onclick="goPage('analyzer',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>Analyzer</button>
+    <button class="nav-btn" onclick="goPage('intelligence',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>Intelligence</button>
     <div class="nav-sec">Collection</div>
     <button class="nav-btn" onclick="goPage('singles',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Singles<span class="nav-count" id="nb-singles">0</span></button>
     <button class="nav-btn" onclick="goPage('psa',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 12l3 3 7-7"/></svg>PSA Slabs<span class="nav-count" id="nb-psa">0</span></button>
@@ -1226,6 +1235,13 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 </div>
 
 <!-- SETTINGS -->
+<div id="page-intelligence" class="page">
+  <div class="topbar"><div class="page-title">Intelligence <small>signals from your collection</small></div></div>
+  <div style="padding:16px 20px;" id="intel-content">
+    <div style="color:var(--muted);font-size:13px;">Loading…</div>
+  </div>
+</div>
+
 <div id="page-settings" class="page">
   <div class="topbar"><div class="page-title">Account &amp; Settings</div></div>
   <div style="padding:20px;max-width:640px;padding-bottom:calc(80px + env(safe-area-inset-bottom, 20px));">
@@ -1281,14 +1297,15 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   <button class="mob-tab mob-tab-primary" id="mt-cardsearch" onclick="mobGoPage('cardsearch','mt-cardsearch')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/></svg>Search
   </button>
-  <button class="mob-tab" id="mt-account" onclick="mobGoPage('settings','mt-account')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>Account
+  <button class="mob-tab" id="mt-watchlist" onclick="mobGoPage('wishlist','mt-watchlist')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Watchlist
   </button>
   <button class="mob-tab" id="mt-more" onclick="openMobileMore()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>More
   </button>
 </nav>
 <button class="mob-fab" id="mob-fab" onclick="fabAction()" title="Add card" aria-label="Add card">+</button>
+<button class="mob-account-btn" id="mob-account-btn" onclick="mobGoPage('settings','')" title="Account" aria-label="Account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></button>
 
 <!-- CARD PICKER -->
 <div class="modal-bg" id="card-picker-modal">
@@ -2355,7 +2372,7 @@ function init() {
       const navBtn = Array.from(document.querySelectorAll('.nav-btn')).find(b => (b.getAttribute('onclick')||'').includes("goPage('" + last + "'"));
       goPage(last, navBtn || null);
       // Sync the mobile bottom-nav highlight too
-      const mobMap = { dashboard:'mt-dashboard', portfolio:'mt-portfolio', cardsearch:'mt-cardsearch', settings:'mt-account' };
+      const mobMap = { dashboard:'mt-dashboard', portfolio:'mt-portfolio', cardsearch:'mt-cardsearch', wishlist:'mt-watchlist' };
       if (mobMap[last]) updateMobTabs(mobMap[last]);
       else if (typeof updateMobTabs === 'function') updateMobTabs('mt-more');
     }
@@ -5162,6 +5179,7 @@ function saveDealLog(dealStatus) {
 
   if (_editingDealLogId) deals = deals.map(x=>x.id===_editingDealLogId?data:x);
   else deals.push(data);
+  saveDealEvaluation(data);   // retrospective score for closed deals (no-op when pending)
   save();
   closeModal('deal-log-modal');
   renderAll();
@@ -5623,7 +5641,7 @@ function renderDeals() {
         <!-- Header row -->
         <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:600;margin-bottom:2px;">${badge}${names}</div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:2px;">${badge}${dealVerdictBadge(d)}${names}</div>
             <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">OUT $${parseFloat(d.buyPrice||0).toFixed(2)} → IN $${parseFloat(d.sellPrice||0).toFixed(2)} · ${d.platform||d.sellPlatform||'—'} · ${d.date||d.sellDate||'—'}</div>
           </div>
           <div style="text-align:right;flex-shrink:0;">
@@ -6452,7 +6470,46 @@ function prefillAddForm(card,chosenType){editingId=null;window._pendingWishRemov
   document.getElementById('f-edition').value=(card.edition||'unlimited');refreshEditionSection();const _pcEd=document.getElementById('f-edition').value;const _pcP=document.querySelector(`#edition-section .ed-pill[data-val="${_pcEd}"]`);if(_pcP)selectEdition(_pcEd,_pcP);
   updateAddPreview();openModal('add-modal');}
 
-async function loadSets(){try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch('https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate',{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();allSets=j.data||[];renderSets(allSets);renderSealedSets(allSets);document.getElementById('set-cnt-lbl').textContent=allSets.length+' sets';if(document.getElementById('page-cardsearch').classList.contains('active'))renderSetBrowser();}catch(e){document.getElementById('set-list').innerHTML='<p style="font-size:12px;color:var(--muted);padding:8px;">Set browser unavailable — add pokemontcg.io key in Settings.</p>';}}
+async function loadSets(){
+  const CACHE_KEY = 'pkv2_sets_cache';
+  const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days — sets change rarely
+  const paint = () => {
+    renderSets(allSets);
+    renderSealedSets(allSets);
+    const lbl = document.getElementById('set-cnt-lbl');
+    if (lbl) lbl.textContent = allSets.length + ' sets';
+    if (document.getElementById('page-cardsearch')?.classList.contains('active')) renderSetBrowser();
+  };
+  // 1) Serve cached sets instantly (stale-while-revalidate) — this is the speedup.
+  let servedFromCache = false;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (raw) {
+      const cached = JSON.parse(raw);
+      if (cached && Array.isArray(cached.data) && cached.data.length) {
+        allSets = cached.data;
+        paint();
+        servedFromCache = true;
+        if (Date.now() - (cached.ts || 0) < CACHE_TTL) return; // fresh — skip the network entirely
+      }
+    }
+  } catch(e) {}
+  // 2) Fetch fresh (first load, or cache stale) and update cache + UI on success.
+  try {
+    const hdrs = keys.ptcg ? {'X-Api-Key':keys.ptcg} : {};
+    const r = await fetch('https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate',{headers:hdrs});
+    if(!r.ok) throw new Error();
+    const j = await r.json();
+    const data = j.data || [];
+    if (data.length) {
+      allSets = data;
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch(e){}
+      paint();
+    }
+  } catch(e) {
+    if (!servedFromCache) document.getElementById('set-list').innerHTML='<p style="font-size:12px;color:var(--muted);padding:8px;">Set browser unavailable — add pokemontcg.io key in Settings.</p>';
+  }
+}
 function renderSets(sets){document.getElementById('set-list').innerHTML=sets.map(s=>{const logo=s.images?.logo?`<img class="set-logo" src="${s.images.logo}" alt="${s.name}" loading="lazy" onerror="this.style.display='none'">`:'<div class="set-logo-ph"></div>';return `<div class="set-item" onclick="openSet('${s.id}','${s.name.replace(/'/g,"\\'")}',event)">${logo}<div style="min-width:0;flex:1;"><div class="set-name">${s.name}</div><div class="set-year">${(s.releaseDate||'').slice(0,4)} · ${s.total||'?'} cards</div></div></div>`;}).join('');}
 function filterSets(q){const f=q?allSets.filter(s=>s.name.toLowerCase().includes(q.toLowerCase())):allSets;renderSets(f);document.getElementById('set-cnt-lbl').textContent=f.length+' sets';}
 async function openSet(id,name,e){document.querySelectorAll('#page-singles .set-item').forEach(el=>el.classList.remove('active'));e?.currentTarget?.classList.add('active');const panel=document.getElementById('set-cards-panel');const grid=document.getElementById('set-cards-grid');document.getElementById('set-cards-title').textContent=name;panel.classList.add('open');grid.innerHTML='<div style="padding:16px;color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px;"><div class="spinner"></div>Loading…</div>';try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=set.id:${id}&orderBy=number&pageSize=250`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();window._setCards={};grid.innerHTML=j.data.map(c=>{const key='sc_'+c.id.replace(/[^a-z0-9]/gi,'_');window._setCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.small||'',rarity:c.rarity||''};return `<div class="set-card-item" onclick="quickAdd(window._setCards['${key}'])">${c.images?.small?`<img src="${c.images.small}" alt="${c.name}" loading="lazy">`:'<div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--muted);">⟡</div>'}<div class="sc-name">${c.name}</div><div class="sc-num">#${c.number}</div></div>`;}).join('');}catch(e){grid.innerHTML='<p style="font-size:12px;color:var(--muted);padding:8px;">Failed to load set cards.</p>';}}
@@ -7419,27 +7476,39 @@ async function browseSet(setId, setName, logoUrl) {
   document.getElementById('set-era-filters').style.display = 'none';
 
   try {
-    const hdrs = keys.ptcg ? {'X-Api-Key': keys.ptcg} : {};
-    const r = await fetch(
-      `https://api.pokemontcg.io/v2/cards?q=set.id:${encodeURIComponent(setId)}&orderBy=number&pageSize=500`,
-      {headers: hdrs}
-    );
-    if (!r.ok) throw new Error('API error ' + r.status);
-    const j = await r.json();
-    loading.style.display = 'none';
-
-    let cards = j.data || [];
-
-    // Fallback: if set.id query returns nothing, try set.name search
-    if (!cards.length) {
-      const r2 = await fetch(
-        `https://api.pokemontcg.io/v2/cards?q=set.name:"${encodeURIComponent(setName)}"&orderBy=number&pageSize=500`,
+    let cards;
+    // Session cache — reopening a set you've already viewed is instant (no API call).
+    // In-memory only (cleared on reload), so it can never fill localStorage or touch
+    // your saved data; cross-reload persistence is the IndexedDB upgrade (#5).
+    window._setCardCache = window._setCardCache || {};
+    if (window._setCardCache[setId]) {
+      cards = window._setCardCache[setId];
+      loading.style.display = 'none';
+    } else {
+      const hdrs = keys.ptcg ? {'X-Api-Key': keys.ptcg} : {};
+      const r = await fetch(
+        `https://api.pokemontcg.io/v2/cards?q=set.id:${encodeURIComponent(setId)}&orderBy=number&pageSize=500`,
         {headers: hdrs}
       );
-      if (r2.ok) {
-        const j2 = await r2.json();
-        cards = j2.data || [];
+      if (!r.ok) throw new Error('API error ' + r.status);
+      const j = await r.json();
+      loading.style.display = 'none';
+
+      cards = j.data || [];
+
+      // Fallback: if set.id query returns nothing, try set.name search
+      if (!cards.length) {
+        const r2 = await fetch(
+          `https://api.pokemontcg.io/v2/cards?q=set.name:"${encodeURIComponent(setName)}"&orderBy=number&pageSize=500`,
+          {headers: hdrs}
+        );
+        if (r2.ok) {
+          const j2 = await r2.json();
+          cards = j2.data || [];
+        }
       }
+
+      if (cards.length) window._setCardCache[setId] = cards;
     }
 
     const cnt = document.getElementById('set-browser-count');
@@ -7599,6 +7668,7 @@ function goPage(name,el){
   if(name==='wishlist' && !document.getElementById('page-wishlist')._rendered){renderWishlist();document.getElementById('page-wishlist')._rendered=true;}
   if(name==='deals'    && !document.getElementById('page-deals')._rendered){renderDeals();document.getElementById('page-deals')._rendered=true;}
   if(name==='analyzer'){renderAnalyzer();}
+  if(name==='intelligence'){renderIntelligence();}
   if(name==='cardsearch'){initTabSearchSets();renderSetBrowser();setTimeout(()=>document.getElementById('tab-search-input')?.focus(),100);}
   if(name==='settings'){loadKeys();renderAccountSection();updateAuthUI();}
 }
@@ -7650,6 +7720,10 @@ function openMobileMore() {
   sheet.id = 'mob-more-sheet';
   sheet.className = 'mob-more-sheet';
   sheet.innerHTML = `
+    <button class="mob-more-row" onclick="closeMobileMore();mobGoPage('intelligence','mt-more');">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+      Intelligence
+    </button>
     <button class="mob-more-row" onclick="closeMobileMore();mobGoPage('deals','mt-more');">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       Deals
@@ -8352,6 +8426,137 @@ function calculateMarketSignal(){
       above_market_average: ofType('above_market_average').sort((a,b)=>b.score-a.score)
     }
   };
+}
+
+// ── Deal evaluation ────────────────────────────────────────────────────────
+// Retrospective deal score — runs ONLY for CLOSED deals (saveDealLog status
+// 'closed'); pending/open drafts are never scored. Compares what actually
+// changed hands against market value, writes a verdict to deal_evaluations,
+// and stamps the deal so renderDeals can badge it. Skips the DB write when the
+// evaluation is unchanged from last time, so re-saving a deal doesn't duplicate.
+function saveDealEvaluation(deal){
+  if(!deal || deal.status !== 'closed') return;
+  const type = deal.dealType || 'purchase';
+  const num  = v => { const n = parseFloat(v); return (isFinite(n) && n >= 0) ? n : null; };
+
+  let market, final, advantage, verdict;
+  if(type === 'purchase'){
+    market = num(deal.inTotal);                                         // market value of cards bought
+    final  = num(deal.finalPrice) ?? num(deal.cashPaid) ?? num(deal.buyPrice);
+    advantage = (market > 0 && final != null) ? ((market - final) / market) * 100 : null;
+    verdict = advantage == null ? 'unknown' : advantage >= 10 ? 'good_buy' : advantage >= -5 ? 'fair' : 'overpaid';
+  } else if(type === 'sale'){
+    market = num(deal.outTotal);                                        // market value of cards sold
+    final  = num(deal.finalPrice) ?? num(deal.sellPrice) ?? num(deal.inTotal);
+    advantage = (market > 0 && final != null) ? ((final - market) / market) * 100 : null;
+    verdict = advantage == null ? 'unknown' : advantage >= 5 ? 'good_sale' : advantage >= -5 ? 'fair' : 'sold_under';
+  } else { // trade
+    market = num(deal.outTotal);                                        // value you gave
+    final  = num(deal.inTotal);                                         // value you got
+    advantage = (market > 0 && final != null) ? ((final - market) / market) * 100 : null;
+    verdict = advantage == null ? 'unknown' : advantage >= 5 ? 'good_trade' : advantage >= -5 ? 'fair' : 'bad_trade';
+  }
+
+  const confidence = (market > 0 && final != null) ? 'high' : (market > 0 || final != null) ? 'medium' : 'low';
+  const score = (advantage != null && isFinite(advantage)) ? +advantage.toFixed(1) : null;
+
+  // Stamp onto the deal (persisted by the surrounding save()) so renderDeals can
+  // badge without recomputing. Skip the DB insert if nothing changed.
+  const changed = deal.evalVerdict !== verdict || deal.evalScore !== score;
+  deal.evalVerdict = verdict;
+  deal.evalScore   = score;
+  if(!changed) return;
+
+  return dbWrite(async (db, user) => {
+    const row = {
+      user_id:      user.id,
+      client_id:    deal.id || null,
+      deal_type:    type,
+      card_name:    deal.cardName || null,
+      market_value: market != null ? +market.toFixed(2) : null,
+      asking_price: num(deal.sellerAsk),
+      my_offer:     num(deal.myOffer),
+      final_price:  final != null ? +final.toFixed(2) : null,
+      score:        (advantage != null && isFinite(advantage)) ? +advantage.toFixed(2) : null,
+      verdict,
+      confidence
+    };
+    const { error } = await db.from('deal_evaluations').insert(row);
+    if(error) console.warn('[db] deal_evaluations insert error:', error.message);
+  });
+}
+
+// Small verdict pill for the Deal Center (reads the stamp left by saveDealEvaluation).
+function dealVerdictBadge(d){
+  if(!d || !d.evalVerdict || d.evalVerdict === 'unknown') return '';
+  const v    = d.evalVerdict;
+  const good = /good_/.test(v);
+  const bad  = /overpaid|sold_under|bad_trade/.test(v);
+  const col  = good ? 'var(--green)' : bad ? 'var(--red)' : 'var(--gold)';
+  const bg   = good ? 'rgba(46,204,128,0.12)' : bad ? 'rgba(255,77,109,0.12)' : 'rgba(245,200,66,0.12)';
+  const pct  = (d.evalScore != null) ? ` ${d.evalScore>=0?'+':''}${d.evalScore}%` : '';
+  return `<span style="display:inline-block;font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.5px;color:${col};background:${bg};border:1px solid ${col};border-radius:4px;padding:1px 5px;margin-right:5px;vertical-align:middle;">${v.replace(/_/g,' ').toUpperCase()}${pct}</span>`;
+}
+
+// ── Intelligence page ──────────────────────────────────────────────────────
+// Renders the seven views straight from calculateMarketSignal() (which also
+// persists to market_signals). Works off the live price cache; sections with no
+// data show a clear empty state rather than a fabricated entry.
+function renderIntelligence(){
+  const el = document.getElementById('intel-content');
+  if(!el) return;
+  const r = calculateMarketSignal();
+  const fmt = (n) => '$' + (Number(n)||0).toFixed(2);
+  const toneCol = (t) => t==='green' ? 'var(--green)' : t==='red' ? 'var(--red)' : 'var(--gold)';
+  const confDot = (c) => {
+    const col = c==='high' ? 'var(--green)' : c==='medium' ? 'var(--gold)' : 'var(--muted)';
+    return `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};flex-shrink:0;" title="${c||'low'} confidence"></span>`;
+  };
+
+  const sections = [
+    { key:'best_buy',             title:'Best Buys',            sub:'below cost & liquid enough to act', tone:'green', metric:(s)=>`${s.score>=0?'+':''}${s.score}%` },
+    { key:'below_cost',           title:'Below Cost',           sub:'market under what you paid',         tone:'red',   metric:(s)=>`${s.metric_value}%` },
+    { key:'gainer',               title:'Biggest Gainers',      sub:'largest gain vs cost',               tone:'green', metric:(s)=>`+${s.metric_value}%` },
+    { key:'worst_performer',      title:'Worst Performers',     sub:'largest loss vs cost',               tone:'red',   metric:(s)=>`${s.metric_value}%` },
+    { key:'overheated',           title:'Overheated',           sub:`price spiking vs ${SIGNAL_CFG.overheatedDays}-day avg`, tone:'gold', metric:(s)=>`+${s.metric_value}%` },
+    { key:'liquid',               title:'Most Liquid',          sub:'most sold comps — easiest to move',  tone:'gold',  metric:(s)=>`${s.metric_value} comps` },
+    { key:'above_market_average', title:'Above Collection Avg', sub:`vs ${fmt(r.marketAverage)} average`, tone:'gold',  metric:(s)=>fmt(s.metric_value) },
+  ];
+
+  if(!r.signals.length){
+    el.innerHTML = `<div style="color:var(--muted);font-size:13px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:16px;">No signals yet. Refresh prices on your collection (Dashboard or Portfolio) to generate intelligence.</div>`;
+    return;
+  }
+
+  let html = '';
+  for(const sec of sections){
+    const all = r.byType[sec.key] || [];
+    const items = all.slice(0, 8);
+    html += `<div style="margin-bottom:22px;">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+        <div style="font-size:14px;font-weight:700;color:var(--text);">${sec.title}</div>
+        <div style="font-size:10px;color:var(--muted);">${sec.sub}</div>
+        <div style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--muted);">${all.length}</div>
+      </div>`;
+    if(!items.length){
+      const empty = sec.key==='overheated'
+        ? `Builds as price history accumulates — needs a few days of snapshots.`
+        : `Nothing here right now.`;
+      html += `<div style="font-size:11px;color:var(--muted);background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:12px 14px;">${empty}</div>`;
+    } else {
+      html += items.map(s => `
+        <div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:9px 12px;margin-bottom:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.card_name||'—'}</div>
+            <div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.rationale||''}</div>
+          </div>
+          ${confDot(s.confidence)}
+          <div style="font-family:var(--mono);font-size:13px;font-weight:700;color:${toneCol(sec.tone)};flex-shrink:0;">${sec.metric(s)}</div>
+        </div>`).join('');
+    }
+    html += `</div>`;
+  }
+  el.innerHTML = html;
 }
 
 // Append-only event log — one immutable INSERT per add / edit / sell event.
