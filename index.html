@@ -2954,6 +2954,37 @@ function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);re
 function fmtPrice(v){return(v==null||!isFinite(v)||v<=0)?'—':'$'+v.toFixed(2);}
 function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
 function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── FORMATTER FAMILY · Patch 1 · pure addition (2026-06) ──
+// ADDITIVE ONLY. No existing call site is migrated and no existing logic is
+// changed. fmtPrice / fmtTrend / trendClass above remain the untouched source
+// of truth; `money` delegates to fmtPrice so the two can never drift. Nothing
+// in the app references these yet — deleting this whole block fully reverts
+// the patch (see Patch 1 rollback notes).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Safe number — parseFloat with a fallback (default 0) when the value isn't finite.
+function safeNum(x, d){ const n = parseFloat(x); return isFinite(n) ? n : (d == null ? 0 : d); }
+
+// Money — dash on empty, 2 decimals. Alias of fmtPrice (single source of truth).
+function money(v){ return fmtPrice(v); }
+
+// Money — always shows, thousands separators (e.g. "$12,300.00").
+function moneyFull(v){ return '$' + safeNum(v, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+// Money — abbreviated for tight spaces / chart axes (e.g. "$12k", "$1.5k").
+function moneyK(v){ const n = safeNum(v, 0); return n >= 1000 ? '$' + (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : moneyFull(n); }
+
+// Money — signed, for gains / losses (e.g. "+$5.00" / "-$5.00"). dp defaults to 2.
+function moneySigned(v, dp){ const n = safeNum(v, 0); const d = (dp == null ? 2 : dp); return (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toFixed(d); }
+
+// Percent — signed, default 1 decimal; '' when not finite. Generalizes fmtTrend.
+function fmtPct(v, dp){ if (v == null || !isFinite(v)) return ''; const d = (dp == null ? 1 : dp); return (v >= 0 ? '+' : '') + v.toFixed(d) + '%'; }
+
+// Date — short month/day by default; pass Intl options to override.
+function fmtDate(d, opts){ try { return new Date(d).toLocaleDateString('en-US', opts || { month: 'short', day: 'numeric' }); } catch (e) { return ''; } }
+
 function getBestCached(card){const p=pcache[cacheKey(card)]?.data;return p?bestPrice(p,card.type==='graded'):0;}
 
 // ═══ PORTFOLIO ═══
