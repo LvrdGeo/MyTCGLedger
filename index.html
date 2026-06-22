@@ -1625,6 +1625,46 @@ let wishlist   = JSON.parse(localStorage.getItem('pkv2_wish')  || '[]');
 let deals      = JSON.parse(localStorage.getItem('pkv2_deals') || '[]');
 let soldHistory= JSON.parse(localStorage.getItem('pkv2_sold')  || '[]');
 
+// ════════════════════════════════════════════════════════════════════════════
+// ── STORAGE HELPERS · Maintainability Patch 2 · pure addition (2026-06) ──
+// Safe localStorage read/write wrappers. ADDITIVE ONLY — no existing call site
+// is migrated, and no key or fallback behavior is changed. Built-ins only; never
+// throw; no UI side-effects (no toast). Rollback: delete this block.
+// ════════════════════════════════════════════════════════════════════════════
+
+// readJSON — parse a JSON value from localStorage. Missing key or unparseable
+// value → fallback. Never throws.
+function readJSON(key, fallback){
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return JSON.parse(raw);
+  } catch (e) { return fallback; }
+}
+
+// writeJSON — serialize + persist a value. Returns true on success, false on
+// error (e.g. quota exceeded). No UI side-effects.
+function writeJSON(key, value){
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (e) { return false; }
+}
+
+// readNumber — read a numeric value from localStorage. Missing/invalid → fallback.
+function readNumber(key, fallback=0){
+  const n = parseFloat(localStorage.getItem(key));
+  return isFinite(n) ? n : fallback;
+}
+
+// writeNumber — persist a numeric value. Returns true on success, false on error.
+function writeNumber(key, value){
+  try {
+    localStorage.setItem(key, String(value));
+    return true;
+  } catch (e) { return false; }
+}
+
 // ═══════════════════════════════════════════════════════════
 // ── CENTRAL STATE ENGINE ──
 // Single source of truth for all calculated portfolio values.
@@ -2211,7 +2251,7 @@ function renderAccountSection() {
   }
 }
 
-let prefs      = JSON.parse(localStorage.getItem('pkv2_prefs') || '{"cond":"NM"}');
+let prefs      = readJSON('pkv2_prefs', { cond: 'NM' });  // Patch 3: via readJSON (key + default unchanged)
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
 
 // ── PER-CARD PRICE HISTORY ENGINE ──
