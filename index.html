@@ -6563,7 +6563,7 @@ function buildCardTrendBlock(card, series, currentPrice){
     }
   }
   const body = enough
-    ? `<canvas id="card-trend-canvas" height="120" style="width:100%;display:block;"></canvas><div id="card-trend-label" style="display:flex;justify-content:space-between;margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--muted);"></div>`
+    ? `<div style="position:relative;height:120px;"><canvas id="card-trend-canvas" style="width:100%;display:block;"></canvas></div><div id="card-trend-label" style="display:flex;justify-content:space-between;margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--muted);"></div>`
     : `<div style="padding:24px 12px;text-align:center;"><div style="font-size:13px;color:var(--muted);margin-bottom:4px;">📈 Building price history…</div><div style="font-size:11px;color:var(--muted2);">Recorded ${series?series.length:0} day${(series&&series.length===1)?'':'s'} so far. Your real trend chart appears once there are 2+ days of data.</div></div>`;
   return `<div class="trend-area"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span class="sec-title-sm">Price History</span>${changeLabel}</div>${body}</div>`;
 }
