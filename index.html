@@ -1748,7 +1748,7 @@ const NRV_DEFAULTS = {
   feePct:          0.136,         // eBay trading-card final-value fee (non-store), editable
   feeFixedSmall:   0.30,          // per-order fee, order <= $10
   feeFixedLarge:   0.40,          // per-order fee, order  > $10
-  discount:        0.15,          // single expected-sale discount (v1)
+  discount:        0.05,          // single expected-sale discount: liquidity/negotiation haircut only (fees+shipping already deducted separately)
   shipping:        { standard: 1.50, graded: 6.00, sealed: 18.00 },
   shippingDefault: 4.00,
   taxEnabled:      false,
@@ -2575,7 +2575,7 @@ function saveNrvForm(){
   const g=id=>document.getElementById(id); if(!g('nrv-discount'))return;
   const n=(id,d)=>{const v=parseFloat(g(id).value); return isFinite(v)?v:d;};
   NRV.shown             = g('nrv-shown').checked;
-  NRV.discount          = Math.min(Math.max(n('nrv-discount',15)/100,0),0.95);
+  NRV.discount          = Math.min(Math.max(n('nrv-discount',5)/100,0),0.95);
   NRV.feePct            = Math.min(Math.max(n('nrv-fee',13.6)/100,0),0.5);
   NRV.shipping.standard = Math.max(n('nrv-ship-standard',1.5),0);
   NRV.shipping.graded   = Math.max(n('nrv-ship-graded',6),0);
