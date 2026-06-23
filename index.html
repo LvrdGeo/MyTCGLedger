@@ -1665,6 +1665,33 @@ function writeNumber(key, value){
   } catch (e) { return false; }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ── STORAGE KEY REGISTRY · Maintainability Patch 4 · pure addition (2026-06) ──
+// Single catalogue of the app's current localStorage keys. ADDITIVE ONLY — used
+// nowhere yet; every existing hardcoded 'pkv2_*' string is left untouched. The
+// values below mirror those literals exactly (verified against the code). This
+// is reference/centralization only, not wired into save / sync / storage.
+// (Patch 4A: 'pkv2_lastpage' is now catalogued below — registry lists all 15 current keys.)
+// Rollback: delete this block.
+// ════════════════════════════════════════════════════════════════════════════
+const STORAGE_KEYS = {
+  collection:       'pkv2_col',
+  sealed:           'pkv2_sealed',
+  wishlist:         'pkv2_wish',
+  deals:            'pkv2_deals',
+  soldHistory:      'pkv2_sold',
+  cash:             'pkv2_cash',
+  keys:             'pkv2_keys',
+  prefs:            'pkv2_prefs',
+  priceCache:       'pkv2_pcache',
+  cardHistory:      'pkv2_cardhist',
+  portfolioHistory: 'pkv2_ph2',
+  valueHistory:     'pkv2_vh',
+  wishHistory:      'pkv2_wh',
+  schema:           'pkv2_schema',
+  lastPage:         'pkv2_lastpage',
+};
+
 // ═══════════════════════════════════════════════════════════
 // ── CENTRAL STATE ENGINE ──
 // Single source of truth for all calculated portfolio values.
@@ -1812,7 +1839,7 @@ const AppState = {
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
 const SCHEMA_VERSION = '6.8';
-if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
+if (localStorage.getItem(STORAGE_KEYS.schema) !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache + stale graded values');
   localStorage.removeItem('pkv2_pcache');
   localStorage.setItem('pkv2_pcache', '{}');
@@ -1830,7 +1857,7 @@ if (localStorage.getItem('pkv2_schema') !== SCHEMA_VERSION) {
     });
     if (_cleared) { localStorage.setItem('pkv2_col', JSON.stringify(_c)); console.log('[Schema] Cleared '+_cleared+' stale price stamps'); }
   } catch(e) {}
-  localStorage.setItem('pkv2_schema', SCHEMA_VERSION);
+  localStorage.setItem(STORAGE_KEYS.schema, SCHEMA_VERSION);
 }
 
 // ── MIGRATION: fix cards that have a grade but wrong type ──
@@ -1860,10 +1887,10 @@ function safeRender(fn, name) {
   try { fn(); }
   catch(err) { console.error('[Render] ' + name + ' failed:', err); }
 }
-let keys       = JSON.parse(localStorage.getItem('pkv2_keys')  || '{"ptcg":"83d3cfd0-e05d-4fc0-9a4d-efef50602756","ppt":"","psa":""}');
+let keys       = JSON.parse(localStorage.getItem(STORAGE_KEYS.keys)  || '{"ptcg":"83d3cfd0-e05d-4fc0-9a4d-efef50602756","ppt":"","psa":""}');
 // Backfill the pokemontcg.io key if it was never set or was cleared, so TCGPlayer
 // lookups stay authenticated (unauthenticated requests are rate-limited → missing TCG prices).
-if (!keys.ptcg) { keys.ptcg = '83d3cfd0-e05d-4fc0-9a4d-efef50602756'; localStorage.setItem('pkv2_keys', JSON.stringify(keys)); }
+if (!keys.ptcg) { keys.ptcg = '83d3cfd0-e05d-4fc0-9a4d-efef50602756'; localStorage.setItem(STORAGE_KEYS.keys, JSON.stringify(keys)); }
 
 // ══════════════════════════════════════════════════════════
 // STAGE 1 — AUTHENTICATION (Supabase)
@@ -2251,7 +2278,7 @@ function renderAccountSection() {
   }
 }
 
-let prefs      = readJSON('pkv2_prefs', { cond: 'NM' });  // Patch 3: via readJSON (key + default unchanged)
+let prefs      = readJSON(STORAGE_KEYS.prefs, { cond: 'NM' });  // Patch 5: key via STORAGE_KEYS.prefs (resolves to 'pkv2_prefs')
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
 
 // ── PER-CARD PRICE HISTORY ENGINE ──
@@ -2406,7 +2433,7 @@ function init() {
   }).catch(()=>{});
   // Restore the page the user was last on (so reload/pull-to-refresh stays put)
   try {
-    const last = localStorage.getItem('pkv2_lastpage');
+    const last = localStorage.getItem(STORAGE_KEYS.lastPage);
     if (last && last !== 'dashboard' && document.getElementById('page-' + last)) {
       // Find the matching sidebar nav button so it highlights correctly
       const navBtn = Array.from(document.querySelectorAll('.nav-btn')).find(b => (b.getAttribute('onclick')||'').includes("goPage('" + last + "'"));
@@ -2419,7 +2446,7 @@ function init() {
   } catch(e) { console.warn('[init] restore page failed', e); }
 }
 function loadKeys(){document.getElementById('k-ptcg').value=keys.ptcg||'';document.getElementById('k-ppt').value=keys.ppt||'';document.getElementById('k-psa').value=keys.psa||'';}
-function saveKey(k){keys[k]=document.getElementById('k-'+k).value.trim();localStorage.setItem('pkv2_keys',JSON.stringify(keys));updateStatusDots();toast('Key saved','green');}
+function saveKey(k){keys[k]=document.getElementById('k-'+k).value.trim();localStorage.setItem(STORAGE_KEYS.keys,JSON.stringify(keys));updateStatusDots();toast('Key saved','green');}
 function updateStatusDots(){document.getElementById('s1').className='dot '+(keys.ptcg?'dot-on':'dot-warn');document.getElementById('s2').className='dot '+(keys.ppt?'dot-on':'dot-off');document.getElementById('s3').className='dot '+(keys.psa?'dot-on':'dot-off');}
 
 // ═══ PRICING ═══
@@ -7724,7 +7751,7 @@ function updateFab(name){
 }
 function goPage(name,el){
   _currentPage=name;
-  try { localStorage.setItem('pkv2_lastpage', name); } catch(e){}
+  try { localStorage.setItem(STORAGE_KEYS.lastPage, name); } catch(e){}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
