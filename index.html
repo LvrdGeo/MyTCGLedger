@@ -587,6 +587,11 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   <div class="port-hero">
     <div class="port-label">Total Portfolio Value</div>
     <div class="port-total" id="port-total">$0.00</div>
+    <div id="nrv-port-row" style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px;">
+      <span id="nrv-port-lbl" style="font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Realizable</span>
+      <span id="port-realizable" style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--green);">—</span>
+      <button id="nrv-port-toggle" onclick="toggleNrvShown()" aria-label="Toggle realizable value" style="border:1px solid var(--border);border-radius:11px;width:34px;height:20px;position:relative;cursor:pointer;padding:0;flex-shrink:0;background:transparent;transition:background .15s;"><span style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:left .15s,background .15s;"></span></button>
+    </div>
     <div class="port-pnl-row">
       <span class="pnl-chip" id="port-pnl-chip" style="display:none"></span>
       <span class="port-meta" id="port-meta">Add cards to track your portfolio</span>
@@ -1280,6 +1285,42 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);"><div><div style="font-size:13px;font-weight:500;">Import</div><div style="font-size:11px;color:var(--muted2);">Restore from JSON export</div></div><label class="btn btn-ghost btn-sm" style="cursor:pointer;">Import<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label></div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;"><div><div style="font-size:13px;font-weight:500;">Clear All Data</div><div style="font-size:11px;color:var(--muted2);">Cannot be undone</div></div><button class="btn btn-danger btn-sm" onclick="showConfirm('Clear all data?','Permanently deletes your entire collection.',clearAll)">Clear All</button></div>
     </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-top:14px;">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Realizable Value</div>
+      <div style="font-size:11px;color:var(--muted2);margin-bottom:10px;">Estimate what you'd actually net after eBay fees, shipping, and an expected-sale discount. Stored on this device only.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div><div style="font-size:13px;font-weight:500;">Show on portfolio</div><div style="font-size:11px;color:var(--muted2);">Display Realizable next to Market Value</div></div>
+        <input type="checkbox" id="nrv-shown" onchange="saveNrvForm()" style="width:20px;height:20px;">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div><div style="font-size:13px;font-weight:500;">Expected-sale discount</div><div style="font-size:11px;color:var(--muted2);">Haircut vs market — you rarely sell at top comp</div></div>
+        <div style="display:flex;align-items:center;gap:4px;"><input class="input" id="nrv-discount" type="number" inputmode="decimal" step="1" min="0" max="95" style="width:64px;text-align:right;" onchange="saveNrvForm()"><span style="font-size:12px;color:var(--muted);">%</span></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div><div style="font-size:13px;font-weight:500;">eBay fee</div><div style="font-size:11px;color:var(--muted2);">Final-value fee % (+ $0.30–0.40/order)</div></div>
+        <div style="display:flex;align-items:center;gap:4px;"><input class="input" id="nrv-fee" type="number" inputmode="decimal" step="0.1" min="0" max="50" style="width:64px;text-align:right;" onchange="saveNrvForm()"><span style="font-size:12px;color:var(--muted);">%</span></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div><div style="font-size:13px;font-weight:500;">Shipping — single</div></div>
+        <div style="display:flex;align-items:center;gap:4px;"><span style="font-size:12px;color:var(--muted);">$</span><input class="input" id="nrv-ship-standard" type="number" inputmode="decimal" step="0.5" min="0" style="width:64px;text-align:right;" onchange="saveNrvForm()"></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div><div style="font-size:13px;font-weight:500;">Shipping — graded slab</div></div>
+        <div style="display:flex;align-items:center;gap:4px;"><span style="font-size:12px;color:var(--muted);">$</span><input class="input" id="nrv-ship-graded" type="number" inputmode="decimal" step="0.5" min="0" style="width:64px;text-align:right;" onchange="saveNrvForm()"></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div><div style="font-size:13px;font-weight:500;">Shipping — sealed box</div></div>
+        <div style="display:flex;align-items:center;gap:4px;"><span style="font-size:12px;color:var(--muted);">$</span><input class="input" id="nrv-ship-sealed" type="number" inputmode="decimal" step="0.5" min="0" style="width:64px;text-align:right;" onchange="saveNrvForm()"></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div><div style="font-size:13px;font-weight:500;">Tax on gains</div><div style="font-size:11px;color:var(--muted2);">Applied to profit only, never sale price</div></div>
+        <input type="checkbox" id="nrv-tax-on" onchange="saveNrvForm()" style="width:20px;height:20px;">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;">
+        <div><div style="font-size:13px;font-weight:500;">Tax rate</div><div style="font-size:11px;color:var(--muted2);">Only used when tax on gains is on</div></div>
+        <div style="display:flex;align-items:center;gap:4px;"><input class="input" id="nrv-tax-pct" type="number" inputmode="decimal" step="1" min="0" max="60" style="width:64px;text-align:right;" onchange="saveNrvForm()"><span style="font-size:12px;color:var(--muted);">%</span></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1690,7 +1731,77 @@ const STORAGE_KEYS = {
   wishHistory:      'pkv2_wh',
   schema:           'pkv2_schema',
   lastPage:         'pkv2_lastpage',
+  nrv:              'pkv2_nrv',
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// ── NET REALIZABLE VALUE (NRV) · v1 · separate calc layer (2026-06) ──
+// Derives the honest "what you'd actually pocket" number from EXISTING market
+// values. ADDITIVE & SEPARATE: reads market value, never modifies pricing,
+// market value, AppState, sync, export/import, sealed pricing, or provenance.
+// Device-local settings (not synced). Rollback: delete this block, its three
+// display hooks, and the STORAGE_KEYS.nrv registry entry.
+// ════════════════════════════════════════════════════════════════════════════
+const NRV_DEFAULTS = {
+  enabled:         true,
+  shown:           true,          // portfolio Realizable line visible (toggle)
+  feePct:          0.136,         // eBay trading-card final-value fee (non-store), editable
+  feeFixedSmall:   0.30,          // per-order fee, order <= $10
+  feeFixedLarge:   0.40,          // per-order fee, order  > $10
+  discount:        0.15,          // single expected-sale discount (v1)
+  shipping:        { standard: 1.50, graded: 6.00, sealed: 18.00 },
+  shippingDefault: 4.00,
+  taxEnabled:      false,
+  taxPct:          0.28,          // applied to GAIN only, when enabled
+};
+
+function loadNrvSettings(){
+  const s = readJSON(STORAGE_KEYS.nrv, {});
+  const m = Object.assign({}, NRV_DEFAULTS, s || {});
+  m.shipping = Object.assign({}, NRV_DEFAULTS.shipping, (s && s.shipping) || {});
+  return m;
+}
+function saveNrvSettings(){ return writeJSON(STORAGE_KEYS.nrv, NRV); }
+
+let NRV = loadNrvSettings();
+
+// Per-unit realizable value + breakdown. Pure (reads NRV settings only). Returns
+// realizable=null when there is no market value, so callers render '—'.
+function nrvForCard(card, market){
+  const m = parseFloat(market);
+  if (!(m > 0)) return { realizable: null, breakdown: null, sellable: false };
+  const disc     = Math.min(Math.max(NRV.discount || 0, 0), 0.95);
+  const gross    = m * (1 - disc);
+  const feePct   = (NRV.feePct != null ? NRV.feePct : 0.136);
+  const feeFixed = gross > 10 ? NRV.feeFixedLarge : NRV.feeFixedSmall;
+  const fees     = gross * feePct + feeFixed;
+  const type     = card.type === 'graded' ? 'graded' : card.type === 'sealed' ? 'sealed' : 'standard';
+  const shipping = (NRV.shipping && NRV.shipping[type] != null) ? NRV.shipping[type] : NRV.shippingDefault;
+  let net = gross - fees - shipping;
+  if (net < 0) net = 0;
+  const basis = parseFloat(card.paid || 0);
+  const gain  = net - basis;
+  const tax   = (NRV.taxEnabled && gain > 0) ? gain * (NRV.taxPct || 0) : 0;
+  const realizable = Math.max(net - tax, 0);
+  return { realizable, breakdown: { market: m, disc, gross, fees, shipping, tax, net }, sellable: net > 0 };
+}
+
+// Portfolio-wide realizable total. SEPARATE aggregator — mirrors the read pattern
+// AppState uses but never touches AppState. Read-only over collection/sealed/pcache.
+function portfolioNRV(){
+  let total = 0;
+  collection.forEach(card => {
+    const p  = pcache[cacheKey(card)]?.data;
+    const bp = p ? bestPrice(p, card.type==='graded') : 0;
+    const r  = nrvForCard(card, bp);
+    if (r.realizable != null) total += r.realizable * (card.qty || 1);
+  });
+  sealed.forEach(prod => {
+    const r = nrvForCard({ type:'sealed', paid: prod.paid }, parseFloat(prod.value||0));
+    if (r.realizable != null) total += r.realizable * (prod.qty || 1);
+  });
+  return total;
+}
 
 // ═══════════════════════════════════════════════════════════
 // ── CENTRAL STATE ENGINE ──
@@ -2447,6 +2558,38 @@ function init() {
 }
 function loadKeys(){document.getElementById('k-ptcg').value=keys.ptcg||'';document.getElementById('k-ppt').value=keys.ppt||'';document.getElementById('k-psa').value=keys.psa||'';}
 function saveKey(k){keys[k]=document.getElementById('k-'+k).value.trim();localStorage.setItem(STORAGE_KEYS.keys,JSON.stringify(keys));updateStatusDots();toast('Key saved','green');}
+
+// ── NRV settings form (Settings → Realizable Value) ──
+function loadNrvForm(){
+  const g=id=>document.getElementById(id); if(!g('nrv-discount'))return;
+  g('nrv-shown').checked       = !!NRV.shown;
+  g('nrv-discount').value      = Math.round((NRV.discount||0)*100);
+  g('nrv-fee').value           = +(((NRV.feePct!=null?NRV.feePct:0.136)*100).toFixed(2));
+  g('nrv-ship-standard').value = NRV.shipping.standard;
+  g('nrv-ship-graded').value   = NRV.shipping.graded;
+  g('nrv-ship-sealed').value   = NRV.shipping.sealed;
+  g('nrv-tax-on').checked      = !!NRV.taxEnabled;
+  g('nrv-tax-pct').value       = Math.round((NRV.taxPct||0)*100);
+}
+function saveNrvForm(){
+  const g=id=>document.getElementById(id); if(!g('nrv-discount'))return;
+  const n=(id,d)=>{const v=parseFloat(g(id).value); return isFinite(v)?v:d;};
+  NRV.shown             = g('nrv-shown').checked;
+  NRV.discount          = Math.min(Math.max(n('nrv-discount',15)/100,0),0.95);
+  NRV.feePct            = Math.min(Math.max(n('nrv-fee',13.6)/100,0),0.5);
+  NRV.shipping.standard = Math.max(n('nrv-ship-standard',1.5),0);
+  NRV.shipping.graded   = Math.max(n('nrv-ship-graded',6),0);
+  NRV.shipping.sealed   = Math.max(n('nrv-ship-sealed',18),0);
+  NRV.taxEnabled        = g('nrv-tax-on').checked;
+  NRV.taxPct            = Math.min(Math.max(n('nrv-tax-pct',28)/100,0),0.6);
+  saveNrvSettings();
+  if(document.querySelector('.page.active')?.id==='page-portfolio') renderPortfolio();
+}
+function toggleNrvShown(){
+  NRV.shown=!NRV.shown; saveNrvSettings();
+  const f=document.getElementById('nrv-shown'); if(f)f.checked=NRV.shown;
+  if(document.querySelector('.page.active')?.id==='page-portfolio') renderPortfolio();
+}
 function updateStatusDots(){document.getElementById('s1').className='dot '+(keys.ptcg?'dot-on':'dot-warn');document.getElementById('s2').className='dot '+(keys.ppt?'dot-on':'dot-off');document.getElementById('s3').className='dot '+(keys.psa?'dot-on':'dot-off');}
 
 // ═══ PRICING ═══
@@ -3453,6 +3596,8 @@ function renderPortfolio(){
   const pnl=totalPaid>0?totalVal-totalPaid:null;
   const pct=pnl!=null&&totalPaid>0?((pnl/totalPaid)*100).toFixed(1):null;
   document.getElementById('port-total').textContent='$'+totalVal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  // NRV header (separate aggregator; does not touch AppState/market value)
+  (function(){const row=document.getElementById('nrv-port-row');if(!row)return;const val=document.getElementById('port-realizable');const lbl=document.getElementById('nrv-port-lbl');const tog=document.getElementById('nrv-port-toggle');const on=!!NRV.shown;if(val){val.textContent=on?(totalVal>0?moneyFull(portfolioNRV()):'—'):'';val.style.display=on?'':'none';}if(lbl)lbl.style.opacity=on?'1':'0.5';if(tog){tog.style.background=on?'var(--green)':'transparent';const k=tog.firstElementChild;if(k){k.style.left=on?'17px':'2px';k.style.background=on?'#fff':'var(--muted)';}tog.setAttribute('aria-pressed',on?'true':'false');}})();
   const chip=document.getElementById('port-pnl-chip');const meta=document.getElementById('port-meta');
   if(pnl!=null){chip.style.display='';chip.className='pnl-chip '+(pnl>=0?'pnl-up':'pnl-dn');chip.textContent=(pnl>=0?'+':'')+fmtPrice(pnl)+' ('+pct+'%)';meta.textContent='vs $'+totalPaid.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' cost basis';}
   else{chip.style.display='none';meta.textContent='Add purchase prices to see P&L';}
@@ -6311,7 +6456,7 @@ async function openDetail(id){
       </div>
       ${trendBlock}
       ${(card.grade||card.type==='graded')?`<div style="font-size:10px;font-family:var(--mono);color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.7;">diag · type:${card.type||'?'} · grade:${card.grade||'none'} · id:${card.cardId||'unresolved'}<br>tcg:${p.tcg!=null?'$'+p.tcg:'—'} · ebay:${p.ebay!=null?'$'+p.ebay:'—'} · ppt:${p.ppt!=null?'$'+p.ppt:'—'} · psa:${p.psa!=null?'$'+p.psa:'—'} · comps:${p.ebayN||0}<br>fetch · ${p._diag||'(cached — tap re-fetch)'}<a onclick="repriceCard('${card.id}')" style="color:var(--blue);cursor:pointer;margin-left:8px;text-decoration:underline;">↻ re-fetch</a></div>`:''}
-      ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?'Recent sold listings':s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
+      ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}${(()=>{const r=nrvForCard(card,best);if(r.realizable==null)return '';const b=r.breakdown;const discAmt=b.market-b.gross;const taxRow=b.tax>0?`<div style="display:flex;justify-content:space-between;"><span>Tax on gain</span><span>−${moneyFull(b.tax)}</span></div>`:'';return `<div style="margin-bottom:18px;"><details><summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:var(--r);background:rgba(46,204,128,0.06);border:1px solid rgba(46,204,128,0.18);"><span style="font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">Realizable Value</span><span style="font-family:var(--mono);font-weight:700;color:${r.sellable?'var(--green)':'var(--muted)'};">${r.sellable?moneyFull(r.realizable):'Below sale cost'}</span></summary><div style="padding:10px 12px 2px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;"><div style="display:flex;justify-content:space-between;"><span>Market</span><span>${moneyFull(b.market)}</span></div><div style="display:flex;justify-content:space-between;"><span>Expected-sale discount (${Math.round(b.disc*100)}%)</span><span>−${moneyFull(discAmt)}</span></div><div style="display:flex;justify-content:space-between;"><span>eBay fees</span><span>−${moneyFull(b.fees)}</span></div><div style="display:flex;justify-content:space-between;"><span>Shipping</span><span>−${moneyFull(b.shipping)}</span></div>${taxRow}<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;margin-top:2px;color:var(--text);font-weight:600;"><span>Realizable</span><span>${moneyFull(r.realizable)}</span></div><div style="font-size:10px;color:var(--muted2);margin-top:5px;">Net after discount, eBay fees & shipping · tune in Settings → Realizable Value</div></div></details></div>`;})()}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?'Recent sold listings':s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
       ${(()=>{const bars=SOURCES.map(s=>({label:s.label,color:s.color,v:p[s.k]})).filter(b=>b.v>0);if(bars.length<2)return '';const mx=Math.max(...bars.map(b=>b.v));return `<div style="margin-bottom:18px;"><div class="sec-title-sm">Price Bar Chart</div><div style="display:flex;flex-direction:column;gap:9px;">${bars.map(b=>`<div style="display:flex;align-items:center;gap:10px;"><div style="width:96px;flex-shrink:0;font-size:12px;color:var(--muted2);display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${b.color};display:inline-block;flex-shrink:0;"></span>${b.label}</div><div style="flex:1;height:9px;background:var(--bg3);border-radius:5px;overflow:hidden;"><div style="width:${Math.max(4,Math.round(b.v/mx*100))}%;height:100%;background:${b.color};border-radius:5px;"></div></div><div style="width:74px;flex-shrink:0;text-align:right;font-family:var(--mono);font-size:12px;font-weight:700;color:${b.v===best?'var(--green)':(b.v===worst&&worst>best?'var(--red)':'var(--text)')};">${fmtPrice(b.v)}</div></div>`).join('')}</div></div>`;})()}
@@ -7768,7 +7913,7 @@ function goPage(name,el){
   if(name==='analyzer'){renderAnalyzer();}
   if(name==='intelligence'){renderIntelligence();}
   if(name==='cardsearch'){initTabSearchSets();renderSetBrowser();setTimeout(()=>document.getElementById('tab-search-input')?.focus(),100);}
-  if(name==='settings'){loadKeys();renderAccountSection();updateAuthUI();}
+  if(name==='settings'){loadKeys();renderAccountSection();updateAuthUI();loadNrvForm();}
 }
 function updateMobTabs(id){document.querySelectorAll('.mob-tab').forEach(t=>t.classList.remove('active'));const el=document.getElementById(id);if(el)el.classList.add('active');}
 
