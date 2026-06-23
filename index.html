@@ -7124,6 +7124,8 @@ function openWishDetail(wishId) {
   openDetail('wishview_' + w.id);
 }
 
+let _wishTried = {};                 // wishId → last fetch-attempt ts (retry throttle, session-scoped)
+const WISH_RETRY_MS = 5*60*1000;     // don't refetch an unpriceable wishlist card more than once / 5 min
 function renderWishlist(){
   const grid=document.getElementById('wish-grid');
   const empty=document.getElementById('wish-empty');
@@ -7163,7 +7165,7 @@ function renderWishlist(){
   grid.innerHTML=sorted.map((w,idx)=>{
     const ck='wish_'+w.id;
     const p=pcache[ck]?.data;
-    const best=p?bestPrice(p):null;
+    const best=(p&&bestPrice(p)>0)?bestPrice(p):null;
     const img=p?.img||w.img||'';
     const inVault=collection.some(c=>c.cardId===w.cardId||(c.name===w.name&&c.set===w.set));
     // Store in global map by index to avoid quote escaping issues in onclick
@@ -7179,7 +7181,9 @@ function renderWishlist(){
         <div style="margin-top:4px;">
           ${best!=null
             ? `<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green);">$${best.toFixed(2)}</div>`
-            : `<div style="display:flex;align-items:center;gap:4px;"><div class="spinner" style="width:8px;height:8px;border-width:1.5px;flex-shrink:0;"></div><span style="font-size:10px;color:var(--muted);">Loading…</span></div>`}
+            : (_wishTried[w.id]
+                ? `<div style="font-family:var(--mono);font-size:11px;color:var(--muted);">—</div>`
+                : `<div style="display:flex;align-items:center;gap:4px;"><div class="spinner" style="width:8px;height:8px;border-width:1.5px;flex-shrink:0;"></div><span style="font-size:10px;color:var(--muted);">Loading…</span></div>`)}
           <canvas id="wsp-${w.id}" width="120" height="32" style="display:block;margin-top:4px;opacity:.8;pointer-events:none;"></canvas>
         </div>
         <div style="display:flex;gap:4px;margin-top:8px;">
@@ -7193,12 +7197,17 @@ function renderWishlist(){
   // Lazy load prices
   wishlist.forEach(async w=>{
     const ck='wish_'+w.id;
-    if(!pcache[ck]){
-      const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:w.type==='graded'?'graded':'holo',grade:w.grade||'',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
-      pcache[ck]={ts:Date.now(),data};
+    const cached=pcache[ck]?.data;
+    if(cached&&bestPrice(cached)>0) return;                              // usable price already cached
+    const now=Date.now();
+    if(_wishTried[w.id]&&(now-_wishTried[w.id])<WISH_RETRY_MS) return;   // retry throttle — no refetch storm
+    _wishTried[w.id]=now;
+    const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:w.type==='graded'?'graded':'holo',grade:w.grade||'',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
+    if(data&&bestPrice(data)>0){                                        // cache ONLY usable results
+      pcache[ck]={ts:now,data};
       localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
-      renderWishlist();
     }
+    renderWishlist();                                                   // reflect price, or swap spinner→dash
   });
 
   // Render charts + sparklines after grid is built
