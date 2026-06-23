@@ -4463,7 +4463,7 @@ function renderPSA(){
     const grader=(card.grade||'').split(' ')[0]||'PSA';const gradeN=(card.grade||'').split(' ').slice(1).join(' ')||'?';
     const img=p?.img||card.img||null;const tcgQ=encodeURIComponent(card.name+(card.num?' '+card.num:'')+' '+card.grade);
     return `<div class="psa-card">
-      <div class="psa-img">${img?`<img src="${img}" alt="${card.name}" loading="lazy" onerror="this.style.display='none'">`:'<div style="font-size:32px;color:var(--muted);">⟡</div>'}
+      <div class="psa-img">${tileImage(img,card.name,{placeholder:'<div style="font-size:32px;color:var(--muted);">⟡</div>'})}
         <div class="psa-grade-b">${gradeN}</div><div class="psa-grader-b">${grader}</div>
       </div>
       <div class="psa-body">
@@ -4483,6 +4483,20 @@ function renderPSA(){
 }
 
 // ═══ ALL SINGLES ═══
+// ── tileImage(): shared image atom (Phase 1: Singles + PSA only). Returns the
+// inner <img>-or-placeholder ONLY — never the wrapper or overlays. Canonical
+// attribute order: class · src · alt · loading · style · onerror. Verified
+// byte-identical to the prior inline Singles/PSA output (string-diff harness).
+function tileImage(src, alt, opts){
+  opts = opts || {};
+  const imgClass = opts.imgClass || '';
+  const imgStyle = opts.imgStyle || '';
+  const onerror  = (opts.onerror !== false);
+  const placeholder = opts.placeholder || '';
+  if (!src) return placeholder;
+  return `<img${imgClass?` class="${imgClass}"`:''} src="${src}" alt="${alt}" loading="lazy"${imgStyle?` style="${imgStyle}"`:''}${onerror?` onerror="this.style.display='none'"`:''}>`;
+}
+
 function renderSingles(){
   const singles=collection.filter(c=>c.type!=='graded');
   let cards=typeFilter?singles.filter(c=>c.type===typeFilter):singles;
@@ -4497,7 +4511,7 @@ function renderSingles(){
   grid.innerHTML=cards.map(card=>{
     const ck=cacheKey(card);const p=pcache[ck]?.data;
     const typeLabel={standard:'Standard',holo:'Holo',reverse:'Reverse',ex:'ex/GX/V',graded:'Graded'}[card.type]||card.type;
-    const imgHtml=(p?.img||card.img)?`<img src="${p?.img||card.img}" alt="${card.name}" loading="lazy" onerror="this.style.display='none'">`:`<div style="font-size:28px;color:var(--muted);">${card.num?'#'+(card.num||'').split('/')[0]:'⟡'}</div>`;
+    const imgHtml=tileImage(p?.img||card.img,card.name,{placeholder:`<div style="font-size:28px;color:var(--muted);">${card.num?'#'+(card.num||'').split('/')[0]:'⟡'}</div>`});
     const priceHtml=p?buildPriceStrip(p,card):`<div class="ps-loading"><div class="spinner"></div>Fetching…</div>`;
     return `<div class="card-tile" id="tile-${card.id}" onclick="openDetail('${card.id}')">
       <div class="ct-img">${imgHtml}
