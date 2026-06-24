@@ -2012,6 +2012,7 @@ if (localStorage.getItem(STORAGE_KEYS.schema) !== SCHEMA_VERSION) {
   console.log('[Schema] Version mismatch — clearing price cache + stale graded values');
   localStorage.removeItem('pkv2_pcache');
   localStorage.setItem('pkv2_pcache', '{}');
+  window._pcacheSchemaReset = true;  // hydratePcache() will also clear IndexedDB
   // Clear stale lastMarketValue on ALL cards so bad synced prices (e.g. the old
   // junk-comp graded prices) get re-fetched fresh instead of stuck as a fallback.
   try {
@@ -2480,6 +2481,53 @@ function renderAccountSection() {
 
 let prefs      = readJSON(STORAGE_KEYS.prefs, { cond: 'NM' });  // Patch 5: key via STORAGE_KEYS.prefs (resolves to 'pkv2_prefs')
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
+// ── Tier 1: durable price cache in IndexedDB (per-key writes). pcache stays the
+// synchronous in-memory object used by every read; this only changes persistence.
+// The localStorage 'pkv2_pcache' blob is left in place as a frozen rollback copy.
+let _idbDB = null, _idbOK = false;
+function _idbOpen(){
+  return new Promise(function(resolve){
+    try {
+      if (!window.indexedDB) return resolve(null);
+      const req = indexedDB.open('mytcg_pcache', 1);
+      req.onupgradeneeded = function(e){ const db = e.target.result; if(!db.objectStoreNames.contains('pcache')) db.createObjectStore('pcache'); };
+      req.onsuccess = function(e){ _idbDB = e.target.result; _idbOK = true; resolve(_idbDB); };
+      req.onerror   = function(){ resolve(null); };
+    } catch(_) { resolve(null); }
+  });
+}
+function _idbStore(mode){ return _idbDB.transaction('pcache', mode).objectStore('pcache'); }
+function idbGetAll(){
+  return new Promise(function(resolve){
+    if(!_idbOK) return resolve({});
+    try {
+      const out = {}, cur = _idbStore('readonly').openCursor();
+      cur.onsuccess = function(e){ const c = e.target.result; if(c){ out[c.key] = c.value; c.continue(); } else resolve(out); };
+      cur.onerror   = function(){ resolve(out); };
+    } catch(_) { resolve({}); }
+  });
+}
+function idbPut(k,v){ try { if(_idbOK) _idbStore('readwrite').put(v,k); } catch(_){} }
+function idbDelete(k){ try { if(_idbOK) _idbStore('readwrite').delete(k); } catch(_){} }
+function idbClear(){ try { if(_idbOK) _idbStore('readwrite').clear(); } catch(_){} }
+async function hydratePcache(){
+  await _idbOpen();
+  if(!_idbOK) return;  // fallback: keep the synchronous localStorage seed (behavior unchanged)
+  try {
+    if (window._pcacheSchemaReset) { idbClear(); return; }  // schema bump → wipe stale IDB too
+    const all = await idbGetAll();
+    const seedKeys = Object.keys(pcache);
+    if ((!all || Object.keys(all).length === 0) && seedKeys.length) {
+      // one-time COPY migration: localStorage blob → IndexedDB (blob left intact)
+      seedKeys.forEach(function(k){ idbPut(k, pcache[k]); });
+      return;  // pcache already equals the migrated seed this session
+    }
+    // IndexedDB is authoritative: replace in-memory contents (drops stale/invalidated keys)
+    Object.keys(pcache).forEach(function(k){ delete pcache[k]; });
+    Object.assign(pcache, all);
+    try { AppState.update(); AppState.renderActive(); } catch(_){}
+  } catch(_){}
+}
 
 // ── PER-CARD PRICE HISTORY ENGINE ──
 // Records each card's price over time → real trend charts. {cacheKey: [{d,v}]}
@@ -2620,6 +2668,7 @@ function init() {
   // Render dashboard immediately for fast perceived load
   AppState.update();
   renderDashboard();
+  hydratePcache();   // async: load durable cache from IndexedDB, then re-render
   // Defer heavy work so the UI paints first
   setTimeout(() => {
     captureHistorySnapshot();
@@ -2711,7 +2760,7 @@ async function getPrices(card){
     return hit.data;
   }
   const data=await fetchLivePrices(card);
-  pcache[ck]={ts:Date.now(),data};localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
+  pcache[ck]={ts:Date.now(),data};idbPut(ck,pcache[ck]);
   recordCardPrice(card, bestPrice(data, card.type==='graded')); saveCardHistory();
   stampLastValue(card, data);
   return data;
@@ -4519,7 +4568,7 @@ async function loadLiquidityScore(card) {
 
     const count = items.length;
     pcache[liqKey] = { ts: Date.now(), count };
-    localStorage.setItem('pkv2_pcache', JSON.stringify(pcache));
+    idbPut(liqKey, pcache[liqKey]);
 
     const s = getLiqScore(count);
     if (el) {
@@ -4659,7 +4708,7 @@ async function loadPricesForCards(cards){
     await Promise.all(batch.map(async ({ card, ck }) => {
       try{
         const data = await getPricesShared(card);   // shared in-flight dedupe (both loaders)
-        if(data) pcache[ck] = { ts: Date.now(), data };
+        if(data){ pcache[ck] = { ts: Date.now(), data }; idbPut(ck, pcache[ck]); }
         if(data) priced.push({ card, data });
         if(!data) return;
         // Patch this card's visible price strip in place.
@@ -4678,8 +4727,7 @@ async function loadPricesForCards(cards){
         if(ps) ps.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0;">Price unavailable</div>';
       }
     }));
-    // Persist cache once per completed batch (not once per card).
-    localStorage.setItem('pkv2_pcache', JSON.stringify(pcache));
+    // Persistence is now per-key via idbPut above (IndexedDB).
   }
 
   // Persist any discovered images to the collection once.
@@ -4743,7 +4791,7 @@ async function loadAllPrices(){
       const ck = cacheKey(card);
       try{
         const data = await getPricesShared(card);
-        pcache[ck] = {ts:Date.now(),data};
+        pcache[ck] = {ts:Date.now(),data}; idbPut(ck, pcache[ck]);
         if(data) priced.push({ card, data });
         cacheDirty = true;
         // Update just this card's price strip (cheap, targeted)
@@ -4761,7 +4809,7 @@ async function loadAllPrices(){
       }
     }));
     // Save cache once per batch (not per card)
-    if(cacheDirty){ localStorage.setItem('pkv2_pcache',JSON.stringify(pcache)); }
+    if(cacheDirty){ /* persistence now per-key via idbPut above (IndexedDB) */ }
   }
 
   // Re-render everything ONCE at the end (not per card)
@@ -6116,7 +6164,7 @@ function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.ge
 // ═══ CARD CRUD ═══
 function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:editingId?'edit':'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:editingId?null:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:editingId?'edit':'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:editingId?null:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -6492,7 +6540,7 @@ function closeCostEditor() {
 
 async function repriceCard(id){
   const card = collection.find(c=>c.id===id);
-  if(card){ try{ delete pcache[cacheKey(card)]; localStorage.setItem('pkv2_pcache', JSON.stringify(pcache)); }catch(e){} }
+  if(card){ try{ delete pcache[cacheKey(card)]; idbDelete(cacheKey(card)); }catch(e){} }
   closeModal('detail-modal');
   setTimeout(()=>openDetail(id), 60);
 }
@@ -7294,7 +7342,7 @@ function renderWishlist(){
     const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:w.type==='graded'?'graded':'holo',grade:w.grade||'',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
     if(data&&bestPrice(data)>0){                                        // cache ONLY usable results
       pcache[ck]={ts:now,data};
-      localStorage.setItem('pkv2_pcache',JSON.stringify(pcache));
+      idbPut(ck,pcache[ck]);
     }
     renderWishlist();                                                   // reflect price, or swap spinner→dash
   });
@@ -8982,11 +9030,12 @@ function importData(e){
   };
   r.readAsText(f);
 }
-async function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};if(typeof soldHistory!=='undefined')soldHistory=[];if(typeof cardHistory!=='undefined')cardHistory={};if(typeof _cashPosition!=='undefined')_cashPosition=0;['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_sold','pkv2_ph2','pkv2_wh','pkv2_vh','pkv2_cardhist','pkv2_cash'].forEach(k=>localStorage.removeItem(k));try{if(typeof syncPush==='function')await syncPush();}catch(e){}init();toast('All data cleared','red');}
+async function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};if(typeof soldHistory!=='undefined')soldHistory=[];if(typeof cardHistory!=='undefined')cardHistory={};if(typeof _cashPosition!=='undefined')_cashPosition=0;['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_sold','pkv2_ph2','pkv2_wh','pkv2_vh','pkv2_cardhist','pkv2_cash'].forEach(k=>localStorage.removeItem(k));try{idbClear();}catch(e){}try{if(typeof syncPush==='function')await syncPush();}catch(e){}init();toast('All data cleared','red');}
 function refreshPrices(){
   pcache = {};
   localStorage.removeItem('pkv2_pcache');
   localStorage.setItem('pkv2_pcache', '{}');
+  idbClear();
   AppState._dirty = true;
   AppState.update();
   toast('Refreshing prices…','gold');
