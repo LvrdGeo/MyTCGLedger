@@ -1713,6 +1713,60 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 // ╚═══════════════════════════════════════════════════════════════════════╝
 // ═══ STATE ═══
 let collection = JSON.parse(localStorage.getItem('pkv2_col')   || '[]');
+// ── Tier 1: durable collection store in IndexedDB (separate DB, single record).
+// collection stays the in-memory array; this only retargets persistence.
+// localStorage 'pkv2_col' is left intact as a frozen rollback copy.
+let _colDB = null, _colOK = false;
+function _colOpen(){
+  return new Promise(function(resolve){
+    try {
+      if (!window.indexedDB) return resolve(null);
+      const req = indexedDB.open('mytcg_collection', 1);
+      req.onupgradeneeded = function(e){ const db = e.target.result; if(!db.objectStoreNames.contains('kv')) db.createObjectStore('kv'); };
+      req.onsuccess = function(e){ _colDB = e.target.result; _colOK = true; resolve(_colDB); };
+      req.onerror   = function(){ resolve(null); };
+    } catch(_) { resolve(null); }
+  });
+}
+function _colStore(mode){ return _colDB.transaction('kv', mode).objectStore('kv'); }
+function idbColLoad(){
+  return new Promise(function(resolve){
+    if(!_colOK) return resolve(null);
+    try {
+      const req = _colStore('readonly').get('collection');
+      req.onsuccess = function(){ resolve(req.result != null ? req.result : null); };
+      req.onerror   = function(){ resolve(null); };
+    } catch(_) { resolve(null); }
+  });
+}
+function idbColSave(arr){ try { if(_colOK) _colStore('readwrite').put(arr, 'collection'); } catch(_){} }
+function idbColClear(){ try { if(_colOK) _colStore('readwrite').delete('collection'); } catch(_){} }
+async function hydrateCollection(){
+  await _colOpen();
+  if(!_colOK) return;  // fallback: keep the synchronous localStorage seed (behavior unchanged)
+  try {
+    const stored = await idbColLoad();
+    if (stored == null) {
+      // one-time COPY migration: localStorage seed → IndexedDB (pkv2_col left intact)
+      if (Array.isArray(collection) && collection.length) idbColSave(collection);
+      return;  // in-memory already equals the migrated seed this session
+    }
+    // IndexedDB is authoritative: replace the in-memory array
+    if (Array.isArray(stored)) collection = stored;
+    // Version-gated stale-price-stamp clear (mirrors the load-time schema guard), applied to IDB data
+    if (window._collectionSchemaReset && Array.isArray(collection)) {
+      let _cleared = 0;
+      collection.forEach(function(card){
+        if (card && card.lastMarketValue != null) {
+          delete card.lastMarketValue; delete card.lastPricedAt;
+          delete card.lastPriceConfidence; delete card.lastPriceSource; _cleared++;
+        }
+      });
+      if (_cleared) idbColSave(collection);
+    }
+    try { AppState.update(); AppState.renderActive(); } catch(_){}
+  } catch(_){}
+}
 let sealed     = JSON.parse(localStorage.getItem('pkv2_sealed') || '[]');
 let wishlist   = JSON.parse(localStorage.getItem('pkv2_wish')  || '[]');
 let deals      = JSON.parse(localStorage.getItem('pkv2_deals') || '[]');
@@ -2013,6 +2067,7 @@ if (localStorage.getItem(STORAGE_KEYS.schema) !== SCHEMA_VERSION) {
   localStorage.removeItem('pkv2_pcache');
   localStorage.setItem('pkv2_pcache', '{}');
   window._pcacheSchemaReset = true;  // hydratePcache() will also clear IndexedDB
+  window._collectionSchemaReset = true;  // hydrateCollection() re-applies the stamp-clear to IDB
   // Clear stale lastMarketValue on ALL cards so bad synced prices (e.g. the old
   // junk-comp graded prices) get re-fetched fresh instead of stuck as a fallback.
   try {
@@ -2249,7 +2304,7 @@ function collectAppData() {
 // Write a pulled cloud object back into local state + localStorage
 function applyAppData(d) {
   if (!d || typeof d !== 'object') return;
-  if (Array.isArray(d.collection))  { collection  = d.collection;  localStorage.setItem('pkv2_col',    JSON.stringify(collection)); }
+  if (Array.isArray(d.collection))  { collection  = d.collection;  idbColSave(collection); }
   if (Array.isArray(d.wishlist))    { wishlist    = d.wishlist;    localStorage.setItem('pkv2_wish',   JSON.stringify(wishlist)); }
   if (Array.isArray(d.sealed))      { sealed      = d.sealed;      localStorage.setItem('pkv2_sealed', JSON.stringify(sealed)); }
   if (Array.isArray(d.deals))       { deals       = d.deals;       localStorage.setItem('pkv2_deals',  JSON.stringify(deals)); }
@@ -2668,6 +2723,7 @@ function init() {
   // Render dashboard immediately for fast perceived load
   AppState.update();
   renderDashboard();
+  hydrateCollection();  // async: load collection from IndexedDB, then re-render
   hydratePcache();   // async: load durable cache from IndexedDB, then re-render
   // Defer heavy work so the UI paints first
   setTimeout(() => {
@@ -8993,7 +9049,7 @@ function saveTransactionToDatabase(txn){
 }
 
 function save(){
-  localStorage.setItem('pkv2_col',JSON.stringify(collection));
+  idbColSave(collection);
   localStorage.setItem('pkv2_wish',JSON.stringify(wishlist));
   localStorage.setItem('pkv2_sealed',JSON.stringify(sealed));
   localStorage.setItem('pkv2_deals',JSON.stringify(deals));
@@ -9030,7 +9086,7 @@ function importData(e){
   };
   r.readAsText(f);
 }
-async function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};if(typeof soldHistory!=='undefined')soldHistory=[];if(typeof cardHistory!=='undefined')cardHistory={};if(typeof _cashPosition!=='undefined')_cashPosition=0;['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_sold','pkv2_ph2','pkv2_wh','pkv2_vh','pkv2_cardhist','pkv2_cash'].forEach(k=>localStorage.removeItem(k));try{idbClear();}catch(e){}try{if(typeof syncPush==='function')await syncPush();}catch(e){}init();toast('All data cleared','red');}
+async function clearAll(){collection=[];wishlist=[];sealed=[];deals=[];pcache={};if(typeof soldHistory!=='undefined')soldHistory=[];if(typeof cardHistory!=='undefined')cardHistory={};if(typeof _cashPosition!=='undefined')_cashPosition=0;['pkv2_col','pkv2_wish','pkv2_sealed','pkv2_deals','pkv2_pcache','pkv2_sold','pkv2_ph2','pkv2_wh','pkv2_vh','pkv2_cardhist','pkv2_cash'].forEach(k=>localStorage.removeItem(k));try{idbClear();}catch(e){}try{idbColClear();}catch(e){}try{if(typeof syncPush==='function')await syncPush();}catch(e){}init();toast('All data cleared','red');}
 function refreshPrices(){
   pcache = {};
   localStorage.removeItem('pkv2_pcache');
