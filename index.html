@@ -3,6 +3,72 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- ════════════════════════════════════════════════════════════════════════
+     TIER 0 · ERROR MONITORING (Sentry) · additive & isolated (2026-06)
+     Loaded FIRST so it captures errors from every later script. Errors-only
+     bundle = no tracing, no session replay (privacy: portfolio + tokens never
+     screenshotted). Guarded: if the CDN is blocked, the app runs normally.
+     Rollback: delete this entire block (and the one line in safeRender).
+     ════════════════════════════════════════════════════════════════════════ -->
+<script src="https://browser.sentry-cdn.com/10.60.0/bundle.min.js" integrity="sha384-wfl9EYpjV8ZzQFZ0kLwPkQFBSJjJMW9YdylIRSsd6R/Sx4lqnxiMKdHpnPbsYXe5" crossorigin="anonymous"></script>
+<script>
+(function(){
+  if (!window.Sentry) return;            // CDN blocked / adblock → monitoring off, app unaffected
+  try {
+    var PROD_HOST = 'mytcgledger.vercel.app';   // ← change if you use a custom domain
+    var host = location.hostname;
+    var env  = host === PROD_HOST ? 'production'
+             : /(^localhost$|^127\.|^192\.168\.)/.test(host) ? 'development'
+             : /\.vercel\.app$/.test(host) ? 'preview'
+             : 'production';
+    Sentry.init({
+      dsn: 'https://cdbd30f3ece9f24dc4fa4971bcefc95c@o4511618272198656.ingest.us.sentry.io/4511618297102336',
+      environment: env,
+      release: 'mytcgledger@6.8',              // ← bump manually when SCHEMA_VERSION changes
+      sendDefaultPii: false,                   // never attach IP / user identifiers
+      tracesSampleRate: 0,                     // errors only
+      ignoreErrors: [
+        'ResizeObserver loop limit exceeded',
+        'ResizeObserver loop completed with undelivered notifications.',
+        'AbortError',
+        'Non-Error promise rejection captured'
+      ],
+      beforeBreadcrumb: function(){ return null; },  // capture NO breadcrumbs (no fetch URLs, console, or clicks)
+      beforeSend: function(event){
+        try {
+          // 1) Strip OAuth access_token / code that lands in the URL after Google sign-in
+          if (event.request && event.request.url) {
+            event.request.url = String(event.request.url).split('#')[0].split('?')[0];
+          }
+          // 2) Redact known API tokens anywhere in the payload (ptcg literal + user's PSA/PokePrice tokens)
+          var secrets = ['83d3cfd0-e05d-4fc0-9a4d-efef50602756'];
+          try {
+            var k = JSON.parse(localStorage.getItem('pkv2_keys') || '{}');
+            ['psa','ppt','ptcg'].forEach(function(n){ if (k[n]) secrets.push(k[n]); });
+          } catch(_){}
+          var s = JSON.stringify(event);
+          secrets.forEach(function(v){ if (v && v.length > 6) s = s.split(v).join('[redacted]'); });
+          return JSON.parse(s);
+        } catch(_) { return event; }
+      }
+    });
+  } catch(e) { /* monitoring must never break page load */ }
+})();
+</script>
+<!-- ░░░░░ TIER 0 TEST TRIGGER — TEMPORARY — DELETE THIS ENTIRE BLOCK AFTER VERIFICATION ░░░░░
+     Fires ONLY when the URL contains ?monitortest=1 . Normal users never trigger it.
+     Usage: open  https://<your-site>/?monitortest=1  then check Sentry for the event. -->
+<script>
+(function(){
+  if (window.Sentry && location.search.indexOf('monitortest=1') !== -1) {
+    try {
+      Sentry.captureMessage('monitortest: Tier 0 Sentry verification event', 'error');
+      console.log('[monitortest] Test event sent to Sentry.');
+    } catch(e) { console.warn('[monitortest] failed:', e); }
+  }
+})();
+</script>
+<!-- ░░░░░ END TIER 0 TEST TRIGGER ░░░░░ -->
 <title>MyTCG Ledger V6</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -2002,7 +2068,7 @@ try {
 // ── Error boundary wrapper for render functions ──
 function safeRender(fn, name) {
   try { fn(); }
-  catch(err) { console.error('[Render] ' + name + ' failed:', err); }
+  catch(err) { console.error('[Render] ' + name + ' failed:', err); try { window.Sentry && Sentry.captureException(err); } catch(_) {} }
 }
 let keys       = JSON.parse(localStorage.getItem(STORAGE_KEYS.keys)  || '{"ptcg":"83d3cfd0-e05d-4fc0-9a4d-efef50602756","ppt":"","psa":""}');
 // Backfill the pokemontcg.io key if it was never set or was cleared, so TCGPlayer
