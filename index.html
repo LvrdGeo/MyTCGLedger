@@ -60,11 +60,16 @@
      Usage: open  https://<your-site>/?monitortest=1  then check Sentry for the event. -->
 <script>
 (function(){
-  if (window.Sentry && location.search.indexOf('monitortest=1') !== -1) {
+  if (location.search.indexOf('monitortest=1') === -1) return;   // only on the test URL
+  if (window.Sentry) {
     try {
       Sentry.captureMessage('monitortest: Tier 0 Sentry verification event', 'error');
-      console.log('[monitortest] Test event sent to Sentry.');
-    } catch(e) { console.warn('[monitortest] failed:', e); }
+      alert('OK: new code is LIVE and Sentry loaded. Test event sent -> now check Sentry > Issues.');
+    } catch(e) {
+      alert('Sentry loaded but capture FAILED: ' + e);
+    }
+  } else {
+    alert('New code is LIVE, but Sentry did NOT load. Most likely an ad/content blocker is blocking the Sentry CDN, or a version/SRI mismatch. Try a private tab with blockers off.');
   }
 })();
 </script>
