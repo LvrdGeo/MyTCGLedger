@@ -1788,11 +1788,18 @@ function nrvForCard(card, market){
 
 // Portfolio-wide realizable total. SEPARATE aggregator — mirrors the read pattern
 // AppState uses but never touches AppState. Read-only over collection/sealed/pcache.
+// Resolve a card's market value: live pcache wins; else the synced lastMarketValue
+// baseline, so a freshly-synced device shows a non-zero total before its own refresh.
+function cardValue(card){
+  const e = pcache[cacheKey(card)];
+  if (e && e.data) return bestPrice(e.data, card.type === 'graded');
+  return +card.lastMarketValue || 0;
+}
+
 function portfolioNRV(){
   let total = 0;
   collection.forEach(card => {
-    const p  = pcache[cacheKey(card)]?.data;
-    const bp = p ? bestPrice(p, card.type==='graded') : 0;
+    const bp = cardValue(card);
     const r  = nrvForCard(card, bp);
     if (r.realizable != null) total += r.realizable * (card.qty || 1);
   });
@@ -1845,10 +1852,9 @@ const AppState = {
       const movers = [];
 
       collection.forEach(card => {
-        const p    = pcache[cacheKey(card)]?.data;
-        // Live cached price only — never a stored/synced fallback, so a stale
-        // lastMarketValue can't pollute displayed values or totals.
-        const bp   = p ? bestPrice(p, card.type==='graded') : 0;
+        // Live pcache wins; else the synced lastMarketValue baseline, so a freshly
+        // synced device shows a non-zero total before running its own live refresh.
+        const bp   = cardValue(card);
         const paid = parseFloat(card.paid || 0);
 
         if (bp > 0) {
@@ -2142,7 +2148,7 @@ async function authGoogle() {
 
 async function authSignOut() {
   if (!supa) return;
-  try { await supa.auth.signOut(); currentUser = null; toast('Signed out', 'gold'); }
+  try { await supa.auth.signOut(); currentUser = null; _syncReconciled = false; toast('Signed out', 'gold'); }
   catch (e) { console.error('[Auth] signout', e); }
 }
 
@@ -2159,6 +2165,7 @@ async function authSignOut() {
 let _syncState = 'idle';        // idle | syncing | synced | offline | error
 let _syncPushTimer = null;
 let _syncPending = false;
+let _syncReconciled = false;    // true only after a successful syncReconcile() this session (cloud-push guard)
 let _lastLocalChange = 0;       // ms timestamp of last local mutation
 
 // Gather everything we sync into one plain object
@@ -2259,7 +2266,7 @@ async function syncPull() {
     .select('data, updated_at')
     .eq('user_id', currentUser.id)
     .maybeSingle();
-  if (error) { console.warn('[Sync] pull error', error.message); return null; }
+  if (error) { console.warn('[Sync] pull error', error.message); throw error; }
   return data; // { data:{...}, updated_at } or null
 }
 
@@ -2279,6 +2286,7 @@ async function syncReconcile() {
   if (!supa || !currentUser) return;
   if (!navigator.onLine) { setSyncStatus('offline'); return; }
   setSyncStatus('syncing');
+  _syncReconciled = false;            // re-reconciling — block pushes until this succeeds
   try {
     const cloud = await syncPull();
     const localD = collectAppData();
@@ -2287,7 +2295,9 @@ async function syncReconcile() {
     if (!cloud) {
       // No cloud row yet → first sign-in. Push local up (your migration).
       await syncPush();
+      _syncReconciled = true;
       setSyncStatus('synced');
+      if (_syncPending) { _syncPending = false; syncQueuePush(); }
       return;
     }
 
@@ -2309,7 +2319,9 @@ async function syncReconcile() {
       await syncPush();
     }
     if (typeof renderAll === 'function') renderAll();
+    _syncReconciled = true;
     setSyncStatus('synced');
+    if (_syncPending) { _syncPending = false; syncQueuePush(); }
   } catch (e) {
     console.error('[Sync] reconcile failed', e);
     setSyncStatus('error');
@@ -2321,6 +2333,7 @@ function syncQueuePush() {
   _lastLocalChange = Date.now();
   if (!supa || !currentUser) return;       // signed out → local only
   if (!navigator.onLine) { _syncPending = true; setSyncStatus('offline'); return; }
+  if (!_syncReconciled) { _syncPending = true; setSyncStatus('error'); return; }   // not reconciled this session → hold, don't overwrite cloud
   clearTimeout(_syncPushTimer);
   setSyncStatus('syncing');
   _syncPushTimer = setTimeout(async () => {
@@ -2342,12 +2355,27 @@ window.addEventListener('offline', () => {
 
 
 // Reflect auth state in the sidebar status + account section
+// Pure, read-only: derives the always-visible sync badge from existing signals.
+// Reads currentUser / navigator.onLine / _syncPending / _syncState — writes nothing.
+function syncBadge(){
+  if (!currentUser)      return { c:'var(--muted2)', t:'Local only' };
+  if (_syncPending)      return { c:'var(--gold)',   t:'Pending changes' };
+  if (!navigator.onLine) return { c:'var(--gold)',   t:'Offline' };
+  switch (_syncState){
+    case 'syncing': return { c:'var(--gold)',  t:'Syncing…' };
+    case 'error':   return { c:'var(--red)',   t:'Sync failed' };
+    case 'synced':  return { c:'var(--green)', t:'Synced' };
+    default:        return { c:'var(--green)', t:'Synced' };   // idle / connected steady state
+  }
+}
+
 function updateAuthUI() {
   const el = document.getElementById('auth-status-pill');
   if (el) {
     if (currentUser) {
-      el.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;"></span> ' +
-        (currentUser.email || 'Signed in');
+      const b = syncBadge();
+      el.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:'+b.c+';display:inline-block;"></span> ' +
+        b.t + ' · ' + (currentUser.email || 'Signed in');
     } else {
       el.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--muted2);display:inline-block;"></span> Local only · <a href="#" onclick="openAuthModal();return false;" style="color:var(--gold);text-decoration:none;">Sign in</a>';
     }
@@ -3195,7 +3223,7 @@ function pct(v, dp=1){ if (v == null || !isFinite(v)) return ''; return (v >= 0 
 // fmtDate — central short date formatter ('Jun 10'); '' on invalid input.
 function fmtDate(v){ const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
 
-function getBestCached(card){const p=pcache[cacheKey(card)]?.data;return p?bestPrice(p,card.type==='graded'):0;}
+function getBestCached(card){return cardValue(card);}
 
 // ═══ PORTFOLIO ═══
 
