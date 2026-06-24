@@ -55,25 +55,6 @@
   } catch(e) { /* monitoring must never break page load */ }
 })();
 </script>
-<!-- ░░░░░ TIER 0 TEST TRIGGER — TEMPORARY — DELETE THIS ENTIRE BLOCK AFTER VERIFICATION ░░░░░
-     Fires ONLY when the URL contains ?monitortest=1 . Normal users never trigger it.
-     Usage: open  https://<your-site>/?monitortest=1  then check Sentry for the event. -->
-<script>
-(function(){
-  if (location.search.indexOf('monitortest=1') === -1) return;   // only on the test URL
-  if (window.Sentry) {
-    try {
-      Sentry.captureMessage('monitortest: Tier 0 Sentry verification event', 'error');
-      alert('OK: new code is LIVE and Sentry loaded. Test event sent -> now check Sentry > Issues.');
-    } catch(e) {
-      alert('Sentry loaded but capture FAILED: ' + e);
-    }
-  } else {
-    alert('New code is LIVE, but Sentry did NOT load. Most likely an ad/content blocker is blocking the Sentry CDN, or a version/SRI mismatch. Try a private tab with blockers off.');
-  }
-})();
-</script>
-<!-- ░░░░░ END TIER 0 TEST TRIGGER ░░░░░ -->
 <title>MyTCG Ledger V6</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
