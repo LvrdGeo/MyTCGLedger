@@ -1335,6 +1335,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px;">Data</div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);"><div><div style="font-size:13px;font-weight:500;">Export</div><div style="font-size:11px;color:var(--muted2);">Download all data as JSON</div></div><button class="btn btn-ghost btn-sm" onclick="exportData()">Export</button></div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);"><div><div style="font-size:13px;font-weight:500;">Import</div><div style="font-size:11px;color:var(--muted2);">Restore from JSON export</div></div><label class="btn btn-ghost btn-sm" style="cursor:pointer;">Import<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);"><div><div style="font-size:13px;font-weight:500;">Clean Up Duplicates</div><div style="font-size:11px;color:var(--muted2);">Merge duplicate cards into one (keeps cost basis &amp; best price)</div></div><button class="btn btn-ghost btn-sm" onclick="cleanupDuplicatesUI()">Scan</button></div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;"><div><div style="font-size:13px;font-weight:500;">Clear All Data</div><div style="font-size:11px;color:var(--muted2);">Cannot be undone</div></div><button class="btn btn-danger btn-sm" onclick="showConfirm('Clear all data?','Permanently deletes your entire collection.',clearAll)">Clear All</button></div>
     </div>
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:20px;margin-top:14px;">
@@ -2313,6 +2314,7 @@ function collectAppData() {
     portfolioHistory: JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'),
     wishHistory: JSON.parse(localStorage.getItem(WISH_HISTORY_KEY) || '[]'),
     cashPosition: parseFloat(localStorage.getItem('pkv2_cash') || '0'),
+    deletionLedger: Array.isArray(deletionLedger) ? deletionLedger : [],
     _localChange: _lastLocalChange || Date.now()
   };
 }
@@ -2329,6 +2331,11 @@ function applyAppData(d) {
   if (Array.isArray(d.portfolioHistory)) localStorage.setItem(HISTORY_KEY, JSON.stringify(d.portfolioHistory));
   if (Array.isArray(d.wishHistory))      localStorage.setItem(WISH_HISTORY_KEY, JSON.stringify(d.wishHistory));
   if (typeof d.cashPosition === 'number') { localStorage.setItem('pkv2_cash', d.cashPosition.toFixed(2)); if(typeof _cashPosition!=='undefined') _cashPosition = d.cashPosition; }
+  // Deletion ledger: union in (monotonic — never shrinks), then suppress in-memory lists.
+  if (Array.isArray(d.deletionLedger)) {
+    deletionLedger = unionLedger(deletionLedger, d.deletionLedger);
+    if (Array.isArray(collection)) { collection = applyDeletions(collection, deletionLedger, 'card'); idbColSave(collection); }
+  }
 }
 
 // Merge cloud + local so the FIRST sign-in never loses anything.
@@ -2370,13 +2377,17 @@ function mergeAppData(localD, cloudD) {
     return out;
   };
   const mergedCardHist = Object.assign({}, cloudD.cardHistory||{}, localD.cardHistory||{});
+  // Deletion ledger: union FIRST (monotonic, never shrinks), then suppress per domain
+  // with fold-before-drop. Inert when the ledger is empty (byte-identical to pre-ledger).
+  const mergedLedger = unionLedger(localD.deletionLedger, cloudD.deletionLedger);
   return {
-    collection:  mergeCollection(localD.collection,  cloudD.collection),
-    wishlist:    mergeById(localD.wishlist,    cloudD.wishlist),
-    sealed:      mergeById(localD.sealed,      cloudD.sealed),
-    deals:       mergeById(localD.deals,       cloudD.deals),
-    soldHistory: mergeById(localD.soldHistory, cloudD.soldHistory),
+    collection:  applyDeletions(mergeCollection(localD.collection,  cloudD.collection), mergedLedger, 'card'),
+    wishlist:    applyDeletions(mergeById(localD.wishlist,    cloudD.wishlist),    mergedLedger, 'wishlist'),
+    sealed:      applyDeletions(mergeById(localD.sealed,      cloudD.sealed),      mergedLedger, 'sealed'),
+    deals:       applyDeletions(mergeById(localD.deals,       cloudD.deals),       mergedLedger, 'deal'),
+    soldHistory: applyDeletions(mergeById(localD.soldHistory, cloudD.soldHistory), mergedLedger, 'sold'),
     cardHistory: mergedCardHist,
+    deletionLedger: mergedLedger,
     // histories: take whichever is longer (more data)
     portfolioHistory: (localD.portfolioHistory||[]).length >= (cloudD.portfolioHistory||[]).length ? localD.portfolioHistory : cloudD.portfolioHistory,
     wishHistory:      (localD.wishHistory||[]).length >= (cloudD.wishHistory||[]).length ? localD.wishHistory : cloudD.wishHistory,
@@ -2407,6 +2418,17 @@ async function syncPull() {
 async function syncPush() {
   if (!supa || !currentUser) return false;
   const payload = collectAppData();
+  // Fix C1: the deletion ledger is monotonic. Before a (possibly stale) blind push,
+  // union our ledger with the cloud's so a background push can NEVER shrink/erase
+  // deletions another device wrote. Cheap read of just the ledger; best-effort.
+  try {
+    const cur = await syncPull();
+    if (cur && cur.data && Array.isArray(cur.data.deletionLedger)) {
+      const unioned = unionLedger(payload.deletionLedger, cur.data.deletionLedger);
+      payload.deletionLedger = unioned;
+      deletionLedger = unioned;
+    }
+  } catch (e) { /* offline/read-failed → push our ledger as-is (still never deletes a cloud entry on its own) */ }
   const { error } = await supa
     .from('user_app_state')
     .upsert({ user_id: currentUser.id, data: payload, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
@@ -3873,6 +3895,169 @@ function findIdentityMatches(record, list){
 }
 
 /* ═══════════════ end Identity Engine — Phase 1 ═══════════════ */
+
+/* ─── Guard 1: add-flow duplicate warning (uses the Identity Engine) ─────────
+   Before a NEW card is added (never on edit, never on deals), check the existing
+   collection for an identity match. No match → proceed silently (zero change).
+   Match → warn and let the user add anyway or cancel. Auto action is NEVER taken
+   here — collectible/physical matches only WARN; nothing is merged or blocked. */
+function dupWarnThenAdd(card, proceed){
+  let matches = [];
+  try { matches = findIdentityMatches(card, collection); } catch(e){ matches = []; }
+  if(!matches.length){ proceed(); return; }
+  const top = matches[0];
+  const existing = top.record || {};
+  const label = (card.name || 'This card') + (card.grade ? (' ' + card.grade) : '');
+  const where = (top.level === 'physical')
+    ? 'the exact same graded card (matching cert) is already in your collection'
+    : (top.level === 'product')
+      ? 'the same sealed product is already in your collection'
+      : 'a card that looks the same is already in your collection';
+  showConfirm(
+    'Possible duplicate',
+    `${label}: ${where}` + (existing.name ? ` (existing: ${existing.name}${existing.set ? ' · ' + existing.set : ''}).` : '.') + ' Add another copy anyway?',
+    () => proceed()
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DELETION LEDGER — core primitives (pure, additive, INERT when ledger empty)
+   A delete is the PRESENCE of a ledger entry, not the absence of a record.
+   Suppression is id-exact (identity NEVER deletes — it only warns). Monotonic
+   (union, never shrinks), forever (no GC), generic over entityType.
+   ════════════════════════════════════════════════════════════════════════════ */
+let deletionLedger = [];
+const LEDGER_VERSION = 'ledger-v2';
+function makeLedgerEntry(entityType, entityId, opts){
+  opts = opts || {};
+  return Object.freeze({
+    entityType: String(entityType||''),
+    entityId:   (entityId!=null ? String(entityId) : ''),
+    identityKey: opts.identityKey || null,
+    reason:     opts.reason || 'user-delete',
+    mergedInto: opts.mergedInto || null,
+    retiredAt:  opts.retiredAt || new Date().toISOString(),
+    version:    LEDGER_VERSION,
+  });
+}
+function ledgerKey(e){ return (e && e.entityType + '|' + e.entityId) || ''; }
+function unionLedger(a, b){
+  const map = new Map();
+  const add = (e) => {
+    if(!e || e.entityId==null || e.entityId==='') return;
+    const k = ledgerKey(e), prev = map.get(k);
+    if(!prev) map.set(k, e);
+    else if(String(e.retiredAt) < String(prev.retiredAt)) map.set(k, e);   // earliest wins
+  };
+  (a||[]).forEach(add); (b||[]).forEach(add);
+  return [...map.values()];
+}
+function isDeleted(ledger, entityType, id){
+  if(id==null) return false;
+  const k = entityType + '|' + String(id);
+  return (ledger||[]).some(e => ledgerKey(e) === k);
+}
+// Generic suppression with FOLD-BEFORE-DROP. Returns the SAME array reference when
+// inert (no entries for this entityType) → byte-identical merge output when empty.
+function applyDeletions(list, ledger, entityType){
+  if(!Array.isArray(list) || !list.length) return list || [];
+  const dead = new Map();
+  for(const e of (ledger||[])) if(e && e.entityType===entityType) dead.set(String(e.entityId), e);
+  if(dead.size===0) return list;
+  const byId = new Map();
+  for(const r of list) if(r && r.id!=null) byId.set(String(r.id), r);
+  for(const r of list){
+    if(!r || r.id==null) continue;
+    const e = dead.get(String(r.id));
+    if(e && e.mergedInto){
+      const keeper = byId.get(String(e.mergedInto));
+      if(keeper && (r.lastPricedAt||0) > (keeper.lastPricedAt||0)){
+        keeper.lastMarketValue     = r.lastMarketValue;
+        keeper.lastPricedAt        = r.lastPricedAt;
+        keeper.lastPriceConfidence = r.lastPriceConfidence;
+        keeper.lastPriceSource     = r.lastPriceSource;
+      }
+    }
+  }
+  return list.filter(r => !(r && r.id!=null && dead.has(String(r.id))));
+}
+// Deterministic keeper: pure fn of identity-stable fields → concurrent cleanups
+// on different devices pick the SAME keeper (can't annihilate a card).
+function chooseKeeper(records){
+  if(!records || !records.length) return null;
+  return [...records].sort((x,y)=>{
+    const ax=String(x.id||''), ay=String(y.id||'');
+    if(ax!==ay) return ax<ay?-1:1;
+    const dx=String(x.added||''), dy=String(y.added||'');
+    if(dx!==dy) return dx<dy?-1:1;
+    return 0;
+  })[0];
+}
+/* ═══════════════ end Deletion Ledger ═══════════════ */
+
+/* ─── Settings action: preview duplicates (dry-run), confirm with numbers, apply ─── */
+function cleanupDuplicatesUI(){
+  let r;
+  try { r = runDuplicateCleanup({ dryRun:true }); }
+  catch(e){ toast('Duplicate scan failed','red'); return; }
+  if(!r || r.groups===0){ toast('No duplicates found','green'); return; }
+  const msg = `Found ${r.groups} duplicate group${r.groups>1?'s':''} (${r.retired} extra record${r.retired>1?'s':''}). `
+    + `This merges each into one card — keeping cost basis and the best price — and removes the duplicate${r.retired>1?'s':''}. `
+    + `Portfolio: ${money(r.before)} → ${money(r.after)} (minus ${money(r.removed)}). Proceed?`;
+  showConfirm('Clean up duplicates', msg, () => {
+    const res = runDuplicateCleanup();
+    toast(`Merged ${res.retired} duplicate${res.retired>1?'s':''}`,'green');
+  });
+}
+
+/* ─── retire(): the deletion path — appends a ledger entry, removes the record
+   locally, saves (which syncs the ledger up). The reusable delete primitive. ─── */
+function retire(entityType, id, opts){
+  if(id==null) return false;
+  opts = opts || {};
+  deletionLedger = unionLedger(deletionLedger, [makeLedgerEntry(entityType, id, opts)]);
+  if(entityType === 'card' && Array.isArray(collection)){
+    collection = collection.filter(c => !(c && String(c.id) === String(id)));
+  }
+  return true;
+}
+
+/* ─── runDuplicateCleanup(): one-shot, deliberate (NOT auto-run). Recomputes the
+   plan live with the deterministic keeper, folds the best/newest price onto each
+   keeper, retires the strays via retire(), saves + renders. Safe to re-run: it
+   no-ops when no identity duplicates remain. Returns a before/after report. ─── */
+function runDuplicateCleanup(opts){
+  opts = opts || {};
+  const dryRun = !!opts.dryRun;
+  const groups = {};
+  collection.forEach(c => { const k = identityEngine(c).collectibleId; (groups[k] ??= []).push(c); });
+  const before = collection.reduce((s,c)=>s+((typeof c.lastMarketValue==='number')?c.lastMarketValue:0),0);
+  const actions = [];
+  for(const k in groups){
+    const recs = groups[k];
+    if(recs.length < 2) continue;
+    const keeper = chooseKeeper(recs);
+    const strays = recs.filter(r => r.id !== keeper.id);
+    // fold best/newest price onto keeper
+    const priced = recs.filter(r=>r.lastPricedAt).sort((a,b)=>(b.lastPricedAt||0)-(a.lastPricedAt||0));
+    const best = priced[0];
+    if(!dryRun && best && (best.lastPricedAt||0) > (keeper.lastPricedAt||0)){
+      keeper.lastMarketValue=best.lastMarketValue; keeper.lastPricedAt=best.lastPricedAt;
+      keeper.lastPriceConfidence=best.lastPriceConfidence; keeper.lastPriceSource=best.lastPriceSource;
+    }
+    actions.push({ group:(keeper.name||'')+' '+(keeper.set||'')+' '+(keeper.grade||''), keeperId:keeper.id, retireIds:strays.map(s=>s.id) });
+    if(!dryRun){
+      strays.forEach(s => retire('card', s.id, { reason:'duplicate-cleanup', mergedInto:keeper.id, identityKey:k }));
+    }
+  }
+  if(!dryRun && actions.length){ save(); if(typeof renderAll==='function') renderAll(); }
+  const after = collection.reduce((s,c)=>s+((typeof c.lastMarketValue==='number')?c.lastMarketValue:0),0);
+  const report = { groups:actions.length, retired:actions.reduce((s,a)=>s+a.retireIds.length,0),
+                   before:+before.toFixed(2), after:+after.toFixed(2), removed:+(before-after).toFixed(2),
+                   records:collection.length, dryRun, actions };
+  try { console.log('[cleanup]', JSON.stringify(report)); } catch(e){}
+  return report;
+}
 function fmtPrice(v){return money(v);}  // Patch 1: thin alias → money() (identical behavior)
 function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
 function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
@@ -6813,7 +6998,7 @@ function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.ge
 // ═══ CARD CRUD ═══
 function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId)collection=collection.map(c=>c.id===editingId?data:c);else collection.push(data);if(!editingId&&window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:editingId?'edit':'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:editingId?null:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast(editingId?'Card updated':'Card added','green');}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId){collection=collection.map(c=>c.id===editingId?data:c);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'edit',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:null,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card updated','green');}else{dupWarnThenAdd(data,()=>{collection.push(data);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card added','green');});}}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -9163,6 +9348,7 @@ function addScannedCard() {
     notes: 'Added via Card Scanner',
     added: new Date().toISOString(),
   };
+  dupWarnThenAdd(card, () => {
   collection.push(card);
   save();
   renderAll();
@@ -9172,6 +9358,7 @@ function addScannedCard() {
   document.getElementById('scan-added-name').textContent = card.name;
   document.getElementById('scan-added').style.display = '';
   toast(card.name + ' added to vault', 'green');
+  });
 }
 
 function resetScanner() {
@@ -9672,6 +9859,10 @@ function importData(e){
       if(d.wishlist)wishlist=d.wishlist;
       if(d.sealed)sealed=d.sealed;
       if(d.deals)deals=d.deals;
+      // Deletion ledger: UNION on import (never shrinks) so importing an old backup
+      // can't resurrect post-backup deletions; then suppress the imported collection.
+      if(Array.isArray(d.deletionLedger)){deletionLedger=unionLedger(deletionLedger,d.deletionLedger);}
+      if(Array.isArray(collection))collection=applyDeletions(collection,deletionLedger,'card');
       if(d.history){localStorage.setItem(HISTORY_KEY,JSON.stringify(d.history));}
       if (Object.prototype.hasOwnProperty.call(d, 'cashPosition')) { const importedCash = parseFloat(d.cashPosition); _cashPosition = Number.isFinite(importedCash) && importedCash >= 0 ? importedCash : 0; localStorage.setItem('pkv2_cash', _cashPosition.toFixed(2)); }
       save();init();toast('Imported successfully — history restored','green');
