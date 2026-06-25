@@ -1768,6 +1768,22 @@ async function hydrateCollection(){
   } catch(_){}
 }
 let sealed     = JSON.parse(localStorage.getItem('pkv2_sealed') || '[]');
+// ── Sealed pricing foundation (Phase 1): manual `value` is the override; `marketValue`
+// is stored SEPARATELY (populated by the Phase 2 agent — not fetched yet). This resolver
+// chooses which the portfolio uses, defaulting to manual so existing totals are unchanged.
+function sealedValueSource(item){
+  if(!item) return 'manual';
+  const manual=parseFloat(item.value||0), market=parseFloat(item.marketValue||0);
+  return item.valueSource || (manual>0 ? 'manual' : (market>0 ? 'market' : 'manual'));
+}
+function sealedEffectiveValue(item){
+  if(!item) return 0;
+  const manual=parseFloat(item.value||0), market=parseFloat(item.marketValue||0);
+  const src=sealedValueSource(item);
+  if(src==='market' && market>0) return market;
+  if(src==='manual' && manual>0) return manual;
+  return manual>0 ? manual : (market>0 ? market : 0);   // safe fallback
+}
 let wishlist   = JSON.parse(localStorage.getItem('pkv2_wish')  || '[]');
 let deals      = JSON.parse(localStorage.getItem('pkv2_deals') || '[]');
 let soldHistory= JSON.parse(localStorage.getItem('pkv2_sold')  || '[]');
@@ -1910,7 +1926,7 @@ function portfolioNRV(){
     if (r.realizable != null) total += r.realizable * (card.qty || 1);
   });
   sealed.forEach(prod => {
-    const r = nrvForCard({ type:'sealed', paid: prod.paid }, parseFloat(prod.value||0));
+    const r = nrvForCard({ type:'sealed', paid: prod.paid }, sealedEffectiveValue(prod));
     if (r.realizable != null) total += r.realizable * (prod.qty || 1);
   });
   return total;
@@ -1978,7 +1994,7 @@ const AppState = {
       });
 
       sealed.forEach(s => {
-        const v = parseFloat(s.value || 0);
+        const v = sealedEffectiveValue(s);
         const p = parseFloat(s.paid || 0);
         if (v > 0) {
           totalVal  += v * (s.qty || 1);
@@ -2796,7 +2812,7 @@ function stampLastValue(card, data){
     if (!card || !card.id) return;
     const rec = collection.find(c => c.id === card.id);   // only owned cards
     if (!rec) return;                                      // ignore wishlist/pseudo cards
-    const a = analyzePrice(data, card.type==='graded');
+    const a = analyzePriceRouted(data, card.type==='graded');
     if (!a || !(a.price > 0)) return;
     rec.lastMarketValue     = +a.price.toFixed(2);
     rec.lastPricedAt        = Date.now();
@@ -3355,6 +3371,116 @@ function bestPrice(p, isGraded) {
   return smartPrice(p, isGraded);
 }
 function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);return v.length?Math.max(...v):0;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIVERSAL VALUATION ENGINE — Phase 1 (pure core, additive seam)
+   ---------------------------------------------------------------------------
+   DORMANT BY DESIGN: no existing call site is rerouted through this engine yet.
+   It exists so future phases (Sealed, adapters, scheduler, intelligence) can
+   plug in. Its profiles DELEGATE to the existing analyzePrice/analyzeRaw/
+   analyzeGraded/findConsensus — they do NOT reimplement any pricing logic, so
+   anything routed through the engine is byte-identical to today's output.
+   Phase 1 touches NO cache / history / scheduler / network / UI / storage.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Dependency-injection seam (ports). Phase 1 uses NONE of these in value();
+// the value path is pure delegation. Defaults are inert no-ops — future phases
+// will inject real implementations (cache=pcache, history=cardHistory, etc.).
+const ValuationPorts = {
+  cache:   { get(){ return null; }, set(){}, del(){} },   // CachePort   (future: IndexedDB pcache)
+  source:  { fetch(){ return null; } },                   // SourcePort  (future: eBay/TCG adapters)
+  history: { read(){ return []; }, append(){} },          // HistoryPort (future: cardHistory series)
+  clock:   { now(){ return Date.now(); } },               // ClockPort
+};
+
+// SourceAdapter interface (CONTRACT ONLY — no implementations in Phase 1):
+//   { name, capabilities:[category…], buildQuery(profile,identity), fetch(query), normalize(raw)->Comp[] }
+
+// PriceQuery model — the category-agnostic request the engine answers.
+function makePriceQuery(category, identity, priceData, opts){
+  return { category: category||null, identity: identity||null, priceData: priceData||null, opts: opts||{} };
+}
+
+// Confidence model — Phase 1 passes the existing analyze confidence through verbatim.
+const CONFIDENCE_LEVELS = ['none','low','medium','high'];
+function confidenceFrom(analysis){
+  return { level: (analysis && analysis.confidence) || 'none',
+           score: null,                              // numeric score is a later phase
+           reason: (analysis && analysis.reason) || '' };
+}
+
+// Valuation Intelligence model — Phase 1 fills ONLY what the existing pipeline
+// already produces. trend/volatility/liquidity/signal/fairValue are explicit
+// nulls (NOT computed here — those are later phases).
+function makeValuation(analysis){
+  return {
+    value:      (analysis && analysis.price) || 0,
+    currency:   'USD',
+    asOf:       null,
+    confidence: confidenceFrom(analysis),
+    sources:    (analysis && analysis.sources)
+                  ? Object.keys(analysis.sources).map(k => ({ source: k, price: analysis.sources[k] }))
+                  : [],
+    comps:      null,
+    trend:      null,
+    volatility: null,
+    liquidity:  null,
+    signal:     null,
+    fairValue:  null,
+  };
+}
+
+// Aggregation interface — Phase 1 delegates to the existing findConsensus/analyze
+// via the profiles below; no new aggregation math is introduced.
+
+// CategoryProfile registry — each profile maps a PriceQuery to an analysis by
+// DELEGATING to the existing functions. Adding a category later = registering a
+// profile; the engine core does not change.
+const CategoryProfiles = {
+  singles: { id:'singles', analyze(q){ return analyzePrice(q.priceData, false); } },  // → analyzeRaw
+  graded:  { id:'graded',  analyze(q){ return analyzePrice(q.priceData, true);  } },  // → analyzeGraded
+};
+function registerCategoryProfile(profile){ if(profile && profile.id) CategoryProfiles[profile.id] = profile; return profile; }
+
+// ValuationEngine — the single brain. PURE: given the same priceData it returns
+// the same Valuation, because it calls the same analyze* the app calls today.
+const ValuationEngine = {
+  ports: ValuationPorts,
+  profileFor(category){ return CategoryProfiles[category] || null; },
+  value(query){
+    const profile = this.profileFor(query && query.category);
+    if(!profile) return makeValuation(null);
+    return makeValuation(profile.analyze(query));   // delegates to existing analyzePrice
+  },
+};
+/* ═══════════════ end Universal Valuation Engine (Phase 1) ═══════════════ */
+
+/* ─── Phase 2: feature-flagged Singles routing through the ValuationEngine ───
+   Flag defaults OFF → analyzePriceRouted is a transparent pass-through to
+   analyzePrice (zero behavior change). When ON, SINGLES (non-graded) route
+   through ValuationEngine.value — which itself delegates to analyzePrice, so the
+   result is byte-identical. Graded is ALWAYS direct (PSA path untouched). Any
+   engine error falls back to analyzePrice. No new pricing logic, cache, or UI. */
+const FLAGS = { singlesEngine: false, gradedEngine: false };   // default OFF
+function analyzePriceRouted(p, isGraded){
+  if(FLAGS.singlesEngine && !isGraded){
+    try {
+      const v = ValuationEngine.value(makePriceQuery('singles', null, p));
+      const sources = {};
+      (v.sources||[]).forEach(s => { sources[s.source] = s.price; });
+      return { price: v.value, confidence: v.confidence.level, reason: v.confidence.reason, sources };
+    } catch(e){ return analyzePrice(p, isGraded); }   // safety net → current behavior
+  }
+  if(FLAGS.gradedEngine && isGraded){
+    try {
+      const v = ValuationEngine.value(makePriceQuery('graded', null, p));
+      const sources = {};
+      (v.sources||[]).forEach(s => { sources[s.source] = s.price; });
+      return { price: v.value, confidence: v.confidence.level, reason: v.confidence.reason, sources };
+    } catch(e){ return analyzePrice(p, isGraded); }   // safety net → current behavior
+  }
+  return analyzePrice(p, isGraded);                    // graded, or flag OFF → unchanged
+}
 function fmtPrice(v){return money(v);}  // Patch 1: thin alias → money() (identical behavior)
 function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
 function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
@@ -3784,7 +3910,7 @@ function renderPortfolio(){
     else{singlesVal+=val;if(paid>0)singlesPaid+=paid;}
   });
   sealed.forEach(prod=>{
-    const val=parseFloat(prod.value||0)*(prod.qty||1);const paid=parseFloat(prod.paid||0)*(prod.qty||1);
+    const val=sealedEffectiveValue(prod)*(prod.qty||1);const paid=parseFloat(prod.paid||0)*(prod.qty||1);
     totalVal+=val;sealedVal+=val;if(paid>0){totalPaid+=paid;sealedPaid+=paid;}
   });
   const pnl=totalPaid>0?totalVal-totalPaid:null;
@@ -3852,7 +3978,7 @@ function pnlRows(){
   });
   sealed.forEach(prod=>{
     const qty = prod.qty||1;
-    const val = parseFloat(prod.value||0)*qty;
+    const val = sealedEffectiveValue(prod)*qty;
     const cost = parseFloat(prod.paid||0)*qty;
     const pnl = (val>0 && cost>0) ? val-cost : null;
     const pct = (pnl!=null && cost>0) ? (pnl/cost)*100 : null;
@@ -3977,7 +4103,7 @@ function openInventoryPanel(type) {
 
   if (isSealed) {
     listEl.innerHTML = cards.map(s => {
-      const val  = parseFloat(s.value||0);
+      const val  = sealedEffectiveValue(s);
       const paid = parseFloat(s.paid||0);
       const pnl  = paid > 0 ? val - paid : null;
       return `<div class="inv-row">
@@ -4249,7 +4375,7 @@ function renderDBConcentration() {
     if (bp > 0) rows.push({ name: card.name, val: bp * (card.qty||1) });
   });
   sealed.forEach(s => {
-    const v = parseFloat(s.value||0);
+    const v = sealedEffectiveValue(s);
     if (v > 0) rows.push({ name: s.name, val: v * (s.qty||1) });
   });
 
@@ -4413,7 +4539,7 @@ function renderTimeline(){
   // Also save a vh snapshot for legacy compat
   let totalVal=0;
   collection.forEach(card=>{const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(isFinite(bp)&&bp>0)totalVal+=bp*(card.qty||1);});
-  sealed.forEach(prod=>{const v=parseFloat(prod.value||0);if(v>0)totalVal+=v*(prod.qty||1);});
+  sealed.forEach(prod=>{const v=sealedEffectiveValue(prod);if(v>0)totalVal+=v*(prod.qty||1);});
   if(totalVal>0){
     const today=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'});
     const last=history[history.length-1];
@@ -4644,14 +4770,52 @@ function loadLiquidityForCards(cards) {
   });
 }
 
+// ═══ Tier 2: PSA virtualization (chunked render + IntersectionObserver) ═══
+// Mirrors the fixed Singles pattern: tile HTML, order, and the price loader are
+// unchanged; only HOW MANY tiles are injected at once changes. No content-visibility
+// rule is added (that was the Singles ordering bug).
+const PSA_CHUNK = 60;
+let _psaCards = [], _psaCursor = 0, _psaObserver = null;
+function _psaSentinel(){
+  const grid=document.getElementById('psa-grid');if(!grid)return null;
+  let s=document.getElementById('psa-sentinel');
+  if(!s){ s=document.createElement('div'); s.id='psa-sentinel'; s.style.cssText='height:1px;width:100%;'; grid.insertAdjacentElement('afterend',s); }
+  return s;
+}
+function appendPsaChunk(){
+  const grid=document.getElementById('psa-grid');if(!grid)return;
+  const slice=_psaCards.slice(_psaCursor,_psaCursor+PSA_CHUNK);
+  if(!slice.length){ if(_psaObserver){_psaObserver.disconnect();_psaObserver=null;} return; }
+  grid.insertAdjacentHTML('beforeend', slice.map(psaTileHTML).join(''));
+  _psaCursor+=slice.length;
+  loadPricesForCards(slice);
+  if(_psaCursor>=_psaCards.length && _psaObserver){ _psaObserver.disconnect(); _psaObserver=null; }
+}
+function _renderPsaChunked(slabs){
+  const grid=document.getElementById('psa-grid');if(!grid)return;
+  _psaCards=slabs;_psaCursor=0;
+  grid.innerHTML='';
+  appendPsaChunk();                       // first chunk + its price load
+  if(_psaCursor<_psaCards.length){        // more remain → observe the sentinel
+    const sent=_psaSentinel();const root=document.querySelector('.main');
+    _psaObserver=new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) appendPsaChunk(); },{root:root||null,rootMargin:'600px 0px'});
+    if(sent)_psaObserver.observe(sent);
+  }
+}
 function renderPSA(){
   const slabs=collection.filter(c=>c.type==='graded');
   const grid=document.getElementById('psa-grid');const empty=document.getElementById('psa-empty');
   document.getElementById('nb-psa').textContent=slabs.length;
   document.getElementById('psa-count-lbl').textContent=slabs.length+' slab'+(slabs.length!==1?'s':'');
+  // Tier 2: reset PSA virtualization state for every (re)render path
+  if(_psaObserver){_psaObserver.disconnect();_psaObserver=null;}
+  _psaCards=[];_psaCursor=0;
+  const _oldPsaSent=document.getElementById('psa-sentinel'); if(_oldPsaSent)_oldPsaSent.remove();
   if(!slabs.length){grid.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
-  grid.innerHTML=slabs.map(card=>{
+  _renderPsaChunked(slabs);
+}
+function psaTileHTML(card){
     const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
     const paid=parseFloat(card.paid||0);const pnl=bp>0&&paid>0?bp-paid:null;
     const grader=(card.grade||'').split(' ')[0]||'PSA';const gradeN=(card.grade||'').split(' ').slice(1).join(' ')||'?';
@@ -4672,8 +4836,6 @@ function renderPSA(){
         </div>
       </div>
     </div>`;
-  }).join('');
-  loadPricesForCards(slabs);
 }
 
 // ═══ ALL SINGLES ═══
@@ -4691,6 +4853,39 @@ function tileImage(src, alt, opts){
   return `<img${imgClass?` class="${imgClass}"`:''} src="${src}" alt="${alt}" loading="lazy"${imgStyle?` style="${imgStyle}"`:''}${onerror?` onerror="this.style.display='none'"`:''}>`;
 }
 
+// ═══ Tier 2: Singles virtualization (chunked render + IntersectionObserver) ═══
+// Tile HTML, filters, sort, and the price/liquidity loaders are unchanged; only
+// HOW MANY tiles are injected at once changes. Loaders are re-run per appended
+// chunk (idempotent via the existing in-flight dedupe + cache).
+const SINGLES_CHUNK = 60;
+let _singlesCards = [], _singlesCursor = 0, _singlesObserver = null;
+function _singlesSentinel(){
+  const grid=document.getElementById('singles-grid');if(!grid)return null;
+  let s=document.getElementById('singles-sentinel');
+  if(!s){ s=document.createElement('div'); s.id='singles-sentinel'; s.style.cssText='height:1px;width:100%;'; grid.insertAdjacentElement('afterend',s); }
+  return s;
+}
+function appendSinglesChunk(){
+  const grid=document.getElementById('singles-grid');if(!grid)return;
+  const slice=_singlesCards.slice(_singlesCursor,_singlesCursor+SINGLES_CHUNK);
+  if(!slice.length){ if(_singlesObserver){_singlesObserver.disconnect();_singlesObserver=null;} return; }
+  grid.insertAdjacentHTML('beforeend', slice.map(singlesTileHTML).join(''));
+  _singlesCursor+=slice.length;
+  loadPricesForCards(slice);
+  loadLiquidityForCards(slice);
+  if(_singlesCursor>=_singlesCards.length && _singlesObserver){ _singlesObserver.disconnect(); _singlesObserver=null; }
+}
+function _renderSinglesChunked(cards){
+  const grid=document.getElementById('singles-grid');if(!grid)return;
+  _singlesCards=cards;_singlesCursor=0;
+  grid.innerHTML='';
+  appendSinglesChunk();                       // first chunk + its price/liquidity load
+  if(_singlesCursor<_singlesCards.length){    // more remain → observe the sentinel
+    const sent=_singlesSentinel();const root=document.querySelector('.main');
+    _singlesObserver=new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) appendSinglesChunk(); },{root:root||null,rootMargin:'600px 0px'});
+    if(sent)_singlesObserver.observe(sent);
+  }
+}
 function renderSingles(){
   const singles=collection.filter(c=>c.type!=='graded');
   let cards=typeFilter?singles.filter(c=>c.type===typeFilter):singles;
@@ -4699,10 +4894,16 @@ function renderSingles(){
   const grid=document.getElementById('singles-grid');const empty=document.getElementById('singles-empty');
   document.getElementById('nb-singles').textContent=singles.reduce((s,c)=>s+(c.qty||1),0);
   document.getElementById('topbar-cnt').textContent=singles.reduce((s,c)=>s+(c.qty||1),0)+' cards';
+  // Tier 2: reset Singles virtualization state for every (re)render path
+  if(_singlesObserver){_singlesObserver.disconnect();_singlesObserver=null;}
+  _singlesCards=[];_singlesCursor=0;
+  const _oldSent=document.getElementById('singles-sentinel'); if(_oldSent)_oldSent.remove();
   if(!singles.length){grid.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
   if(!cards.length){grid.innerHTML='<p style="color:var(--muted);font-size:12.5px;grid-column:1/-1;padding:10px 0;">No cards match this filter.</p>';return;}
-  grid.innerHTML=cards.map(card=>{
+  _renderSinglesChunked(cards);
+}
+function singlesTileHTML(card){
     const ck=cacheKey(card);const p=pcache[ck]?.data;
     const typeLabel={standard:'Standard',holo:'Holo',reverse:'Reverse',ex:'ex/GX/V',graded:'Graded'}[card.type]||card.type;
     const imgHtml=tileImage(p?.img||card.img,card.name,{placeholder:`<div style="font-size:28px;color:var(--muted);">${card.num?'#'+(card.num||'').split('/')[0]:'⟡'}</div>`});
@@ -4723,9 +4924,6 @@ function renderSingles(){
         </div>
       </div>
     </div>`;
-  }).join('');
-  loadPricesForCards(cards);
-  loadLiquidityForCards(cards);
 }
 
 function buildPriceStrip(p,card){
@@ -6155,7 +6353,9 @@ function selectSealedType(val,icon,label,el){document.querySelectorAll('#sealed-
 function updateSealedPreview(){const name=document.getElementById('sp-name').value.trim();const set=document.getElementById('sp-set').value.trim();const type=document.getElementById('sp-type').value;const info=SEALED_TYPES[type]||SEALED_TYPES.other;document.getElementById('sp-prev-icon').textContent=info.icon;document.getElementById('sp-prev-name').textContent=name||'No product selected';document.getElementById('sp-prev-name').style.color=name?'var(--text)':'var(--muted)';document.getElementById('sp-prev-meta').textContent=[info.label,set].filter(Boolean).join(' · ')||'Fill in details below';}
 function saveSealed(){
   const name=document.getElementById('sp-name').value.trim();if(!name){toast('Product name required','red');return;}
-  const data={id:editingSealedId||newId('s'),name,type:document.getElementById('sp-type').value,set:document.getElementById('sp-set').value.trim(),lang:document.getElementById('sp-lang').value,cond:document.getElementById('sp-cond').value,qty:parseInt(document.getElementById('sp-qty').value)||1,paid:document.getElementById('sp-paid').value,value:document.getElementById('sp-value').value,date:document.getElementById('sp-date').value,notes:document.getElementById('sp-notes').value.trim(),added:editingSealedId?(sealed.find(x=>x.id===editingSealedId)||{}).added:new Date().toISOString()};
+  const _prevSealed=editingSealedId?(sealed.find(x=>x.id===editingSealedId)||{}):{};
+  const _spVal=document.getElementById('sp-value').value;
+  const data={id:editingSealedId||newId('s'),name,type:document.getElementById('sp-type').value,set:document.getElementById('sp-set').value.trim(),lang:document.getElementById('sp-lang').value,cond:document.getElementById('sp-cond').value,qty:parseInt(document.getElementById('sp-qty').value)||1,paid:document.getElementById('sp-paid').value,value:_spVal,date:document.getElementById('sp-date').value,notes:document.getElementById('sp-notes').value.trim(),added:editingSealedId?_prevSealed.added:new Date().toISOString(),marketValue:_prevSealed.marketValue!=null?_prevSealed.marketValue:null,lastPricedAt:_prevSealed.lastPricedAt!=null?_prevSealed.lastPricedAt:null,lastPriceSource:_prevSealed.lastPriceSource||null,lastPriceConfidence:_prevSealed.lastPriceConfidence||null,compCount:_prevSealed.compCount||0,valueSource:_prevSealed.valueSource||(parseFloat(_spVal||0)>0?'manual':'market')};
   if(editingSealedId)sealed=sealed.map(x=>x.id===editingSealedId?data:x);else sealed.push(data);
   save();closeModal('sealed-modal');renderSealed();renderPortfolio();
   if(sealedSetFilter)renderSealedQuickAdd(sealedSetFilter,document.getElementById('sealed-set-banner-logo').src||'');
@@ -6169,7 +6369,7 @@ function renderSealed(){
   const total=sealed.reduce((s,x)=>s+(x.qty||1),0);
   document.getElementById('nb-sealed').textContent=total;document.getElementById('sealed-topbar-cnt').textContent=total+' item'+(total!==1?'s':'');
   let totalVal=0,totalPaid=0,pnlCount=0;
-  sealed.forEach(x=>{const v=parseFloat(x.value||0);const p=parseFloat(x.paid||0);if(v>0)totalVal+=v*(x.qty||1);if(p>0){totalPaid+=p*(x.qty||1);pnlCount++;}});
+  sealed.forEach(x=>{const v=sealedEffectiveValue(x);const p=parseFloat(x.paid||0);if(v>0)totalVal+=v*(x.qty||1);if(p>0){totalPaid+=p*(x.qty||1);pnlCount++;}});
   document.getElementById('ss-total').textContent=total;
   document.getElementById('ss-value').textContent='$'+totalVal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const pnlEl=document.getElementById('ss-pnl');const pnlSub=document.getElementById('ss-pnl-sub');
@@ -6180,7 +6380,8 @@ function renderSealed(){
   if(!items.length){grid.innerHTML='<p style="color:var(--muted);font-size:12.5px;padding:10px 0;">No items match this filter.</p>';return;}
   grid.innerHTML=items.map(p=>{
     const info=SEALED_TYPES[p.type]||SEALED_TYPES.other;
-    const val=parseFloat(p.value||0),paid=parseFloat(p.paid||0);
+    const val=sealedEffectiveValue(p),paid=parseFloat(p.paid||0);
+    const vsrc=sealedValueSource(p);
     const roi=val>0&&paid>0?val*(p.qty||1)-paid*(p.qty||1):null;
     const roiPct=roi!=null&&paid>0?((roi/(paid*(p.qty||1)))*100).toFixed(1):null;
     const tcgQ=encodeURIComponent(p.name+(p.set?' '+p.set:''));
@@ -6194,7 +6395,7 @@ function renderSealed(){
         <div class="ct-name">${p.name}</div>
         <div class="ct-set">${p.set||''}${p.qty>1?' · ×'+p.qty:''}</div>
         <div class="price-strip">
-          ${val>0?`<div class="ps-row"><span class="ps-lbl">Market</span><span class="ps-val ps-best">$${val.toFixed(2)}</span></div>`:''}
+          ${val>0?`<div class="ps-row"><span class="ps-lbl">Value<span style="font-size:8px;font-weight:700;padding:1px 4px;border-radius:4px;margin-left:5px;letter-spacing:.3px;background:${vsrc==='market'?'rgba(46,204,128,.16)':'rgba(245,200,66,.16)'};color:${vsrc==='market'?'var(--green)':'var(--gold)'};">${vsrc==='market'?'LIVE':'MANUAL'}</span></span><span class="ps-val ps-best">$${val.toFixed(2)}</span></div>`:''}
           ${paid>0?`<div class="ps-row"><span class="ps-lbl">Paid</span><span class="ps-val">$${paid.toFixed(2)}</span></div>`:''}
           ${roi!=null?`<hr class="ps-divider"><div class="ps-summary"><span style="color:${roi>=0?'var(--green)':'var(--red)'};">${roi>=0?'+':'-'}$${Math.abs(roi).toFixed(2)} (${roiPct}%)</span></div>`:''}
           ${!val&&!paid?`<div onclick="openSealedModal('${p.id}')" style="font-size:11px;color:var(--gold);cursor:pointer;padding:6px 0;">⚠ Tap to add market value</div>`:''}
@@ -6604,7 +6805,7 @@ async function openDetail(id){
   const card=collection.find(c=>c.id===id)||((window._detailTransient&&window._detailTransient.id===id)?window._detailTransient:null);if(!card)return;
   const p=pcache[cacheKey(card)]?.data||await getPrices(card);
   const best=bestPrice(p,card.type==='graded'),worst=worstPrice(p);
-  const priceAnalysis=analyzePrice(p,card.type==='graded');
+  const priceAnalysis=analyzePriceRouted(p,card.type==='graded');
   const roi=card.paid?(best-parseFloat(card.paid)):null;
   const roiPct=card.paid&&best>0?((best/parseFloat(card.paid)-1)*100).toFixed(1):null;
   // Sparkline
@@ -8631,7 +8832,7 @@ function buildHoldingRow(card, userId){
   const isG     = card.type==='graded';
   const bp      = p ? bestPrice(p, isG) : null;
   const hasLive = bp != null && isFinite(bp) && bp > 0;
-  const a       = (hasLive && p) ? analyzePrice(p, isG) : null;   // {price, confidence, sources}
+  const a       = (hasLive && p) ? analyzePriceRouted(p, isG) : null;   // {price, confidence, sources}
   const src     = (a && a.sources && Object.keys(a.sources).length) ? Object.keys(a.sources).join('+') : null;
   const cb      = parseFloat(card.paid);
   return {
@@ -8674,7 +8875,7 @@ function saveHoldingToDatabase(card){
 // Build one price-snapshot row: resolved best price + per-source breakdown +
 // comps + confidence, all from real price fields. Missing values => null.
 function buildSnapshotRow(card, data, userId){
-  const a     = analyzePrice(data, card.type==='graded');   // {price, confidence, sources}
+  const a     = analyzePriceRouted(data, card.type==='graded');   // {price, confidence, sources}
   const num   = v => (v != null && isFinite(parseFloat(v))) ? parseFloat(v) : null;
   const comps = parseInt(data && data.ebayN, 10);
   const mp    = (a && isFinite(a.price) && a.price > 0) ? a.price : null;
@@ -8789,7 +8990,7 @@ function calculateMarketSignal(){
     const isG = card.type==='graded';
     const bp  = bestPrice(data, isG);
     if(!(bp > 0)) continue;
-    const a       = analyzePrice(data, isG);
+    const a       = analyzePriceRouted(data, isG);
     const comps   = parseInt(data.ebayN, 10) || 0;
     const paid    = parseFloat(card.paid);
     const qty     = card.qty || 1;
