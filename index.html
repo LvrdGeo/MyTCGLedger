@@ -3461,7 +3461,7 @@ const ValuationEngine = {
    through ValuationEngine.value — which itself delegates to analyzePrice, so the
    result is byte-identical. Graded is ALWAYS direct (PSA path untouched). Any
    engine error falls back to analyzePrice. No new pricing logic, cache, or UI. */
-const FLAGS = { singlesEngine: false, gradedEngine: false };   // default OFF
+const FLAGS = { singlesEngine: false, gradedEngine: false, sealedEngine: false };   // default OFF
 function analyzePriceRouted(p, isGraded){
   if(FLAGS.singlesEngine && !isGraded){
     try {
@@ -3481,6 +3481,94 @@ function analyzePriceRouted(p, isGraded){
   }
   return analyzePrice(p, isGraded);                    // graded, or flag OFF → unchanged
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SEALED PRICING AGENT — Phase 1 (additive · DORMANT behind FLAGS.sealedEngine)
+   ----------------------------------------------------------------------------
+   Vertical slice: immutable Valuation record + sealed CategoryProfile + query
+   builder + evidence-ledger mapper + dormant client agent. NO confidence/integrity
+   scoring, NO portfolio wiring, NO UI — those are Phase 2. Nothing here is called
+   by any existing render/pricing path, so current behavior is unchanged.
+   Heavy lifting (eBay fetch, normalize, reject, ledger, median) lives in the
+   Worker /sealed endpoint; the client maps its response into ONE frozen record.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+// Rejection reason codes — shared contract with the Worker. Every rejected comp
+// in the Evidence Ledger carries exactly one of these.
+const SEALED_REASON_CODES = Object.freeze({
+  SINGLE:    'single_card',
+  LOT:       'lot_or_bundle_of_singles',
+  BREAK:     'break_or_live_break',
+  EMPTY_BOX: 'empty_box',
+  OPENED:    'opened_or_used',
+  CODE_CARD: 'code_card_only',
+  DAMAGED:   'damaged',
+  ACCESSORY: 'accessory',
+  UNRELATED: 'unrelated_product',
+  OUTLIER:   'price_outlier',
+  WRONG_SET: 'set_name_missing',
+});
+
+// Query Intelligence (Phase 1 subset): product-type → canonical eBay phrase.
+const SEALED_TYPE_PHRASES = Object.freeze({
+  booster_box:'booster box', etb:'elite trainer box', booster_bundle:'booster bundle',
+  collection_box:'collection box', tin:'tin', premium_collection:'premium collection',
+  upc:'ultra premium collection', special_collection:'special collection',
+  build_battle:'build & battle', blister:'blister pack', booster_pack:'booster pack',
+});
+function buildSealedQuery(item){
+  if(!item) return '';
+  const phrase = SEALED_TYPE_PHRASES[item.type] || '';
+  const parts = [item.name, item.set, phrase, 'factory sealed'].filter(Boolean);
+  if(item.lang && item.lang!=='EN') parts.push(String(item.lang).toLowerCase());
+  return parts.join(' ').replace(/\s+/g,' ').trim();
+}
+
+// Immutable Valuation record — Phase 1 shape: value + full evidence ledger only.
+// (confidence / integrity / aggregation detail / fairValue are intentionally absent.)
+function makeSealedValuation(resp, item){
+  const accepted = Array.isArray(resp && resp.acceptedComps) ? resp.acceptedComps : [];
+  const rejected = Array.isArray(resp && resp.rejectedComps) ? resp.rejectedComps : [];
+  const codes    = Array.isArray(resp && resp.reasonCodes)   ? resp.reasonCodes   : [];
+  return Object.freeze({
+    category:      'sealed',
+    itemId:        item ? item.id : null,
+    marketValue:   (resp && typeof resp.marketValue === 'number') ? resp.marketValue : null,
+    source:        (resp && resp.source) || 'ebay-sold',
+    lastPricedAt:  (resp && resp.lastPricedAt) || null,
+    acceptedComps: Object.freeze(accepted.map(c => Object.freeze({ ...c }))),  // evidence ledger
+    rejectedComps: Object.freeze(rejected.map(c => Object.freeze({ ...c }))),  // each carries .reason
+    reasonCodes:   Object.freeze([ ...codes ]),
+    compCount:     accepted.length,
+  });
+}
+
+// Client adapter → calls Worker /sealed, returns ONE deterministic frozen record.
+// DORMANT: runs only when FLAGS.sealedEngine is ON (default OFF). On any failure
+// or missing endpoint, returns a null-value record (caller would stay on manual).
+async function fetchSealedValuation(item){
+  if(!FLAGS.sealedEngine || !item) return makeSealedValuation(null, item);
+  try {
+    const q   = buildSealedQuery(item);
+    const url = `${EBAY_WORKER}/sealed?q=${encodeURIComponent(q)}&type=${encodeURIComponent(item.type||'')}&lang=${encodeURIComponent(item.lang||'EN')}&limit=20`;
+    const r = await fetch(url);
+    if(!r.ok) return makeSealedValuation(null, item);
+    return makeSealedValuation(await r.json(), item);
+  } catch(e){ return makeSealedValuation(null, item); }
+}
+
+// Register the sealed CategoryProfile (additive; singles/graded untouched). Maps an
+// already-fetched Worker response (q.priceData) → the engine's analysis shape, so
+// sealed can flow through ValuationEngine.value(makePriceQuery('sealed', item, resp)).
+registerCategoryProfile({
+  id: 'sealed',
+  analyze(q){
+    const resp = q && q.priceData;
+    const mv = (resp && typeof resp.marketValue === 'number') ? resp.marketValue : 0;
+    return { price: mv || 0, confidence: 'none', reason: '', sources: mv > 0 ? { ebay: mv } : {} };
+  },
+});
+/* ═══════════════ end Sealed Pricing Agent — Phase 1 ═══════════════ */
 function fmtPrice(v){return money(v);}  // Patch 1: thin alias → money() (identical behavior)
 function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
 function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
