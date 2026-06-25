@@ -3995,6 +3995,58 @@ function chooseKeeper(records){
 }
 /* ═══════════════ end Deletion Ledger ═══════════════ */
 
+/* ─── Sealed market pricing: calls Worker /sealed, stamps marketValue, re-renders.
+   Calls /sealed directly (not gated by FLAGS.sealedEngine, which also affects
+   singles/graded). Per-item cache; graceful when worker returns null. ─── */
+let sealedPriceCache = {};        // id → { ts, marketValue, confidence, source, lastPricedAt }
+let _sealedPricesLoading = false;
+const SEALED_PRICE_TTL = 6 * 60 * 60 * 1000;   // 6h
+async function loadSealedPrices(force){
+  if(_sealedPricesLoading || !Array.isArray(sealed) || !sealed.length) return;
+  const now = Date.now();
+  // price items that have no fresh cache AND no manual override
+  const toFetch = sealed.filter(it=>{
+    if(!it || !it.id) return false;
+    if((it.valueSource||'')==='manual' && parseFloat(it.value||0)>0) return false;  // user set it manually
+    const c = sealedPriceCache[it.id];
+    return force || !c || (now - c.ts) > SEALED_PRICE_TTL;
+  });
+  if(!toFetch.length) return;
+  _sealedPricesLoading = true;
+  let changed = false;
+  try{
+    const BATCH = 4;
+    for(let i=0;i<toFetch.length;i+=BATCH){
+      const batch = toFetch.slice(i,i+BATCH);
+      await Promise.all(batch.map(async it=>{
+        try{
+          const q = buildSealedQuery(it);
+          const url = `${EBAY_WORKER}/sealed?q=${encodeURIComponent(q)}&type=${encodeURIComponent(it.type||'')}&lang=${encodeURIComponent(it.lang||'EN')}&limit=20`;
+          const r = await fetch(url);
+          if(!r.ok) return;
+          const d = await r.json();
+          if(d && typeof d.marketValue==='number' && d.marketValue>0){
+            sealedPriceCache[it.id] = { ts:Date.now(), marketValue:d.marketValue, confidence:d.confidence||'preliminary', source:d.source||'', lastPricedAt:d.lastPricedAt||new Date().toISOString() };
+            const obj = sealed.find(s=>s.id===it.id);
+            if(obj){
+              obj.marketValue = d.marketValue;
+              obj.lastMarketValue = d.marketValue;
+              obj.lastPricedAt = Date.parse(d.lastPricedAt||'') || Date.now();
+              obj.lastPriceConfidence = d.confidence||'preliminary';
+              obj.lastPriceSource = d.source||'sealed';
+              if(!obj.valueSource) obj.valueSource = 'market';   // default to market unless user chose manual
+              changed = true;
+            }
+          }
+        }catch(e){ /* skip this item */ }
+      }));
+    }
+  } finally {
+    _sealedPricesLoading = false;
+    if(changed){ try{ save(); }catch(e){} if(typeof renderSealed==='function') renderSealed(); }
+  }
+}
+
 /* ─── Settings action: preview duplicates (dry-run), confirm with numbers, apply ─── */
 function cleanupDuplicatesUI(){
   let r;
@@ -6954,6 +7006,7 @@ function renderSealed(){
   else{pnlEl.textContent='—';pnlEl.style.color='var(--muted2)';pnlSub.textContent='add prices to track';}
   if(!sealed.length){grid.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
+  if(typeof loadSealedPrices==='function'){ loadSealedPrices(); }   // non-blocking: fetch market prices, re-renders when ready
   if(!items.length){grid.innerHTML='<p style="color:var(--muted);font-size:12.5px;padding:10px 0;">No items match this filter.</p>';return;}
   grid.innerHTML=items.map(p=>{
     const info=SEALED_TYPES[p.type]||SEALED_TYPES.other;
