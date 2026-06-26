@@ -4000,6 +4000,34 @@ function chooseKeeper(records){
 }
 /* ═══════════════ end Deletion Ledger ═══════════════ */
 
+/* ─── Resolve a CLEAN official product image for a sealed item.
+   Tries TCGPlayer's product CDN (clean studio render) by resolving a product id
+   via pokemontcg.io, then sets obj.imgTcg. Falls back silently to the upscaled
+   eBay image already on obj.img. Network-dependent; degrades gracefully. ─── */
+async function resolveSealedOfficialImage(it){
+  if(!it || it.imgTcg || it._tcgTried) return;
+  it._tcgTried = true;   // one attempt per item per session
+  try{
+    const hdrs = (typeof keys!=='undefined' && keys.ptcg) ? {'X-Api-Key':keys.ptcg} : {};
+    const setName = (it.set || it.name || '').trim();
+    if(!setName) return;
+    const q = encodeURIComponent(`set.name:"${setName}"`);
+    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${q}&pageSize=1`, { headers: hdrs });
+    if(!r.ok) return;
+    const j = await r.json();
+    const card = (j.data && j.data[0]) || null;
+    const tcgUrl = card && card.tcgplayer && card.tcgplayer.url;
+    if(!tcgUrl) return;
+    const m = String(tcgUrl).match(/(\d{4,})/);   // numeric TCGPlayer product id
+    if(!m) return;
+    const cdn = `https://tcgplayer-cdn.tcgplayer.com/product/${m[1]}_in_1000x1000.jpg`;
+    it.imgTcg = cdn;
+    it.img = cdn;                 // prefer the clean render; tile onerror falls back to eBay
+    try{ save(); }catch(e){}
+    if(typeof renderSealed==='function') renderSealed();
+  }catch(e){ /* network/parse fail → keep eBay image */ }
+}
+
 /* ─── Sealed market pricing: calls Worker /sealed, stamps marketValue, re-renders.
    Calls /sealed directly (not gated by FLAGS.sealedEngine, which also affects
    singles/graded). Per-item cache; graceful when worker returns null. ─── */
@@ -4047,9 +4075,9 @@ async function loadSealedPrices(force){
               obj.rejectedCount = rej;
               if(!obj.valueSource) obj.valueSource = 'market';   // default to market unless user chose manual
               // capture a representative product image (only if user hasn't set one).
-              // Resilient: check acceptedComps, then any comp array, then top-level,
-              // across both possible field names (imageUrl / image).
-              if(!obj.img){
+              // Prefer a CLEAN render: try TCGPlayer official image first (resolved
+              // separately), fall back to the eBay comp image UPSCALED to high-res.
+              if(!obj.img && !obj.imgTcg){
                 const pickImg = (arr) => {
                   if(!Array.isArray(arr)) return '';
                   const c = arr.find(x => x && (x.imageUrl || x.image));
@@ -4057,7 +4085,11 @@ async function loadSealedPrices(force){
                 };
                 let img = pickImg(d.acceptedComps) || pickImg(d.comps) || pickImg(d.rejectedComps);
                 if(!img && (d.imageUrl || d.image)) img = d.imageUrl || d.image;
-                if(img){ obj.img = img; }
+                if(img){
+                  // upscale eBay thumbnails: s-l64/140/225/500 → s-l1600 (sharper)
+                  obj.imgEbay = img.replace(/\/s-l\d+\./, '/s-l1600.');
+                  if(!obj.img) obj.img = obj.imgEbay;   // provisional; TCGPlayer render may override below
+                }
               }
               changed = true;
             }
@@ -4068,6 +4100,8 @@ async function loadSealedPrices(force){
   } finally {
     _sealedPricesLoading = false;
     if(changed){ try{ save(); }catch(e){} if(typeof renderSealed==='function') renderSealed(); }
+    // after pricing, try to upgrade each item to a CLEAN official render (async, non-blocking)
+    try{ (sealed||[]).forEach(it=>{ if(it && !it.imgTcg && !it._tcgTried) resolveSealedOfficialImage(it); }); }catch(e){}
   }
 }
 
@@ -7123,7 +7157,7 @@ function renderSealed(){
     return `<div class="card-tile" style="cursor:default;">
       <div class="ct-img" style="aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:52px;overflow:hidden;position:relative;">
         <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${info.icon}</span>
-        ${tileImage(p.img, p.name, { imgStyle:'position:relative;width:100%;height:100%;object-fit:cover;', placeholder:'' })}
+        ${p.img?`<img src="${p.img}" alt="${p.name}" loading="lazy" style="position:relative;width:100%;height:100%;object-fit:cover;" onerror="${p.imgEbay&&p.imgEbay!==p.img?`this.onerror=null;this.src='${p.imgEbay}'`:`this.style.display='none'`}">`:''}
         <div class="ct-badges"><span class="ct-badge type-standard">${info.label}</span>${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${p.lang}</span>`:''}</div>
         <span class="ct-cond" style="background:${p.cond==='sealed'?'rgba(46,204,128,.2)':'rgba(255,140,66,.2)'};color:${p.cond==='sealed'?'#4ade80':'var(--orange)'};width:auto;padding:2px 6px;border-radius:6px;font-size:9px;top:7px;right:7px;">${p.cond==='sealed'?'SEALED':'OPEN'}</span>
       </div>
