@@ -755,7 +755,10 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 <div id="page-sealed" class="page">
   <div class="topbar">
     <div class="page-title">Sealed Products <small id="sealed-topbar-cnt">0 items</small></div>
+    <div style="display:flex;gap:8px;">
+    <button class="btn btn-ghost" id="sealed-refresh-btn" onclick="refreshSealedPrices()" title="Refresh market prices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh</button>
     <button class="btn btn-primary" onclick="openSealedModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Product</button>
+    </div>
   </div>
   <div class="sealed-stats">
     <div class="stat-card"><div class="stat-lbl">Items</div><div class="stat-val" style="color:var(--blue)" id="ss-total">0</div></div>
@@ -1629,6 +1632,8 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
         <div class="form-group"><div class="form-label">Quantity</div><input class="input" id="sp-qty" type="number" value="1" min="1"></div>
         <div class="form-group"><div class="form-label">Purchase Price ($)</div><input class="input" id="sp-paid" type="number" placeholder="0.00" step="0.01"></div>
         <div class="form-group"><div class="form-label">Market Value ($)</div><input class="input" id="sp-value" type="number" placeholder="0.00" step="0.01"></div>
+        <div class="form-group" style="grid-column:1/-1;" id="sp-valuesource-wrap" hidden><div class="form-label">Value Source</div><div style="display:flex;gap:6px;"><button type="button" id="sp-src-market" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;" onclick="setSealedValueSource('market')">Market</button><button type="button" id="sp-src-manual" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;" onclick="setSealedValueSource('manual')">Manual</button></div></div>
+        <div class="form-group" style="grid-column:1/-1;" id="sp-evidence" hidden></div>
         <div class="form-group"><div class="form-label">Purchase Date</div><input class="input" id="sp-date" type="date"></div>
         <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Notes</div><textarea class="input" id="sp-notes" placeholder="Storage, source…" style="min-height:48px;"></textarea></div>
       </div>
@@ -4026,15 +4031,34 @@ async function loadSealedPrices(force){
           if(!r.ok) return;
           const d = await r.json();
           if(d && typeof d.marketValue==='number' && d.marketValue>0){
-            sealedPriceCache[it.id] = { ts:Date.now(), marketValue:d.marketValue, confidence:d.confidence||'preliminary', source:d.source||'', lastPricedAt:d.lastPricedAt||new Date().toISOString() };
+            const acc = Array.isArray(d.acceptedComps) ? d.acceptedComps.length : 0;
+            const rej = Array.isArray(d.rejectedComps) ? d.rejectedComps.length : 0;
+            sealedPriceCache[it.id] = { ts:Date.now(), marketValue:d.marketValue, low:(typeof d.low==='number'?d.low:null), high:(typeof d.high==='number'?d.high:null), dispersion:(typeof d.dispersion==='number'?d.dispersion:null), confidence:d.confidence||'preliminary', source:d.source||'', acceptedCount:acc, rejectedCount:rej, recencyDays:(typeof d.recencyDays==='number'?d.recencyDays:null), lastPricedAt:d.lastPricedAt||new Date().toISOString(), _hasComps:(Array.isArray(d.acceptedComps)&&d.acceptedComps.length>0), _hasImgField:!!(Array.isArray(d.acceptedComps)&&d.acceptedComps.find(c=>c&&(c.imageUrl||c.image))) };
             const obj = sealed.find(s=>s.id===it.id);
             if(obj){
               obj.marketValue = d.marketValue;
               obj.lastMarketValue = d.marketValue;
+              obj.marketLow = (typeof d.low==='number') ? d.low : null;
+              obj.marketHigh = (typeof d.high==='number') ? d.high : null;
               obj.lastPricedAt = Date.parse(d.lastPricedAt||'') || Date.now();
               obj.lastPriceConfidence = d.confidence||'preliminary';
               obj.lastPriceSource = d.source||'sealed';
+              obj.compCount = acc;
+              obj.rejectedCount = rej;
               if(!obj.valueSource) obj.valueSource = 'market';   // default to market unless user chose manual
+              // capture a representative product image (only if user hasn't set one).
+              // Resilient: check acceptedComps, then any comp array, then top-level,
+              // across both possible field names (imageUrl / image).
+              if(!obj.img){
+                const pickImg = (arr) => {
+                  if(!Array.isArray(arr)) return '';
+                  const c = arr.find(x => x && (x.imageUrl || x.image));
+                  return c ? (c.imageUrl || c.image) : '';
+                };
+                let img = pickImg(d.acceptedComps) || pickImg(d.comps) || pickImg(d.rejectedComps);
+                if(!img && (d.imageUrl || d.image)) img = d.imageUrl || d.image;
+                if(img){ obj.img = img; }
+              }
               changed = true;
             }
           }
@@ -4045,6 +4069,85 @@ async function loadSealedPrices(force){
     _sealedPricesLoading = false;
     if(changed){ try{ save(); }catch(e){} if(typeof renderSealed==='function') renderSealed(); }
   }
+}
+
+/* ─── "Explain my price" evidence panel for the sealed modal ─── */
+let _sealedModalId = null;       // the sealed item currently open in the modal (edit mode)
+function _sealedConfBadge(conf){
+  const c = (conf||'').toLowerCase();
+  const map = { high:['var(--green)','High'], medium:['var(--gold)','Medium'], low:['var(--orange)','Low'], preliminary:['var(--gold)','Preliminary'] };
+  const [col,lbl] = map[c] || ['var(--muted)', conf||'—'];
+  return `<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;background:${col};color:#0a0a0a;letter-spacing:.3px;">${lbl.toUpperCase()}</span>`;
+}
+function renderSealedEvidence(id){
+  const wrap = document.getElementById('sp-evidence');
+  const srcWrap = document.getElementById('sp-valuesource-wrap');
+  const item = id ? sealed.find(s=>s.id===id) : null;
+  const c = item ? sealedPriceCache[item.id] : null;
+  const mv = item && (c ? c.marketValue : (typeof item.marketValue==='number'?item.marketValue:null));
+  if(!wrap) return;
+  if(!item || mv==null){ wrap.hidden = true; if(srcWrap) srcWrap.hidden = true; return; }
+  // value-source toggle visible whenever a market value exists
+  if(srcWrap){ srcWrap.hidden = false; _syncSealedSourceButtons(item.valueSource || 'market'); }
+  const low = c?c.low:item.marketLow, high = c?c.high:item.marketHigh;
+  const acc = c?c.acceptedCount:item.compCount, rej = c?c.rejectedCount:item.rejectedCount;
+  const source = (c?c.source:item.lastPriceSource)||'';
+  const conf = (c?c.confidence:item.lastPriceConfidence)||'';
+  const when = c?c.lastPricedAt:item.lastPricedAt;
+  const isAsking = /browse/i.test(source);
+  const sourceLbl = isAsking ? 'Active listings (asking prices)' : (/sold/i.test(source) ? 'Recent sold listings' : (source||'—'));
+  const whenStr = when ? (typeof when==='number' ? new Date(when).toLocaleDateString() : new Date(Date.parse(when)||Date.now()).toLocaleDateString()) : '';
+  const img = item.img ? `<img src="${item.img}" alt="" loading="lazy" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">` : '';
+  wrap.hidden = false;
+  wrap.innerHTML = `
+    <div style="background:var(--bg3);border-radius:var(--r2);padding:12px 14px;display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        ${img}
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-family:var(--disp);font-size:20px;font-weight:800;color:var(--green);">$${mv.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+            ${_sealedConfBadge(conf)}
+          </div>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:2px;">Market estimate${whenStr?` · ${whenStr}`:''}</div>
+        </div>
+      </div>
+      ${(low!=null&&high!=null)?`<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);"><span>Range</span><span style="font-family:var(--mono);color:var(--text);">$${low.toFixed(0)} – $${high.toFixed(0)}</span></div>`:''}
+      ${(acc!=null)?`<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);"><span>Comps used</span><span style="font-family:var(--mono);color:var(--text);">${acc} accepted${rej!=null?` · ${rej} filtered out`:''}</span></div>`:''}
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);"><span>Source</span><span style="color:${isAsking?'var(--orange)':'var(--green)'};text-align:right;">${sourceLbl}</span></div>
+      ${isAsking?`<div style="font-size:10px;color:var(--orange);line-height:1.4;border-top:1px solid var(--border);padding-top:8px;">⚠ Based on current asking prices, not confirmed sales — treat as a market ceiling, not a sold value.</div>`:''}
+      ${c?`<div style="font-size:9px;color:var(--muted);border-top:1px solid var(--border);padding-top:6px;font-family:var(--mono);">diag: comps=${c._hasComps?'yes':'NO'} · img-field=${c._hasImgField?'yes':'NO'} · saved-img=${item.img?'yes':'NO'}</div>`:''}
+    </div>`;
+}
+function _syncSealedSourceButtons(src){
+  const m = document.getElementById('sp-src-market'), n = document.getElementById('sp-src-manual');
+  if(!m||!n) return;
+  const on = 'btn-primary', off = 'btn-ghost';
+  m.classList.remove(on,off); n.classList.remove(on,off);
+  m.classList.add(src==='market'?on:off); n.classList.add(src==='manual'?on:off);
+}
+function setSealedValueSource(src){
+  _syncSealedSourceButtons(src);
+  // remember choice for save; if switching to market, mirror market value into the field for clarity
+  window._sealedPendingSource = src;
+  if(src==='market' && _sealedModalId){
+    const item = sealed.find(s=>s.id===_sealedModalId);
+    const c = item && sealedPriceCache[item.id];
+    const mv = c ? c.marketValue : (item && typeof item.marketValue==='number' ? item.marketValue : null);
+    if(mv!=null) document.getElementById('sp-value').value = '';   // clear manual so market wins
+  }
+}
+
+/* ─── Manual refresh of sealed market prices (force re-fetch + spin state) ─── */
+async function refreshSealedPrices(){
+  const btn = document.getElementById('sealed-refresh-btn');
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
+  try {
+    sealedPriceCache = {};                 // drop cache so all items re-price
+    await loadSealedPrices(true);
+    if(typeof renderSealed==='function') renderSealed();
+    toast('Prices refreshed','green');
+  } catch(e){ toast('Refresh failed','red'); }
+  finally { if(btn){ btn.disabled = false; btn.style.opacity = ''; } }
 }
 
 /* ─── Settings action: preview duplicates (dry-run), confirm with numbers, apply ─── */
@@ -6977,6 +7080,8 @@ function openSealedModal(id){
   if(id){const p=sealed.find(x=>x.id===id);if(!p)return;document.getElementById('sp-name').value=p.name||'';document.getElementById('sp-set').value=p.set||'';document.getElementById('sp-lang').value=p.lang||'EN';document.getElementById('sp-cond').value=p.cond||'sealed';document.getElementById('sp-qty').value=p.qty||1;document.getElementById('sp-paid').value=p.paid||'';document.getElementById('sp-value').value=p.value||'';document.getElementById('sp-date').value=p.date||'';document.getElementById('sp-notes').value=p.notes||'';document.getElementById('sp-type').value=p.type||'booster_box';document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const ap=document.querySelector(`#sealed-modal .type-pill[data-val="${p.type||'booster_box'}"]`);if(ap)ap.classList.add('active');}
   else{['sp-name','sp-set','sp-paid','sp-value','sp-notes','sp-date'].forEach(i=>document.getElementById(i).value='');document.getElementById('sp-qty').value=1;document.getElementById('sp-lang').value='EN';document.getElementById('sp-cond').value='sealed';document.getElementById('sp-type').value='booster_box';document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));document.querySelector('#sealed-modal .type-pill[data-val="booster_box"]').classList.add('active');}
   updateSealedPreview();openModal('sealed-modal');
+  _sealedModalId = id || null; window._sealedPendingSource = null;
+  if(typeof renderSealedEvidence==='function') renderSealedEvidence(id);
 }
 function selectSealedType(val,icon,label,el){document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));el.classList.add('active');document.getElementById('sp-type').value=val;document.getElementById('sp-prev-icon').textContent=icon;updateSealedPreview();}
 function updateSealedPreview(){const name=document.getElementById('sp-name').value.trim();const set=document.getElementById('sp-set').value.trim();const type=document.getElementById('sp-type').value;const info=SEALED_TYPES[type]||SEALED_TYPES.other;document.getElementById('sp-prev-icon').textContent=info.icon;document.getElementById('sp-prev-name').textContent=name||'No product selected';document.getElementById('sp-prev-name').style.color=name?'var(--text)':'var(--muted)';document.getElementById('sp-prev-meta').textContent=[info.label,set].filter(Boolean).join(' · ')||'Fill in details below';}
@@ -6984,7 +7089,7 @@ function saveSealed(){
   const name=document.getElementById('sp-name').value.trim();if(!name){toast('Product name required','red');return;}
   const _prevSealed=editingSealedId?(sealed.find(x=>x.id===editingSealedId)||{}):{};
   const _spVal=document.getElementById('sp-value').value;
-  const data={id:editingSealedId||newId('s'),name,type:document.getElementById('sp-type').value,set:document.getElementById('sp-set').value.trim(),lang:document.getElementById('sp-lang').value,cond:document.getElementById('sp-cond').value,qty:parseInt(document.getElementById('sp-qty').value)||1,paid:document.getElementById('sp-paid').value,value:_spVal,date:document.getElementById('sp-date').value,notes:document.getElementById('sp-notes').value.trim(),added:editingSealedId?_prevSealed.added:new Date().toISOString(),marketValue:_prevSealed.marketValue!=null?_prevSealed.marketValue:null,lastPricedAt:_prevSealed.lastPricedAt!=null?_prevSealed.lastPricedAt:null,lastPriceSource:_prevSealed.lastPriceSource||null,lastPriceConfidence:_prevSealed.lastPriceConfidence||null,compCount:_prevSealed.compCount||0,valueSource:_prevSealed.valueSource||(parseFloat(_spVal||0)>0?'manual':'market')};
+  const data={id:editingSealedId||newId('s'),name,type:document.getElementById('sp-type').value,set:document.getElementById('sp-set').value.trim(),lang:document.getElementById('sp-lang').value,cond:document.getElementById('sp-cond').value,qty:parseInt(document.getElementById('sp-qty').value)||1,paid:document.getElementById('sp-paid').value,value:_spVal,date:document.getElementById('sp-date').value,notes:document.getElementById('sp-notes').value.trim(),added:editingSealedId?_prevSealed.added:new Date().toISOString(),marketValue:_prevSealed.marketValue!=null?_prevSealed.marketValue:null,lastPricedAt:_prevSealed.lastPricedAt!=null?_prevSealed.lastPricedAt:null,lastPriceSource:_prevSealed.lastPriceSource||null,lastPriceConfidence:_prevSealed.lastPriceConfidence||null,compCount:_prevSealed.compCount||0,valueSource:(window._sealedPendingSource||_prevSealed.valueSource||(parseFloat(_spVal||0)>0?'manual':'market'))};
   if(editingSealedId)sealed=sealed.map(x=>x.id===editingSealedId?data:x);else sealed.push(data);
   save();closeModal('sealed-modal');renderSealed();renderPortfolio();
   if(sealedSetFilter)renderSealedQuickAdd(sealedSetFilter,document.getElementById('sealed-set-banner-logo').src||'');
@@ -7016,8 +7121,9 @@ function renderSealed(){
     const roiPct=roi!=null&&paid>0?((roi/(paid*(p.qty||1)))*100).toFixed(1):null;
     const tcgQ=encodeURIComponent(p.name+(p.set?' '+p.set:''));
     return `<div class="card-tile" style="cursor:default;">
-      <div class="ct-img" style="aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:52px;">
-        ${info.icon}
+      <div class="ct-img" style="aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:52px;overflow:hidden;position:relative;">
+        <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${info.icon}</span>
+        ${tileImage(p.img, p.name, { imgStyle:'position:relative;width:100%;height:100%;object-fit:cover;', placeholder:'' })}
         <div class="ct-badges"><span class="ct-badge type-standard">${info.label}</span>${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${p.lang}</span>`:''}</div>
         <span class="ct-cond" style="background:${p.cond==='sealed'?'rgba(46,204,128,.2)':'rgba(255,140,66,.2)'};color:${p.cond==='sealed'?'#4ade80':'var(--orange)'};width:auto;padding:2px 6px;border-radius:6px;font-size:9px;top:7px;right:7px;">${p.cond==='sealed'?'SEALED':'OPEN'}</span>
       </div>
