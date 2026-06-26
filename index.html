@@ -4008,23 +4008,17 @@ async function resolveSealedOfficialImage(it){
   if(!it || it.imgTcg || it._tcgTried) return;
   it._tcgTried = true;   // one attempt per item per session
   try{
-    const hdrs = (typeof keys!=='undefined' && keys.ptcg) ? {'X-Api-Key':keys.ptcg} : {};
-    const setName = (it.set || it.name || '').trim();
-    if(!setName) return;
-    const q = encodeURIComponent(`set.name:"${setName}"`);
-    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${q}&pageSize=1`, { headers: hdrs });
+    // Ask the worker for a CLEAN official product image (TCGCSV → TCGPlayer CDN).
+    const url = `${EBAY_WORKER}/sealed-image?name=${encodeURIComponent(it.name||'')}&set=${encodeURIComponent(it.set||'')}&type=${encodeURIComponent(it.type||'')}`;
+    const r = await fetch(url);
     if(!r.ok) return;
-    const j = await r.json();
-    const card = (j.data && j.data[0]) || null;
-    const tcgUrl = card && card.tcgplayer && card.tcgplayer.url;
-    if(!tcgUrl) return;
-    const m = String(tcgUrl).match(/(\d{4,})/);   // numeric TCGPlayer product id
-    if(!m) return;
-    const cdn = `https://tcgplayer-cdn.tcgplayer.com/product/${m[1]}_in_1000x1000.jpg`;
-    it.imgTcg = cdn;
-    it.img = cdn;                 // prefer the clean render; tile onerror falls back to eBay
-    try{ save(); }catch(e){}
-    if(typeof renderSealed==='function') renderSealed();
+    const d = await r.json();
+    if(d && d.imageUrl){
+      it.imgTcg = d.imageUrl;
+      it.img = d.imageUrl;        // prefer the clean render; tile onerror falls back to eBay
+      try{ save(); }catch(e){}
+      if(typeof renderSealed==='function') renderSealed();
+    }
   }catch(e){ /* network/parse fail → keep eBay image */ }
 }
 
