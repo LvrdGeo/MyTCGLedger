@@ -1637,7 +1637,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
         <div class="form-group" style="grid-column:1/-1;" id="sp-evidence" hidden></div>
         <div class="form-group"><div class="form-label">Purchase Date</div><input class="input" id="sp-date" type="date"></div>
         <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Notes</div><textarea class="input" id="sp-notes" placeholder="Storage, source…" style="min-height:48px;"></textarea></div>
-        <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Product Image URL <span style="color:var(--muted);font-weight:400;">· paste a stock image (TCGPlayer, Pokémon Center, etc.)</span></div><div style="display:flex;gap:6px;"><input class="input" id="sp-img" placeholder="https://…/product.jpg" oninput="updateSealedPreview()" style="flex:1;"><button type="button" class="btn btn-ghost btn-sm" onclick="findSealedImage()" title="Search for a stock image" style="white-space:nowrap;">🔍 Find</button></div></div>
+        <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Product Image <span style="color:var(--muted);font-weight:400;">· upload a photo, or paste a URL</span></div><div style="display:flex;gap:6px;"><input class="input" id="sp-img" placeholder="https://…/product.jpg" oninput="updateSealedPreview()" style="flex:1;"><button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('sp-photo-file').click()" title="Upload a photo" style="white-space:nowrap;">📷 Add Photo</button><button type="button" class="btn btn-ghost btn-sm" onclick="findSealedImage()" title="Search for a stock image" style="white-space:nowrap;">🔍 Find</button></div><input type="file" id="sp-photo-file" accept="image/*" style="display:none;" onchange="uploadSealedPhoto(this)"><div id="sp-photo-status" style="font-size:11px;color:var(--muted);margin-top:4px;"></div></div>
       </div>
     </div>
     <div class="modal-ft"><button class="btn btn-ghost" onclick="closeModal('sealed-modal')">Cancel</button><button class="btn btn-primary" onclick="saveSealed()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><polyline points="20 6 9 17 4 12"/></svg>Save Product</button></div>
@@ -4368,6 +4368,47 @@ function findSealedImage(){
   // Google Images for that exact product — user taps an image, copies its URL, pastes back.
   window.open('https://www.google.com/search?tbm=isch&q='+encodeURIComponent(q), '_blank');
   toast('Find a clean image, copy its address, paste it above','blue');
+}
+
+/* ─── Upload a sealed product photo to Supabase Storage (bucket: sealed-images).
+   Shrinks/compresses in-browser to keep files small, uploads, then writes the
+   public URL into the sp-img field. The URL (not the image data) is stored on
+   the item, so it syncs to every device with no bloat. ─── */
+async function _shrinkImage(file, maxDim, quality){
+  maxDim = maxDim||800; quality = quality||0.82;
+  try{
+    const bmp = await createImageBitmap(file);
+    let w = bmp.width, h = bmp.height;
+    const scale = Math.min(1, maxDim/Math.max(w,h));
+    w = Math.round(w*scale); h = Math.round(h*scale);
+    const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise(res=>canvas.toBlob(res, 'image/webp', quality));
+    return blob || file;
+  }catch(e){ return file; }
+}
+async function uploadSealedPhoto(inputEl){
+  const status = (t,c)=>{ const el=document.getElementById('sp-photo-status'); if(el){ el.textContent=t; el.style.color=c||'var(--muted)'; } };
+  const file = inputEl && inputEl.files && inputEl.files[0];
+  if(!file) return;
+  if(!supa){ status('Storage not available — paste a URL instead','var(--red)'); return; }
+  if(!currentUser){ status('Sign in to upload photos','var(--red)'); return; }
+  try{
+    status('Optimizing photo…');
+    const blob = await _shrinkImage(file, 800, 0.82);
+    const base = (document.getElementById('sp-name') && document.getElementById('sp-name').value || 'product').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60) || 'product';
+    const path = base + '-' + Date.now() + '.webp';
+    status('Uploading…');
+    const up = await supa.storage.from('sealed-images').upload(path, blob, { contentType:'image/webp', upsert:true });
+    if(up.error){ status('Upload failed: '+up.error.message,'var(--red)'); return; }
+    const pub = supa.storage.from('sealed-images').getPublicUrl(path);
+    const url = pub && pub.data && pub.data.publicUrl;
+    if(!url){ status('Could not get image URL','var(--red)'); return; }
+    const field = document.getElementById('sp-img');
+    if(field){ field.value = url; if(typeof updateSealedPreview==='function') updateSealedPreview(); }
+    status('Photo added ✓','var(--green)');
+  }catch(e){ status('Error: '+(e.message||e),'var(--red)'); }
+  finally{ try{ inputEl.value=''; }catch(_){} }
 }
 
 /* ─── Sealed market pricing: calls Worker /sealed, stamps marketValue, re-renders.
@@ -7533,7 +7574,7 @@ function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.ge
 // ═══ CARD CRUD ═══
 function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId){collection=collection.map(c=>c.id===editingId?data:c);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'edit',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:null,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card updated','green');}else{dupWarnThenAdd(data,()=>{collection.push(data);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card added','green');});}}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId){collection=collection.map(c=>c.id===editingId?data:c);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'edit',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:null,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card updated','green');}else{collection.push(data);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card added','green');}}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -9883,7 +9924,6 @@ function addScannedCard() {
     notes: 'Added via Card Scanner',
     added: new Date().toISOString(),
   };
-  dupWarnThenAdd(card, () => {
   collection.push(card);
   save();
   renderAll();
@@ -9893,7 +9933,6 @@ function addScannedCard() {
   document.getElementById('scan-added-name').textContent = card.name;
   document.getElementById('scan-added').style.display = '';
   toast(card.name + ' added to vault', 'green');
-  });
 }
 
 function resetScanner() {
