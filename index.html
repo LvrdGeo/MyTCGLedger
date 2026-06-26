@@ -1378,6 +1378,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
       </div>
     </div>
   </div>
+
 </div>
 
 </div><!-- /main -->
@@ -1636,6 +1637,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
         <div class="form-group" style="grid-column:1/-1;" id="sp-evidence" hidden></div>
         <div class="form-group"><div class="form-label">Purchase Date</div><input class="input" id="sp-date" type="date"></div>
         <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Notes</div><textarea class="input" id="sp-notes" placeholder="Storage, source…" style="min-height:48px;"></textarea></div>
+        <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Product Image URL <span style="color:var(--muted);font-weight:400;">· paste a stock image (TCGPlayer, Pokémon Center, etc.)</span></div><div style="display:flex;gap:6px;"><input class="input" id="sp-img" placeholder="https://…/product.jpg" oninput="updateSealedPreview()" style="flex:1;"><button type="button" class="btn btn-ghost btn-sm" onclick="findSealedImage()" title="Search for a stock image" style="white-space:nowrap;">🔍 Find</button></div></div>
       </div>
     </div>
     <div class="modal-ft"><button class="btn btn-ghost" onclick="closeModal('sealed-modal')">Cancel</button><button class="btn btn-primary" onclick="saveSealed()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><polyline points="20 6 9 17 4 12"/></svg>Save Product</button></div>
@@ -2680,6 +2682,256 @@ const SEALED_CATALOG=[
 ];
 const CACHE_TTL = 60*60*1000;
 const EBAY_WORKER = 'https://mytcg-ebay.geo6810-03e.workers.dev';
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SEALED PRODUCT IMAGE CATALOG — production framework (fully local, no API).
+   Resolves sealed product images from our OWN catalog. No scraping, no live
+   third-party image APIs. Works even when image files are missing (status flag).
+   ────────────────────────────────────────────────────────────────────────────
+   RESOLUTION PRIORITY (see resolveSealedImage):
+     1. Manual image URL (item.imgManual + item.img) — ALWAYS wins.
+     2. Exact canonicalName match.
+     3. Alias match.
+     4. Normalized product-name match.
+     5. Category fallback image.
+     6. Generic sealed fallback image.
+   ────────────────────────────────────────────────────────────────────────────
+   FOLDER STRUCTURE (ship images under /public so they deploy with the app):
+     /images/sealed/booster-box/        /images/sealed/etb/
+     /images/sealed/pc-etb/             /images/sealed/booster-bundle/
+     /images/sealed/upc/                /images/sealed/collection-box/
+     /images/sealed/premium-collection/ /images/sealed/tin/
+     /images/sealed/mini-tin/           /images/sealed/build-battle/
+     /images/sealed/build-battle-stadium/ /images/sealed/blister/
+     /images/sealed/fallback/           ← category + generic fallbacks
+   ────────────────────────────────────────────────────────────────────────────
+   HOW TO ADD A NEW PRODUCT (see SEALED_IMAGE_CATALOG below):
+     • Add an entry object with id, canonicalName, category, setName, era,
+       imagePath, aliases[], status, sourceNotes.
+     • canonicalName is the human name; the resolver normalizes it for matching.
+     • imagePath follows the folder structure, e.g.
+         /images/sealed/booster-box/phantasmal-flames-booster-box.webp
+     • Name the image file as the normalized canonicalName + .webp.
+     • status: 'available' once the file exists, else 'missing' (resolver will
+       fall back to a category/generic image so nothing breaks).
+   HOW ALIASES WORK:
+     • aliases[] are alternate names users might type ("sv151", "151 bundle").
+       They are normalized and matched the same way as canonicalName.
+   MOVING TO CLOUDFLARE R2 LATER:
+     • Keep imagePath values relative ('/images/sealed/...'). When you move to
+       R2, set SEALED_IMAGE_BASE to your R2 public URL (e.g.
+       'https://cdn.mytcgledger.com') and every path resolves to R2 with no
+       per-entry edits. Leave '' to serve from your own /public deploy.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+// Prefix for all catalog image paths. '' = serve from app's /public folder.
+// Set to an R2/CDN base later (no trailing slash) to migrate without edits.
+const SEALED_IMAGE_BASE = '';
+
+// Supported categories (used for fallbacks + validation).
+const SEALED_CATEGORIES = [
+  'booster-box','etb','pc-etb','booster-bundle','upc','collection-box',
+  'premium-collection','tin','mini-tin','build-battle','build-battle-stadium',
+  'checklane-blister','three-pack-blister','blister','other'
+];
+
+// Map the app's internal `type` values → catalog category keys (tolerant).
+const SEALED_TYPE_TO_CATEGORY = {
+  booster_box:'booster-box', etb:'etb', bundle:'booster-bundle',
+  blister:'blister', tin:'tin', other:'collection-box',
+};
+
+// Normalize a product name for matching:
+// lowercase · & → "and" · strip punctuation · collapse spaces · trim · spaces→hyphens
+function normalizeSealedName(s){
+  return String(s||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // strip accents (é→e, ó→o)
+    .toLowerCase()
+    .replace(/&/g,' and ')
+    .replace(/[^a-z0-9\s]/g,' ')   // strip punctuation/specials
+    .replace(/\s+/g,' ')           // collapse duplicate spaces
+    .trim()
+    .replace(/\s/g,'-');           // spaces → hyphens
+}
+
+// Category fallback images. Files live under /images/sealed/fallback/.
+// Safe even if the files don't exist yet (img onerror hides → emoji shows).
+const SEALED_CATEGORY_FALLBACK_IMG = {
+  'booster-box':           '/images/sealed/fallback/booster-box.webp',
+  'etb':                   '/images/sealed/fallback/etb.webp',
+  'pc-etb':                '/images/sealed/fallback/pc-etb.webp',
+  'booster-bundle':        '/images/sealed/fallback/booster-bundle.webp',
+  'upc':                   '/images/sealed/fallback/upc.webp',
+  'collection-box':        '/images/sealed/fallback/collection-box.webp',
+  'premium-collection':    '/images/sealed/fallback/premium-collection.webp',
+  'tin':                   '/images/sealed/fallback/tin.webp',
+  'mini-tin':              '/images/sealed/fallback/mini-tin.webp',
+  'build-battle':          '/images/sealed/fallback/build-battle.webp',
+  'build-battle-stadium':  '/images/sealed/fallback/build-battle-stadium.webp',
+  'checklane-blister':     '/images/sealed/fallback/blister.webp',
+  'three-pack-blister':    '/images/sealed/fallback/blister.webp',
+  'blister':               '/images/sealed/fallback/blister.webp',
+  'other':                 '/images/sealed/fallback/generic-sealed.webp',
+};
+const SEALED_GENERIC_FALLBACK_IMG = '/images/sealed/fallback/generic-sealed.webp';
+
+/* ─── THE CATALOG. Add new sealed products here. ────────────────────────────
+   Each entry:
+     id           unique slug (normalized canonicalName)
+     canonicalName human-readable product name
+     category      one of SEALED_CATEGORIES
+     setName       the set/expansion
+     era           rough era grouping (e.g. 'Scarlet & Violet', 'Sword & Shield')
+     imagePath     /images/sealed/<category>/<file>.webp
+     aliases       alternate names users might type (normalized at match time)
+     status        'available' (file exists) | 'missing' (use fallback)
+     sourceNotes   where the art came from / licensing note
+   ─────────────────────────────────────────────────────────────────────────── */
+const SEALED_IMAGE_CATALOG = [
+  {
+    id:'scarlet-and-violet-151-booster-bundle',
+    canonicalName:'Scarlet & Violet 151 Booster Bundle',
+    category:'booster-bundle', setName:'151', era:'Scarlet & Violet',
+    imagePath:'/images/sealed/booster-bundle/sv151-booster-bundle.webp',
+    aliases:['sv151 booster bundle','151 booster bundle','sv 151 bundle'],
+    status:'missing', sourceNotes:'placeholder — add official product image'
+  },
+  {
+    id:'prismatic-evolutions-super-premium-collection',
+    canonicalName:'Prismatic Evolutions Super Premium Collection',
+    category:'premium-collection', setName:'Prismatic Evolutions', era:'Scarlet & Violet',
+    imagePath:'/images/sealed/premium-collection/prismatic-evolutions-super-premium-collection.webp',
+    aliases:['prismatic evolutions spc','prismatic spc','prismatic super premium'],
+    status:'missing', sourceNotes:'placeholder — add official product image'
+  },
+  {
+    id:'surging-sparks-booster-box',
+    canonicalName:'Surging Sparks Booster Box',
+    category:'booster-box', setName:'Surging Sparks', era:'Scarlet & Violet',
+    imagePath:'/images/sealed/booster-box/surging-sparks-booster-box.webp',
+    aliases:['surging sparks bb'],
+    status:'missing', sourceNotes:'placeholder — add official product image'
+  },
+  {
+    id:'crown-zenith-elite-trainer-box',
+    canonicalName:'Crown Zenith Elite Trainer Box',
+    category:'etb', setName:'Crown Zenith', era:'Sword & Shield',
+    imagePath:'/images/sealed/etb/crown-zenith-elite-trainer-box.webp',
+    aliases:['crown zenith etb','cz etb'],
+    status:'missing', sourceNotes:'placeholder — add official product image'
+  },
+  {
+    id:'obsidian-flames-elite-trainer-box',
+    canonicalName:'Obsidian Flames Elite Trainer Box',
+    category:'etb', setName:'Obsidian Flames', era:'Scarlet & Violet',
+    imagePath:'/images/sealed/etb/obsidian-flames-elite-trainer-box.webp',
+    aliases:['obsidian flames etb','obf etb'],
+    status:'missing', sourceNotes:'placeholder — add official product image'
+  },
+  {
+    id:'arceus-vstar-ultra-premium-collection',
+    canonicalName:'Arceus VSTAR Ultra-Premium Collection',
+    category:'upc', setName:'Brilliant Stars', era:'Sword & Shield',
+    imagePath:'/images/sealed/upc/arceus-vstar-ultra-premium-collection.webp',
+    aliases:['arceus vstar upc','arceus upc','arceus ultra premium'],
+    status:'missing', sourceNotes:'placeholder — add official product image'
+  },
+  {
+    id:'phantasmal-flames-booster-box',
+    canonicalName:'Phantasmal Flames Booster Box',
+    category:'booster-box', setName:'Phantasmal Flames', era:'Mega Evolution',
+    imagePath:'/images/sealed/booster-box/phantasmal-flames-booster-box.webp',
+    aliases:['phantasmal flames bb','me02 booster box','phantasmal flames booster'],
+    status:'missing', sourceNotes:'placeholder — add official product image'
+  },
+  // ⬇⬇⬇ ADD NEW SEALED PRODUCTS BELOW (copy an entry above as a template) ⬇⬇⬇
+
+  // ⬆⬆⬆ ADD NEW SEALED PRODUCTS ABOVE ⬆⬆⬆
+];
+
+// Build fast lookup indexes once (canonical + alias → entry).
+const _sealedByCanonical = {};
+const _sealedByAlias = {};
+(function _indexSealedCatalog(){
+  try{
+    for(const e of SEALED_IMAGE_CATALOG){
+      if(!e) continue;
+      const cn = normalizeSealedName(e.canonicalName||e.id||'');
+      if(cn) _sealedByCanonical[cn] = e;
+      const al = Array.isArray(e.aliases) ? e.aliases : [];
+      for(const a of al){ const na = normalizeSealedName(a); if(na) _sealedByAlias[na] = e; }
+    }
+  }catch(_){}
+})();
+
+// Apply the base prefix (for future R2 migration) to a path. Safe on null.
+function _sealedImgUrl(path){
+  if(!path) return '';
+  if(/^https?:\/\//i.test(path)) return path;     // already absolute
+  return (SEALED_IMAGE_BASE||'') + path;
+}
+
+/* Resolve the best image for a sealed item. Pure, synchronous, never throws.
+   Returns { url, method } — method ∈ manual|canonical|alias|normalized|
+   category-fallback|generic-fallback. Caller may show emoji if url is ''. */
+function resolveSealedImageEx(item){
+  try{
+    item = item || {};
+    // 1) Manual image URL always wins.
+    if(item.imgManual && item.img) return { url:item.img, method:'manual' };
+    // legacy manual images (set before imgManual flag existed) still honored
+    if(item.img && item.imgManual!==false && !item._catalogImg && /^https?:\/\//i.test(item.img))
+      return { url:item.img, method:'manual' };
+
+    const key = normalizeSealedName(item.name);
+
+
+    // 2) exact canonicalName match (local static catalog)
+    if(key && _sealedByCanonical[key]){
+      const e = _sealedByCanonical[key];
+      if(e.imagePath) return { url:_sealedImgUrl(e.imagePath), method:'canonical' };
+    }
+    // 3) alias match
+    if(key && _sealedByAlias[key]){
+      const e = _sealedByAlias[key];
+      if(e.imagePath) return { url:_sealedImgUrl(e.imagePath), method:'alias' };
+    }
+    // 4) normalized fuzzy match (key contains / contained by a canonical key)
+    if(key){
+      for(const ck in _sealedByCanonical){
+        if(ck===key) continue;
+        if(ck.includes(key) || key.includes(ck)){
+          const e = _sealedByCanonical[ck];
+          if(e.imagePath) return { url:_sealedImgUrl(e.imagePath), method:'normalized' };
+        }
+      }
+    }
+    // 5) category fallback
+    const cat = SEALED_TYPE_TO_CATEGORY[item.type] || (SEALED_CATEGORIES.indexOf(item.type)>=0 ? item.type : 'other');
+    if(SEALED_CATEGORY_FALLBACK_IMG[cat])
+      return { url:_sealedImgUrl(SEALED_CATEGORY_FALLBACK_IMG[cat]), method:'category-fallback' };
+    // 6) generic fallback
+    return { url:_sealedImgUrl(SEALED_GENERIC_FALLBACK_IMG), method:'generic-fallback' };
+  }catch(_){
+    // never throw — always return a valid generic fallback
+    return { url:_sealedImgUrl(SEALED_GENERIC_FALLBACK_IMG), method:'generic-fallback' };
+  }
+}
+
+// Thin wrapper used by the UI: returns just the URL string.
+function sealedImageFor(item){ return resolveSealedImageEx(item).url; }
+
+/* DEBUG HELPER (development only). Logs name, normalized name, resolved path,
+   and which method produced it. Call from the console: debugSealedImage(item)
+   or debugSealedImage('Phantasmal Flames Booster Box'). */
+function debugSealedImage(itemOrName){
+  const item = (typeof itemOrName==='string') ? { name:itemOrName } : (itemOrName||{});
+  const r = resolveSealedImageEx(item);
+  const out = { product:item.name||'(none)', normalized:normalizeSealedName(item.name), resolvedPath:r.url||'(empty)', method:r.method };
+  try{ console.table ? console.table(out) : console.log(out); }catch(_){ console.log(out); }
+  return out;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // EDITION MODEL — 1st Edition / Unlimited / Shadowless
@@ -4027,7 +4279,8 @@ function openSealedDetail(id){
   const whenStr = when ? (typeof when==='number' ? new Date(when).toLocaleDateString() : new Date(Date.parse(when)||Date.now()).toLocaleDateString()) : '';
   const tcgQ = encodeURIComponent(p.name+(p.set?' '+p.set:''));
   const ebayQ = encodeURIComponent(p.name+(p.set?' '+p.set:'')+' sealed');
-  const img = p.img ? `<img src="${p.img}" alt="${p.name}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" ${p.imgEbay&&p.imgEbay!==p.img?`onerror="this.onerror=null;this.src='${p.imgEbay}'"`:`onerror="this.style.display='none'"`}>` : '';
+  const _sealedImg = sealedImageFor(p);
+  const img = _sealedImg ? `<img src="${_sealedImg}" alt="${p.name}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : '';
   const row = (lbl,v,col) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;"><span style="color:var(--muted2);">${lbl}</span><span style="font-family:var(--mono);${col?`color:${col};`:''}text-align:right;">${v}</span></div>`;
 
   document.getElementById('detail-inner').innerHTML = `
@@ -4101,21 +4354,20 @@ function openSealedDetail(id){
    via pokemontcg.io, then sets obj.imgTcg. Falls back silently to the upscaled
    eBay image already on obj.img. Network-dependent; degrades gracefully. ─── */
 async function resolveSealedOfficialImage(it){
-  if(!it || it.imgTcg || it._tcgTried) return;
-  it._tcgTried = true;   // one attempt per item per session
-  try{
-    // Ask the worker for a CLEAN official product image (TCGCSV → TCGPlayer CDN).
-    const url = `${EBAY_WORKER}/sealed-image?name=${encodeURIComponent(it.name||'')}&set=${encodeURIComponent(it.set||'')}&type=${encodeURIComponent(it.type||'')}`;
-    const r = await fetch(url);
-    if(!r.ok) return;
-    const d = await r.json();
-    if(d && d.imageUrl){
-      it.imgTcg = d.imageUrl;
-      it.img = d.imageUrl;        // prefer the clean render; tile onerror falls back to eBay
-      try{ save(); }catch(e){}
-      if(typeof renderSealed==='function') renderSealed();
-    }
-  }catch(e){ /* network/parse fail → keep eBay image */ }
+  return; /* no-op: TCGCSV domain dead + eBay images disabled; images are set manually */
+}
+
+/* ─── Find-image helper: opens an image search for the exact product so the user
+   can copy a stock image URL and paste it into the field. ─── */
+function findSealedImage(){
+  const name = (document.getElementById('sp-name')?document.getElementById('sp-name').value:'').trim();
+  const set  = (document.getElementById('sp-set') ?document.getElementById('sp-set').value :'').trim();
+  const type = document.getElementById('sp-type') ? (document.getElementById('sp-type').value||'').replace(/_/g,' ') : '';
+  const q = [name, set, type, 'sealed product'].filter(Boolean).join(' ');
+  if(!q.trim()){ toast('Enter a product name first','red'); return; }
+  // Google Images for that exact product — user taps an image, copies its URL, pastes back.
+  window.open('https://www.google.com/search?tbm=isch&q='+encodeURIComponent(q), '_blank');
+  toast('Find a clean image, copy its address, paste it above','blue');
 }
 
 /* ─── Sealed market pricing: calls Worker /sealed, stamps marketValue, re-renders.
@@ -4176,9 +4428,9 @@ async function loadSealedPrices(force){
                 let img = pickImg(d.acceptedComps) || pickImg(d.comps) || pickImg(d.rejectedComps);
                 if(!img && (d.imageUrl || d.image)) img = d.imageUrl || d.image;
                 if(img){
-                  // upscale eBay thumbnails: s-l64/140/225/500 → s-l1600 (sharper)
+                  // store the eBay image but DO NOT display it (user wants stock pics only).
                   obj.imgEbay = img.replace(/\/s-l\d+\./, '/s-l1600.');
-                  if(!obj.img) obj.img = obj.imgEbay;   // provisional; TCGPlayer render may override below
+                  // obj.img is only ever a manual or TCGCSV stock image — never eBay.
                 }
               }
               changed = true;
@@ -4191,7 +4443,7 @@ async function loadSealedPrices(force){
     _sealedPricesLoading = false;
     if(changed){ try{ save(); }catch(e){} if(typeof renderSealed==='function') renderSealed(); }
     // after pricing, try to upgrade each item to a CLEAN official render (async, non-blocking)
-    try{ (sealed||[]).forEach(it=>{ if(it && !it.imgTcg && !it._tcgTried) resolveSealedOfficialImage(it); }); }catch(e){}
+    // TCGCSV auto-image resolution removed (domain dead); stock images are manual now.
   }
 }
 
@@ -7201,8 +7453,8 @@ function renderAnalyzer(){
 // ═══ SEALED ═══
 function openSealedModal(id){
   editingSealedId=id||null;document.getElementById('sealed-modal-title').textContent=id?'Edit Product':'Add Sealed Product';
-  if(id){const p=sealed.find(x=>x.id===id);if(!p)return;document.getElementById('sp-name').value=p.name||'';document.getElementById('sp-set').value=p.set||'';document.getElementById('sp-lang').value=p.lang||'EN';document.getElementById('sp-cond').value=p.cond||'sealed';document.getElementById('sp-qty').value=p.qty||1;document.getElementById('sp-paid').value=p.paid||'';document.getElementById('sp-value').value=p.value||'';document.getElementById('sp-date').value=p.date||'';document.getElementById('sp-notes').value=p.notes||'';document.getElementById('sp-type').value=p.type||'booster_box';document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const ap=document.querySelector(`#sealed-modal .type-pill[data-val="${p.type||'booster_box'}"]`);if(ap)ap.classList.add('active');}
-  else{['sp-name','sp-set','sp-paid','sp-value','sp-notes','sp-date'].forEach(i=>document.getElementById(i).value='');document.getElementById('sp-qty').value=1;document.getElementById('sp-lang').value='EN';document.getElementById('sp-cond').value='sealed';document.getElementById('sp-type').value='booster_box';document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));document.querySelector('#sealed-modal .type-pill[data-val="booster_box"]').classList.add('active');}
+  if(id){const p=sealed.find(x=>x.id===id);if(!p)return;document.getElementById('sp-name').value=p.name||'';document.getElementById('sp-set').value=p.set||'';document.getElementById('sp-lang').value=p.lang||'EN';document.getElementById('sp-cond').value=p.cond||'sealed';document.getElementById('sp-qty').value=p.qty||1;document.getElementById('sp-paid').value=p.paid||'';document.getElementById('sp-value').value=p.value||'';document.getElementById('sp-date').value=p.date||'';document.getElementById('sp-notes').value=p.notes||'';if(document.getElementById('sp-img'))document.getElementById('sp-img').value=(p.imgManual?p.img:'')||'';document.getElementById('sp-type').value=p.type||'booster_box';document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const ap=document.querySelector(`#sealed-modal .type-pill[data-val="${p.type||'booster_box'}"]`);if(ap)ap.classList.add('active');}
+  else{['sp-name','sp-set','sp-paid','sp-value','sp-notes','sp-date','sp-img'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});document.getElementById('sp-qty').value=1;document.getElementById('sp-lang').value='EN';document.getElementById('sp-cond').value='sealed';document.getElementById('sp-type').value='booster_box';document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));document.querySelector('#sealed-modal .type-pill[data-val="booster_box"]').classList.add('active');}
   updateSealedPreview();openModal('sealed-modal');
   _sealedModalId = id || null; window._sealedPendingSource = null;
   if(typeof renderSealedEvidence==='function') renderSealedEvidence(id);
@@ -7213,7 +7465,7 @@ function saveSealed(){
   const name=document.getElementById('sp-name').value.trim();if(!name){toast('Product name required','red');return;}
   const _prevSealed=editingSealedId?(sealed.find(x=>x.id===editingSealedId)||{}):{};
   const _spVal=document.getElementById('sp-value').value;
-  const data={id:editingSealedId||newId('s'),name,type:document.getElementById('sp-type').value,set:document.getElementById('sp-set').value.trim(),lang:document.getElementById('sp-lang').value,cond:document.getElementById('sp-cond').value,qty:parseInt(document.getElementById('sp-qty').value)||1,paid:document.getElementById('sp-paid').value,value:_spVal,date:document.getElementById('sp-date').value,notes:document.getElementById('sp-notes').value.trim(),added:editingSealedId?_prevSealed.added:new Date().toISOString(),marketValue:_prevSealed.marketValue!=null?_prevSealed.marketValue:null,lastPricedAt:_prevSealed.lastPricedAt!=null?_prevSealed.lastPricedAt:null,lastPriceSource:_prevSealed.lastPriceSource||null,lastPriceConfidence:_prevSealed.lastPriceConfidence||null,compCount:_prevSealed.compCount||0,valueSource:(window._sealedPendingSource||_prevSealed.valueSource||(parseFloat(_spVal||0)>0?'manual':'market'))};
+  const data={id:editingSealedId||newId('s'),name,type:document.getElementById('sp-type').value,set:document.getElementById('sp-set').value.trim(),lang:document.getElementById('sp-lang').value,cond:document.getElementById('sp-cond').value,qty:parseInt(document.getElementById('sp-qty').value)||1,paid:document.getElementById('sp-paid').value,value:_spVal,date:document.getElementById('sp-date').value,notes:document.getElementById('sp-notes').value.trim(),img:(document.getElementById('sp-img')?document.getElementById('sp-img').value.trim():'')||_prevSealed.img||'',imgManual:!!(document.getElementById('sp-img')&&document.getElementById('sp-img').value.trim()),imgEbay:_prevSealed.imgEbay||null,imgTcg:_prevSealed.imgTcg||null,added:editingSealedId?_prevSealed.added:new Date().toISOString(),marketValue:_prevSealed.marketValue!=null?_prevSealed.marketValue:null,lastPricedAt:_prevSealed.lastPricedAt!=null?_prevSealed.lastPricedAt:null,lastPriceSource:_prevSealed.lastPriceSource||null,lastPriceConfidence:_prevSealed.lastPriceConfidence||null,compCount:_prevSealed.compCount||0,valueSource:(window._sealedPendingSource||_prevSealed.valueSource||(parseFloat(_spVal||0)>0?'manual':'market'))};
   if(editingSealedId)sealed=sealed.map(x=>x.id===editingSealedId?data:x);else sealed.push(data);
   save();closeModal('sealed-modal');renderSealed();renderPortfolio();
   if(sealedSetFilter)renderSealedQuickAdd(sealedSetFilter,document.getElementById('sealed-set-banner-logo').src||'');
@@ -7247,7 +7499,7 @@ function renderSealed(){
     return `<div class="card-tile" style="cursor:default;">
       <div class="ct-img" onclick="openSealedDetail('${p.id}')" style="aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:52px;overflow:hidden;position:relative;cursor:pointer;">
         <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${info.icon}</span>
-        ${p.img?`<img src="${p.img}" alt="${p.name}" loading="lazy" style="position:relative;width:100%;height:100%;object-fit:cover;" onerror="${p.imgEbay&&p.imgEbay!==p.img?`this.onerror=null;this.src='${p.imgEbay}'`:`this.style.display='none'`}">`:''}
+        ${(()=>{const _si=sealedImageFor(p);return _si?`<img src="${_si}" alt="${p.name}" loading="lazy" style="position:relative;width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`:'';})()}
         <div class="ct-badges"><span class="ct-badge type-standard">${info.label}</span>${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${p.lang}</span>`:''}</div>
         <span class="ct-cond" style="background:${p.cond==='sealed'?'rgba(46,204,128,.2)':'rgba(255,140,66,.2)'};color:${p.cond==='sealed'?'#4ade80':'var(--orange)'};width:auto;padding:2px 6px;border-radius:6px;font-size:9px;top:7px;right:7px;">${p.cond==='sealed'?'SEALED':'OPEN'}</span>
       </div>
