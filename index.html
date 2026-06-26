@@ -4000,6 +4000,102 @@ function chooseKeeper(records){
 }
 /* ═══════════════ end Deletion Ledger ═══════════════ */
 
+/* ─── Rich sealed DETAIL view (read-first). Opens in the shared detail-modal.
+   Hero image · big value + confidence + source · P&L · full pricing evidence ·
+   product details · actions (Edit / TCGPlayer / eBay / Refresh / Delete). ─── */
+function openSealedDetail(id){
+  const p = sealed.find(s=>s.id===id);
+  if(!p){ return; }
+  const c = sealedPriceCache[p.id] || null;
+  const val = sealedEffectiveValue(p);
+  const vsrc = sealedValueSource(p);
+  const paid = parseFloat(p.paid||0);
+  const qty = p.qty||1;
+  const info = (typeof SEALED_TYPES!=='undefined' && SEALED_TYPES[p.type]) || {icon:'📦',label:p.type||'Sealed'};
+  const totalVal = val*qty, totalPaid = paid*qty;
+  const roi = (val>0&&paid>0) ? totalVal-totalPaid : null;
+  const roiPct = (roi!=null&&totalPaid>0) ? ((roi/totalPaid)*100).toFixed(1) : null;
+  const mv = c ? c.marketValue : (typeof p.marketValue==='number'?p.marketValue:null);
+  const low = c?c.low:p.marketLow, high = c?c.high:p.marketHigh;
+  const conf = (c?c.confidence:p.lastPriceConfidence)||'';
+  const source = (c?c.source:p.lastPriceSource)||'';
+  const acc = c?c.acceptedCount:p.compCount, rej = c?c.rejectedCount:p.rejectedCount;
+  const disp = c?c.dispersion:null, recency = c?c.recencyDays:null;
+  const when = c?c.lastPricedAt:p.lastPricedAt;
+  const isAsking = /browse/i.test(source);
+  const sourceLbl = isAsking ? 'Active listings (asking)' : (/sold/i.test(source) ? 'Recent solds' : (source||'—'));
+  const whenStr = when ? (typeof when==='number' ? new Date(when).toLocaleDateString() : new Date(Date.parse(when)||Date.now()).toLocaleDateString()) : '';
+  const tcgQ = encodeURIComponent(p.name+(p.set?' '+p.set:''));
+  const ebayQ = encodeURIComponent(p.name+(p.set?' '+p.set:'')+' sealed');
+  const img = p.img ? `<img src="${p.img}" alt="${p.name}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" ${p.imgEbay&&p.imgEbay!==p.img?`onerror="this.onerror=null;this.src='${p.imgEbay}'"`:`onerror="this.style.display='none'"`}>` : '';
+  const row = (lbl,v,col) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;"><span style="color:var(--muted2);">${lbl}</span><span style="font-family:var(--mono);${col?`color:${col};`:''}text-align:right;">${v}</span></div>`;
+
+  document.getElementById('detail-inner').innerHTML = `
+    <div class="modal-hd"><h2 style="font-size:18px;">${p.name}</h2><button class="modal-close" onclick="closeModal('detail-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <div style="display:flex;gap:16px;margin-bottom:18px;align-items:flex-start;">
+        <div style="width:128px;height:128px;flex-shrink:0;border-radius:12px;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:54px;position:relative;">
+          <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${info.icon}</span>${img}
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">
+            <span class="ct-badge type-standard">${info.label}</span>
+            <span class="ct-badge" style="background:${p.cond==='sealed'?'rgba(46,204,128,.18)':'rgba(255,140,66,.18)'};color:${p.cond==='sealed'?'#4ade80':'var(--orange)'};">${p.cond==='sealed'?'SEALED':(p.cond||'').toUpperCase()}</span>
+            ${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${p.lang}</span>`:''}
+            ${qty>1?`<span class="ct-badge" style="background:var(--bg4);color:var(--muted);">×${qty}</span>`:''}
+          </div>
+          <div style="font-size:11px;color:var(--muted2);margin-bottom:6px;">${p.set||''}</div>
+          <div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;">
+            <span style="font-family:var(--disp);font-size:26px;font-weight:800;color:var(--green);">${val>0?money(totalVal):'—'}</span>
+            ${val>0?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;background:${vsrc==='market'?'rgba(46,204,128,.16)':'rgba(245,200,66,.16)'};color:${vsrc==='market'?'var(--green)':'var(--gold)'};">${vsrc==='market'?'LIVE':'MANUAL'}</span>`:''}
+          </div>
+          ${qty>1&&val>0?`<div style="font-size:10.5px;color:var(--muted);margin-top:1px;">${money(val)} each</div>`:''}
+          ${roi!=null?`<div style="font-size:13px;font-weight:600;margin-top:5px;color:${roi>=0?'var(--green)':'var(--red)'};">${roi>=0?'▲':'▼'} ${money(Math.abs(roi))} (${roiPct}%)</div>`:''}
+        </div>
+      </div>
+
+      ${mv!=null?`
+      <div style="background:var(--bg3);border-radius:var(--r2);padding:13px 15px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;">Market Evidence</span>
+          ${_sealedConfBadge(conf)}
+        </div>
+        ${row('Market estimate', money(mv)+(whenStr?` <span style="color:var(--muted);font-size:10px;">· ${whenStr}</span>`:''), 'var(--green)')}
+        ${(low!=null&&high!=null)?row('Range (10–90%)', `${money(low)} – ${money(high)}`):''}
+        ${(acc!=null)?row('Comps used', `${acc} accepted${rej!=null?` · ${rej} filtered`:''}`):''}
+        ${(disp!=null)?row('Spread', (disp*100).toFixed(0)+'%'):''}
+        ${(recency!=null)?row('Sold window', recency+' days'):''}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0 0;font-size:12.5px;"><span style="color:var(--muted2);">Source</span><span style="color:${isAsking?'var(--orange)':'var(--green)'};text-align:right;font-size:11.5px;">${sourceLbl}</span></div>
+        ${isAsking?`<div style="font-size:10px;color:var(--orange);line-height:1.4;border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">⚠ Based on current asking prices, not confirmed sales — a market ceiling, not a sold value.</div>`:''}
+      </div>`:`
+      <div style="background:var(--bg3);border-radius:var(--r2);padding:13px 15px;margin-bottom:14px;font-size:12px;color:var(--muted);">
+        No market data yet. <span onclick="closeModal('detail-modal');refreshSealedPrices()" style="color:var(--gold);cursor:pointer;">Refresh prices</span> or set a manual value via Edit.
+      </div>`}
+
+      <div style="margin-bottom:16px;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;">Details</div>
+        ${row('Set', p.set||'—')}
+        ${row('Type', info.label)}
+        ${row('Condition', p.cond==='sealed'?'Factory Sealed':(p.cond||'—'))}
+        ${row('Language', p.lang||'EN')}
+        ${row('Quantity', String(qty))}
+        ${paid>0?row('Paid', money(paid)+(qty>1?` (${money(totalPaid)} total)`:'')):''}
+        ${p.date?row('Purchase date', new Date(Date.parse(p.date)||Date.now()).toLocaleDateString()):''}
+        ${p.added?row('Added', new Date(Date.parse(p.added)||Date.now()).toLocaleDateString()):''}
+        ${p.notes?`<div style="padding:8px 0;font-size:12px;color:var(--muted2);"><span style="color:var(--muted);">Notes:</span> ${p.notes}</div>`:''}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button class="btn btn-primary" onclick="closeModal('detail-modal');openSealedModal('${p.id}')" style="justify-content:center;">Edit</button>
+        <button class="btn btn-ghost" onclick="closeModal('detail-modal');refreshSealedPrices()" style="justify-content:center;">Refresh Price</button>
+        <a href="https://www.tcgplayer.com/search/pokemon/product?q=${tcgQ}" target="_blank" class="btn btn-ghost" style="justify-content:center;">TCGPlayer</a>
+        <a href="https://www.ebay.com/sch/i.html?_nkw=${ebayQ}&LH_Sold=1&LH_Complete=1" target="_blank" class="btn btn-ghost" style="justify-content:center;">eBay Sold</a>
+        <button class="btn btn-danger" onclick="closeModal('detail-modal');deleteSealed('${p.id}')" style="justify-content:center;grid-column:1/-1;">Remove from vault</button>
+      </div>
+    </div>`;
+  openModal('detail-modal');
+}
+
 /* ─── Resolve a CLEAN official product image for a sealed item.
    Tries TCGPlayer's product CDN (clean studio render) by resolving a product id
    via pokemontcg.io, then sets obj.imgTcg. Falls back silently to the upscaled
@@ -7149,15 +7245,15 @@ function renderSealed(){
     const roiPct=roi!=null&&paid>0?((roi/(paid*(p.qty||1)))*100).toFixed(1):null;
     const tcgQ=encodeURIComponent(p.name+(p.set?' '+p.set:''));
     return `<div class="card-tile" style="cursor:default;">
-      <div class="ct-img" style="aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:52px;overflow:hidden;position:relative;">
+      <div class="ct-img" onclick="openSealedDetail('${p.id}')" style="aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:52px;overflow:hidden;position:relative;cursor:pointer;">
         <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${info.icon}</span>
         ${p.img?`<img src="${p.img}" alt="${p.name}" loading="lazy" style="position:relative;width:100%;height:100%;object-fit:cover;" onerror="${p.imgEbay&&p.imgEbay!==p.img?`this.onerror=null;this.src='${p.imgEbay}'`:`this.style.display='none'`}">`:''}
         <div class="ct-badges"><span class="ct-badge type-standard">${info.label}</span>${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${p.lang}</span>`:''}</div>
         <span class="ct-cond" style="background:${p.cond==='sealed'?'rgba(46,204,128,.2)':'rgba(255,140,66,.2)'};color:${p.cond==='sealed'?'#4ade80':'var(--orange)'};width:auto;padding:2px 6px;border-radius:6px;font-size:9px;top:7px;right:7px;">${p.cond==='sealed'?'SEALED':'OPEN'}</span>
       </div>
       <div class="ct-body">
-        <div class="ct-name">${p.name}</div>
-        <div class="ct-set">${p.set||''}${p.qty>1?' · ×'+p.qty:''}</div>
+        <div class="ct-name" onclick="openSealedDetail('${p.id}')" style="cursor:pointer;">${p.name}</div>
+        <div class="ct-set" onclick="openSealedDetail('${p.id}')" style="cursor:pointer;">${p.set||''}${p.qty>1?' · ×'+p.qty:''}</div>
         <div class="price-strip">
           ${val>0?`<div class="ps-row"><span class="ps-lbl">Value<span style="font-size:8px;font-weight:700;padding:1px 4px;border-radius:4px;margin-left:5px;letter-spacing:.3px;background:${vsrc==='market'?'rgba(46,204,128,.16)':'rgba(245,200,66,.16)'};color:${vsrc==='market'?'var(--green)':'var(--gold)'};">${vsrc==='market'?'LIVE':'MANUAL'}</span></span><span class="ps-val ps-best">$${val.toFixed(2)}</span></div>`:''}
           ${paid>0?`<div class="ps-row"><span class="ps-lbl">Paid</span><span class="ps-val">$${paid.toFixed(2)}</span></div>`:''}
