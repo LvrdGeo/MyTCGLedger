@@ -9775,35 +9775,48 @@ async function scanCard(input) {
 async function searchAndShowMatches(parsed) {
   try {
     const hdrs = keys.ptcg ? { 'X-Api-Key': keys.ptcg } : {};
-    // Build query — try with number first for precision, fallback to name+set
-    let q = `name:"${parsed.name}"`;
+    const rawName = (parsed.name || '').trim();
+    const cleanName = rawName.replace(/[\u2018\u2019`]/g, "'");
+    const looseName = rawName.replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const lastWord = looseName.split(' ').filter(Boolean).pop() || looseName;
+    const ptcg = async (q) => {
+      const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=15`, { headers: hdrs });
+      const j = await r.json();
+      return (j && j.data) || [];
+    };
+    let data = [];
+    let q = `name:"${cleanName}"`;
     if (parsed.number) q += ` number:${parsed.number}`;
     if (parsed.set)    q += ` set.name:"${parsed.set}"`;
-
-    let r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=10`, { headers: hdrs });
-    let j = await r.json();
-
-    // If number+set query returned nothing, fall back to name only
-    if (!j.data?.length && (parsed.number || parsed.set)) {
-      r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(`name:"${parsed.name}"`)}&orderBy=-set.releaseDate&pageSize=10`, { headers: hdrs });
-      j = await r.json();
+    data = await ptcg(q);
+    if (!data.length) {
+      let q2 = `name:*${looseName.replace(/ /g,'*')}*`;
+      if (parsed.number) q2 += ` number:${parsed.number}`;
+      data = await ptcg(q2);
     }
-
+    if (!data.length && parsed.set) {
+      data = await ptcg(`name:*${looseName.replace(/ /g,'*')}* set.name:"${parsed.set}"`);
+    }
+    if (!data.length && parsed.number) {
+      data = await ptcg(`name:*${lastWord}* number:${parsed.number}`);
+    }
+    if (!data.length) {
+      data = await ptcg(`name:"${cleanName}"`);
+      if (!data.length) data = await ptcg(`name:*${lastWord}*`);
+    }
     document.getElementById('scan-loading').style.display = 'none';
-
-    if (!j.data?.length) { showScanResultManual(parsed); return; }
-
-    // Score each result — prefer exact number + set match
+    if (!data.length) { showScanResultManual(parsed); return; }
+    const j = { data };
     const scored = j.data.map(card => {
       let score = 0;
       if (parsed.number && card.number === parsed.number) score += 3;
       if (parsed.set && card.set?.name?.toLowerCase().includes(parsed.set.toLowerCase())) score += 2;
       if (card.name.toLowerCase() === parsed.name.toLowerCase()) score += 2;
+      else if (card.name.toLowerCase().includes(lastWord.toLowerCase())) score += 1;
       return { card, score };
     });
     scored.sort((a,b) => b.score - a.score);
     const sorted = scored.map(x => x.card);
-
     if (sorted.length === 1 || scored[0].score >= 5) {
       showScanResultCard(sorted[0]);
     } else {
@@ -9813,90 +9826,6 @@ async function searchAndShowMatches(parsed) {
     document.getElementById('scan-loading').style.display = 'none';
     showScanResultManual(parsed);
   }
-}
-
-function showScanResultCard(card) {
-  const tier = card.tcgplayer?.prices ? Object.values(card.tcgplayer.prices)[0] : null;
-  const price = tier?.market || null;
-  const rarity = card.rarity || '';
-  let type = 'standard';
-  const r = rarity.toLowerCase();
-  if (r.includes('ex') || r.includes('gx') || r.includes(' v') || r.includes('vmax')) type = 'ex';
-  else if (r.includes('holo')) type = 'holo';
-  else if (r.includes('reverse')) type = 'reverse';
-
-  scanSelectedCard = { id: card.id, name: card.name, set: card.set?.name || '', setId: card.set?.id || '', num: card.number || '', img: card.images?.large || card.images?.small || '', cardId: card.id, type, rarity };
-
-  // ── Graded slab: lock type to graded, show the grade selector, hide condition pills ──
-  const condRow = document.getElementById('scan-cond-row');
-  const gradeRow = document.getElementById('scan-grade-row');
-  if (scanIsGraded) {
-    scanSelectedCard.type = 'graded';
-    const parts = (scanGrade || 'PSA 10').split(' ');
-    const grader = parts[0] || 'PSA';
-    const gnum = parts.slice(1).join(' ') || '10';
-    const gSel = document.getElementById('scan-grader');
-    const nSel = document.getElementById('scan-grade-sel');
-    if ([...gSel.options].some(o => o.value === grader)) gSel.value = grader;
-    if ([...nSel.options].some(o => o.value === gnum)) nSel.value = gnum;
-    scanSelectedCard.grade = gSel.value + ' ' + nSel.value;
-    scanGrade = scanSelectedCard.grade;
-    document.getElementById('scan-grade-hint').textContent = '· auto-detected, confirm';
-    gradeRow.style.display = '';
-    condRow.style.display = 'none';
-  } else {
-    gradeRow.style.display = 'none';
-    condRow.style.display = '';
-  }
-
-  // ── Edition: show selector only for eligible WOTC sets; pre-select Vision's read ──
-  const elig = editionEligibility(scanSelectedCard);
-  const row = document.getElementById('scan-edition-row');
-  if (elig.eligible) {
-    document.getElementById('scan-ed-shadowless').style.display = elig.shadowless ? '' : 'none';
-    let chosen = scanDetectedEdition || 'unlimited';
-    if (chosen === 'shadowless' && !elig.shadowless) chosen = 'unlimited';
-    setScanEdition(chosen);
-    scanSelectedCard.edition = chosen;
-    const hint = document.getElementById('scan-edition-hint');
-    hint.textContent = (scanDetectedEdition && chosen !== 'unlimited') ? '· auto-detected, confirm' : '';
-    row.style.display = '';
-  } else {
-    scanSelectedCard.edition = 'unlimited';
-    setScanEdition('unlimited');
-    row.style.display = 'none';
-  }
-
-  // Update UI
-  const imgEl = document.getElementById('scan-result-img');
-  if (card.images?.small) {
-    imgEl.innerHTML = `<img src="${card.images.small}" style="width:100%;height:100%;object-fit:cover;" alt="${card.name}">`;
-  }
-  document.getElementById('scan-result-name').textContent = card.name;
-  document.getElementById('scan-result-meta').textContent = [card.set?.name, '#' + (card.number || '?'), card.rarity].filter(Boolean).join(' · ');
-  document.getElementById('scan-result-price').textContent = price ? fmtPrice(price) + ' · TCGPlayer' : 'Price loading…';
-  document.getElementById('scan-matches').style.display = 'none';
-  document.getElementById('scan-result').style.display = '';
-}
-
-function showScanMatches(cards, parsed) {
-  document.getElementById('scan-matches').style.display = '';
-  // Show first card as default selection
-  showScanResultCard(cards[0]);
-
-  document.getElementById('scan-matches-list').innerHTML = cards.map((card, i) => {
-    const tier = card.tcgplayer?.prices ? Object.values(card.tcgplayer.prices)[0] : null;
-    const price = tier?.market || null;
-    return `<div onclick="showScanResultCard(${JSON.stringify(card).replace(/"/g,'&quot;')})" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:var(--r);border:1px solid var(--border);cursor:pointer;transition:border-color .15s;" onmouseover="this.style.borderColor='var(--gold)'" onmouseout="this.style.borderColor='var(--border)'">
-      ${card.images?.small ? `<img src="${card.images.small}" style="height:40px;border-radius:4px;" alt="${card.name}">` : '<div style="width:29px;height:40px;background:var(--bg4);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--muted);">⟡</div>'}
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${card.name}</div>
-        <div style="font-size:10px;color:var(--muted2);">${card.set?.name || ''} · #${card.number || '?'}</div>
-      </div>
-      ${price ? `<div style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--green);flex-shrink:0;">${fmtPrice(price)}</div>` : ''}
-    </div>`;
-  }).join('');
-  document.getElementById('scan-result').style.display = '';
 }
 
 function showScanResultManual(parsed) {
