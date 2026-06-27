@@ -742,7 +742,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 <!-- TAB 2: PSA -->
 <div id="page-psa" class="page">
   <div class="topbar">
-    <div class="page-title">PSA Slabs <small id="psa-count-lbl">0 slabs</small></div>
+    <button class="btn btn-ghost btn-sm" onclick="goPage('portfolio')" title="Back to Portfolio" style="padding:6px 8px;margin-right:4px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:18px;height:18px"><polyline points="15 18 9 12 15 6"/></svg></button><div class="page-title">PSA Slabs <small id="psa-count-lbl">0 slabs</small></div>
     <button class="btn btn-primary" onclick="openAddModal(true)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Slab</button>
   </div>
   <div style="padding:14px 20px;padding-bottom:calc(80px + env(safe-area-inset-bottom, 20px));">
@@ -754,7 +754,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 <!-- TAB 3: SEALED -->
 <div id="page-sealed" class="page">
   <div class="topbar">
-    <div class="page-title">Sealed Products <small id="sealed-topbar-cnt">0 items</small></div>
+    <button class="btn btn-ghost btn-sm" onclick="goPage('portfolio')" title="Back to Portfolio" style="padding:6px 8px;margin-right:4px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:18px;height:18px"><polyline points="15 18 9 12 15 6"/></svg></button><div class="page-title">Sealed Products <small id="sealed-topbar-cnt">0 items</small></div>
     <div style="display:flex;gap:8px;">
     <button class="btn btn-ghost" id="sealed-refresh-btn" onclick="refreshSealedPrices()" title="Refresh market prices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh</button>
     <button class="btn btn-primary" onclick="openSealedModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Product</button>
@@ -1175,7 +1175,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 <!-- ALL SINGLES -->
 <div id="page-singles" class="page">
   <div class="topbar">
-    <div class="page-title">All Singles <small id="topbar-cnt">0 cards</small></div>
+    <button class="btn btn-ghost btn-sm" onclick="goPage('portfolio')" title="Back to Portfolio" style="padding:6px 8px;margin-right:4px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:18px;height:18px"><polyline points="15 18 9 12 15 6"/></svg></button><div class="page-title">All Singles <small id="topbar-cnt">0 cards</small></div>
     <button class="btn btn-ghost btn-sm" onclick="refreshPrices()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
     <button class="btn btn-primary" onclick="openAddModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Card</button>
   </div>
@@ -3332,10 +3332,13 @@ async function fetchLivePrices(card){
       result.ebayN = cleanPrices.length;
       if (cleanPrices.length) {
         if (card.type === 'graded') {
-          // GRADED: average of ALL sold comps on the eBay "{grade} Sold" page (user spec).
-          // With 6+ comps, trim the single lowest & highest to shed wrong-grade mislistings.
+          // GRADED: MEDIAN of sold comps on the eBay "{grade} Sold" page.
+          // Median (not average) so a few inflated/wrong-variant comps can't drag the
+          // headline up — e.g. Latias&Latios #170 PSA10 real solds cluster ~$18-20k but
+          // a couple high mislistings pushed the average to ~$23k. With 6+ comps we also
+          // trim the lowest & highest before taking the median for extra robustness.
           const arr = cleanPrices.length >= 6 ? cleanPrices.slice(1, -1) : cleanPrices;
-          pricePoint = arr.reduce((a, b) => a + b, 0) / arr.length;
+          pricePoint = medianOf(arr);
         } else {
           // RAW: median is the robust eBay cross-check (raw headline leads on TCGPlayer).
           pricePoint = medianOf(cleanPrices);
@@ -3589,7 +3592,7 @@ function analyzeGraded(p) {
   if (p.psa > 0) {
     const n = p.ebayN || 0;
     let conf = n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low';
-    let reason = n ? `Average of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
+    let reason = n ? `Median of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
                    : 'eBay sold comp for this grade';
     // SANITY CHECK: a graded slab should be worth at least as much as the raw card.
     // If the graded comp is well BELOW the raw TCGPlayer price, the comps are likely
