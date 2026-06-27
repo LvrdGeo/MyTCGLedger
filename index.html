@@ -639,10 +639,10 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   <div class="port-hero">
     <div class="port-label">Total Portfolio Value</div>
     <div class="port-total" id="port-total">$0.00</div>
-    <div id="nrv-port-row" style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px;">
+    <div id="nrv-port-row" style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px;position:relative;">
       <span id="nrv-port-lbl" style="font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Realizable</span>
-      <span id="port-realizable" style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--green);">—</span>
-      <button id="nrv-port-toggle" onclick="toggleNrvShown()" aria-label="Toggle realizable value" style="border:1px solid var(--border);border-radius:11px;width:34px;height:20px;position:relative;cursor:pointer;padding:0;flex-shrink:0;background:transparent;transition:background .15s;"><span style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:left .15s,background .15s;"></span></button>
+      <span id="port-realizable" style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--green);"></span>
+      <button id="nrv-port-toggle" onclick="toggleNrvShown()" aria-label="Toggle realizable value" style="border:1px solid var(--border);border-radius:11px;width:34px;height:20px;position:absolute;right:0;top:50%;transform:translateY(-50%);cursor:pointer;padding:0;flex-shrink:0;background:transparent;transition:background .15s;"><span style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:left .15s,background .15s;"></span></button>
     </div>
     <div class="port-pnl-row">
       <span class="pnl-chip" id="port-pnl-chip" style="display:none"></span>
@@ -2342,6 +2342,9 @@ function applyAppData(d) {
   if (Array.isArray(d.deletionLedger)) {
     deletionLedger = unionLedger(deletionLedger, d.deletionLedger);
     if (Array.isArray(collection)) { collection = applyDeletions(collection, deletionLedger, 'card'); idbColSave(collection); }
+    if (Array.isArray(sealed))   { sealed   = applyDeletions(sealed,   deletionLedger, 'sealed'); }
+    if (Array.isArray(wishlist)) { wishlist = applyDeletions(wishlist, deletionLedger, 'wishlist'); }
+    if (Array.isArray(deals))    { deals    = applyDeletions(deals,    deletionLedger, 'deal'); }
   }
 }
 
@@ -4341,13 +4344,16 @@ function openSealedDetail(id){
         ${p.notes?`<div style="padding:8px 0;font-size:12px;color:var(--muted2);"><span style="color:var(--muted);">Notes:</span> ${p.notes}</div>`:''}
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <button class="btn btn-primary" onclick="closeModal('detail-modal');openSealedModal('${p.id}')" style="justify-content:center;">Edit</button>
-        <button class="btn btn-ghost" onclick="closeModal('detail-modal');refreshSealedPrices()" style="justify-content:center;">Refresh Price</button>
-        <a href="https://www.tcgplayer.com/search/pokemon/product?q=${tcgQ}" target="_blank" class="btn btn-ghost" style="justify-content:center;">TCGPlayer</a>
-        <a href="https://www.ebay.com/sch/i.html?_nkw=${ebayQ}&LH_Sold=1&LH_Complete=1" target="_blank" class="btn btn-ghost" style="justify-content:center;">eBay Sold</a>
-        <button class="btn btn-danger" onclick="closeModal('detail-modal');deleteSealed('${p.id}')" style="justify-content:center;grid-column:1/-1;">Remove from vault</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        <a href="https://www.tcgplayer.com/search/pokemon/product?q=${tcgQ}" target="_blank" class="btn btn-ghost btn-sm" style="justify-content:center;">TCGPlayer</a>
+        <a href="https://www.ebay.com/sch/i.html?_nkw=${ebayQ}&LH_Sold=1&LH_Complete=1" target="_blank" class="btn btn-ghost btn-sm" style="justify-content:center;">eBay Sold</a>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal');refreshSealedPrices()" style="justify-content:center;grid-column:1/-1;">🔄 Refresh Price</button>
       </div>
+    </div>
+    <div class="modal-ft" style="gap:8px;">
+      <button class="btn btn-danger btn-sm" onclick="closeModal('detail-modal');deleteSealed('${p.id}')" style="margin-right:auto;">🗑 Delete</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('detail-modal')">Close</button>
+      <button class="btn btn-primary btn-sm" onclick="closeModal('detail-modal');openSealedModal('${p.id}')">✏️ Edit</button>
     </div>`;
   openModal('detail-modal');
 }
@@ -7515,7 +7521,7 @@ function saveSealed(){
   if(sealedSetFilter)renderSealedQuickAdd(sealedSetFilter,document.getElementById('sealed-set-banner-logo').src||'');
   toast(editingSealedId?'Product updated':'Product added','green');
 }
-function deleteSealed(id){showConfirm('Remove product?','Permanently removes it.',()=>{sealed=sealed.filter(x=>x.id!==id);save();renderSealed();renderPortfolio();toast('Removed','red');});}
+function deleteSealed(id){showConfirm('Remove product?','Permanently removes it.',()=>{retire('sealed',id);sealed=sealed.filter(x=>x.id!==id);save();renderSealed();renderPortfolio();toast('Removed','red');});}
 function setSealedFilter(f,el){sealedFilter=f;document.querySelectorAll('#page-sealed .filter-chip').forEach(c=>c.classList.remove('active'));el.classList.add('active');renderSealed();}
 function renderSealed(){
   const items=sealed.filter(s=>(!sealedFilter||s.type===sealedFilter)&&(!sealedSetFilter||s.set===sealedSetFilter));
@@ -8019,7 +8025,7 @@ async function openDetail(id){
         </div>
       </div>
       ${trendBlock}
-      ${(card.grade||card.type==='graded')?`<div style="font-size:10px;font-family:var(--mono);color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.7;">diag · type:${card.type||'?'} · grade:${card.grade||'none'} · id:${card.cardId||'unresolved'}<br>tcg:${p.tcg!=null?'$'+p.tcg:'—'} · ebay:${p.ebay!=null?'$'+p.ebay:'—'} · ppt:${p.ppt!=null?'$'+p.ppt:'—'} · psa:${p.psa!=null?'$'+p.psa:'—'} · comps:${p.ebayN||0}<br>fetch · ${p._diag||'(cached — tap re-fetch)'}<a onclick="repriceCard('${card.id}')" style="color:var(--blue);cursor:pointer;margin-left:8px;text-decoration:underline;">↻ re-fetch</a></div>`:''}
+      ${(card.grade||card.type==='graded')?`<div style="font-size:10px;font-family:var(--mono);color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.7;">diag · type:${card.type||'?'} · grade:${card.grade||'none'} · id:${card.cardId||'unresolved'}<br>tcg:${p.tcg!=null?'$'+p.tcg:'—'} · ebay:${p.ebay!=null?'$'+p.ebay:'—'} · ppt:${p.ppt!=null?'$'+p.ppt:'—'} · psa:${p.psa!=null?'$'+p.psa:'—'} · comps:${p.ebayN||0}<br>fetch · ${p._diag||'(cached — tap re-fetch)'}<a onclick="repriceCard('${card.id}')" style="color:var(--blue);cursor:pointer;margin-left:8px;text-decoration:underline;">↻ re-fetch</a>${(p.ebay_sales&&p.ebay_sales.length)?`<br><span style="color:var(--muted2);">comps used:</span> ${p.ebay_sales.map(s=>'$'+Math.round(s.price)).join(' · ')}`:''}</div>`:''}
       ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}${(()=>{const r=nrvForCard(card,best);if(r.realizable==null)return '';const b=r.breakdown;const discAmt=b.market-b.gross;const taxRow=b.tax>0?`<div style="display:flex;justify-content:space-between;"><span>Tax on gain</span><span>−${moneyFull(b.tax)}</span></div>`:'';return `<div style="margin-bottom:18px;"><details><summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:var(--r);background:rgba(46,204,128,0.06);border:1px solid rgba(46,204,128,0.18);"><span style="font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">Realizable Value</span><span style="font-family:var(--mono);font-weight:700;color:${r.sellable?'var(--green)':'var(--muted)'};">${r.sellable?moneyFull(r.realizable):'Below sale cost'}</span></summary><div style="padding:10px 12px 2px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;"><div style="display:flex;justify-content:space-between;"><span>Market</span><span>${moneyFull(b.market)}</span></div><div style="display:flex;justify-content:space-between;"><span>Expected-sale discount (${Math.round(b.disc*100)}%)</span><span>−${moneyFull(discAmt)}</span></div><div style="display:flex;justify-content:space-between;"><span>eBay fees</span><span>−${moneyFull(b.fees)}</span></div><div style="display:flex;justify-content:space-between;"><span>Shipping</span><span>−${moneyFull(b.shipping)}</span></div>${taxRow}<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;margin-top:2px;color:var(--text);font-weight:600;"><span>Realizable</span><span>${moneyFull(r.realizable)}</span></div><div style="font-size:10px;color:var(--muted2);margin-top:5px;">Net after discount, eBay fees & shipping · tune in Settings → Realizable Value</div></div></details></div>`;})()}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?'Recent sold listings':s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
@@ -10441,6 +10447,9 @@ function importData(e){
       // can't resurrect post-backup deletions; then suppress the imported collection.
       if(Array.isArray(d.deletionLedger)){deletionLedger=unionLedger(deletionLedger,d.deletionLedger);}
       if(Array.isArray(collection))collection=applyDeletions(collection,deletionLedger,'card');
+      if(Array.isArray(sealed))sealed=applyDeletions(sealed,deletionLedger,'sealed');
+      if(Array.isArray(wishlist))wishlist=applyDeletions(wishlist,deletionLedger,'wishlist');
+      if(Array.isArray(deals))deals=applyDeletions(deals,deletionLedger,'deal');
       if(d.history){localStorage.setItem(HISTORY_KEY,JSON.stringify(d.history));}
       if (Object.prototype.hasOwnProperty.call(d, 'cashPosition')) { const importedCash = parseFloat(d.cashPosition); _cashPosition = Number.isFinite(importedCash) && importedCash >= 0 ? importedCash : 0; localStorage.setItem('pkv2_cash', _cashPosition.toFixed(2)); }
       save();init();toast('Imported successfully — history restored','green');
