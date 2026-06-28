@@ -9677,22 +9677,15 @@ Reason through the steps in a few short sentences. THEN, as the very last thing 
 
 For a graded slab set "graded":true and fill grader/grade (and cert if seen). For a raw card set "graded":false and leave grader/grade/cert empty. If you truly cannot identify the card at all, make the last line exactly: {"error":"Cannot identify — please retake with better lighting"}`;
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const resp = await fetch(`${EBAY_WORKER}/vision`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-        { type: 'text', text: PROMPT }
-      ]}]
-    })
+    body: JSON.stringify({ base64, mediaType, prompt: PROMPT })
   });
-  if (!resp.ok) throw new Error('API ' + resp.status);
-  const data = await resp.json();
-  if (data.error) throw new Error(data.error.message || 'API error');
-  const text = (data.content || []).map(i => i.text || '').join('').trim();
+  if (!resp.ok) throw new Error('Vision ' + resp.status);
+  const respData = await resp.json();
+  if (respData.error) throw new Error(respData.error);
+  const text = (respData.text || '').trim();
   // The model reasons first, then emits one flat JSON object last — pull it out.
   const cleaned = text.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
   const extractLastJson = (str) => {
