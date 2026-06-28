@@ -9694,11 +9694,32 @@ For a graded slab set "graded":true and fill grader/grade (and cert if seen). Fo
   if (data.error) throw new Error(data.error.message || 'API error');
   const text = (data.content || []).map(i => i.text || '').join('').trim();
   // The model reasons first, then emits one flat JSON object last — pull it out.
-  let jsonStr = text;
-  const lb = text.lastIndexOf('{'), rb = text.lastIndexOf('}');
-  if (lb >= 0 && rb > lb) jsonStr = text.slice(lb, rb + 1);
-  jsonStr = jsonStr.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
-  return JSON.parse(jsonStr);
+  const cleaned = text.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
+  const extractLastJson = (str) => {
+    let end = str.lastIndexOf('}');
+    while (end >= 0) {
+      let depth = 0;
+      for (let k = end; k >= 0; k--) {
+        const ch = str[k];
+        if (ch === '}') depth++;
+        else if (ch === '{') {
+          depth--;
+          if (depth === 0) {
+            try { return JSON.parse(str.slice(k, end + 1)); } catch (_) { break; }
+          }
+        }
+      }
+      end = str.lastIndexOf('}', end - 1);
+    }
+    return null;
+  };
+  let parsed = extractLastJson(cleaned);
+  if (!parsed) {
+    const lb = cleaned.lastIndexOf('{'), rb = cleaned.lastIndexOf('}');
+    if (lb >= 0 && rb > lb) { try { parsed = JSON.parse(cleaned.slice(lb, rb + 1)); } catch (_) {} }
+  }
+  if (!parsed) throw new Error('No parseable JSON in vision response');
+  return parsed;
 }
 
 async function scanCard(input) {
