@@ -8980,14 +8980,23 @@ async function doTabSearch(q, page=1){
     const hdrs = keys.ptcg ? {'X-Api-Key':keys.ptcg} : {};
     // Build query: search by name, but if we know the dex number use that too
   // This catches ALL cards featuring that Pokémon (e.g. "Brock's Mudkip", promos, etc.)
-  const dexNum = getPokemonDexNumber(q);
+  // Support "name + number" searches: "pidgeot ex 97", "2016 pidgeot ex 97", "097", "97/87".
+  let _work = q.trim();
+  _work = _work.replace(/^(19|20)\d{2}\s+/, '');                 // strip a leading year
+  let _cardNum = null;
+  const _nm = _work.match(/\s(\d{1,3})(?:\/\d{1,3})?$/);          // trailing card number
+  if (_nm) { _cardNum = _nm[1].replace(/^0+/, '') || _nm[1]; _work = _work.slice(0, _nm.index).trim(); }
+  const dexNum = getPokemonDexNumber(_work);
   let qStr;
-  if(dexNum) {
-    // Use pokedex number — gets EVERY card featuring this pokemon regardless of card name
+  if (_cardNum && _work) {
+    // explicit name + number → precise hit. Wildcard name dodges apostrophes/punct.
+    const _loose = _work.replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    qStr = `name:*${_loose.replace(/ /g,'*')}* number:${_cardNum}`;
+  } else if (dexNum) {
     qStr = `nationalPokedexNumbers:${dexNum}`;
   } else {
-    // Fall back to name search for multi-word queries or unknown pokemon
-    qStr = `name:${q}`;
+    const _ln = (_work || q).replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    qStr = _ln ? `name:*${_ln.replace(/ /g,'*')}*` : `name:*${(_work||q)}*`;
   }
     if(_tabSetFilter) qStr += ` set.name:"${_tabSetFilter}"`;
     if(_tabRarity)    qStr += ` rarity:"${_tabRarity}"`;
