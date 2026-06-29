@@ -6306,7 +6306,7 @@ async function runDealSearch(q) {
   // ── Section 2: Live search from pokemontcg.io ──
   try {
     const hdrs = keys.ptcg ? { 'X-Api-Key': keys.ptcg } : {};
-    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent('name:'+q)}&orderBy=-set.releaseDate&pageSize=8`, { headers: hdrs });
+    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=8`, { headers: hdrs });
     if (r.ok) {
       const j = await r.json();
       if (j.data?.length) {
@@ -6738,7 +6738,7 @@ function onDLPickerSearch(val) {
       } else if (isNumber) {
         qStr = `number:${val.trim()}`; // search by card number
       } else {
-        qStr = `name:${val}`;
+        qStr = buildNameQuery(val);
       }
       const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=20`,{headers:hdrs});
       const j = await r.json();
@@ -6759,20 +6759,38 @@ function onDLPickerSearch(val) {
   },400);
 }
 
-function dlPickerSelectCard(card) {
+async function dlPickerSelectCard(card) {
   _dlPickerCard = card;
   document.getElementById('dl-picker-name').textContent = card.name;
-  document.getElementById('dl-picker-meta').textContent = [card.set, card.num?'#'+card.num:''].filter(Boolean).join(' · ');
+  document.getElementById('dl-picker-meta').textContent = [card.set, card.num?'#'+card.num:''].filter(Boolean).join(' \u00b7 ');
   const imgEl = document.getElementById('dl-picker-img');
-  imgEl.innerHTML = card.img ? `<img src="${card.img}" style="width:100%;height:100%;object-fit:contain;">` : '⟡';
-  // Auto-fill market price
+  imgEl.innerHTML = card.img ? `<img src="${card.img}" style="width:100%;height:100%;object-fit:contain;">` : '';
+  const valEl = document.getElementById('dl-picker-value');
+  const mktEl = document.getElementById('dl-picker-mkt');
   if (card.mkt) {
-    document.getElementById('dl-picker-value').value = card.mkt.toFixed(2);
-    document.getElementById('dl-picker-mkt').textContent = 'TCGPlayer market: $'+card.mkt.toFixed(2);
+    valEl.value = card.mkt.toFixed(2);
+    mktEl.textContent = 'Market: $'+card.mkt.toFixed(2);
+  } else {
+    mktEl.textContent = 'Fetching market value\u2026';
+    try {
+      const probe = { id: card.ownedId || card.id, cardId: card.id, name: card.name, set: card.set, num: card.num, type: card.grade ? 'graded' : 'standard', grade: card.grade || '', cond: card.cond || 'NM' };
+      await loadPricesForCards([probe]);
+      const p = pcache[cacheKey(probe)]?.data;
+      const mkt = p ? bestPrice(p, probe.type === 'graded') : null;
+      if (mkt) {
+        card.mkt = mkt;
+        valEl.value = mkt.toFixed(2);
+        mktEl.textContent = 'Market: $'+mkt.toFixed(2);
+      } else {
+        mktEl.textContent = 'No market price found \u2014 enter manually';
+      }
+    } catch (e) {
+      mktEl.textContent = 'Could not fetch price \u2014 enter manually';
+    }
   }
   document.getElementById('dl-picker-results').innerHTML = '';
   document.getElementById('dl-picker-search').value = '';
-  document.getElementById('dl-picker-value').focus();
+  valEl.focus();
 }
 
 function dlPickerUpdateMktDiff() {
@@ -7154,8 +7172,22 @@ async function doDealSearch(q) {
   const grid = document.getElementById('deal-search-grid');
   try {
     const hdrs = keys.ptcg ? {'X-Api-Key': keys.ptcg} : {};
-    const dexNum = getPokemonDexNumber(q);
-    const qStr = dexNum ? `nationalPokedexNumbers:${dexNum}` : `name:${q}`;
+    // Support "name + number" + multi-word names (wildcard avoids Lucene 400 errors).
+    let _work = q.trim().replace(/^(19|20)\d{2}\s+/, '');
+    let _cardNum = null;
+    const _nm = _work.match(/\s(\d{1,3})(?:\/\d{1,3})?$/);
+    if (_nm) { _cardNum = _nm[1].replace(/^0+/, '') || _nm[1]; _work = _work.slice(0, _nm.index).trim(); }
+    const dexNum = getPokemonDexNumber(_work);
+    let qStr;
+    if (_cardNum && _work) {
+      const _loose = _work.replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      qStr = `name:*${_loose.replace(/ /g,'*')}* number:${_cardNum}`;
+    } else if (dexNum) {
+      qStr = `nationalPokedexNumbers:${dexNum}`;
+    } else {
+      const _ln = (_work || q).replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      qStr = _ln ? `name:*${_ln.replace(/ /g,'*')}*` : `name:*${_work || q}*`;
+    }
     const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=24`, {headers: hdrs});
     const j = await r.json();
     if (!j.data?.length) { grid.innerHTML = '<div class="cs-empty">No results.</div>'; return; }
@@ -8179,7 +8211,7 @@ async function doModalSearch(q){
     const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
     // Use dex number for known pokemon, name search for everything else
     const dexNum = getPokemonDexNumber(q);
-    const qStr   = dexNum ? `nationalPokedexNumbers:${dexNum}` : `name:${q}`;
+    const qStr   = dexNum ? `nationalPokedexNumbers:${dexNum}` : buildNameQuery(q);
     const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=20`,{headers:hdrs});
     if(!r.ok)throw new Error('API '+r.status);
     const j=await r.json();
@@ -8228,7 +8260,7 @@ document.addEventListener('click',e=>{
 function onNameSearch(val){clearTimeout(searchTimer);const dd=document.getElementById('name-dd');if(!val.trim()){dd.classList.remove('open');return;}dd.classList.add('open');dd.innerHTML='<div class="sd-loading"><div class="spinner"></div>Searching…</div>';searchTimer=setTimeout(()=>doNameSearch(val),350);}
 async function doNameSearch(q){
   const dd=document.getElementById('name-dd');
-  try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent('name:'+q)}&orderBy=-set.releaseDate&pageSize=12`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();
+  try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=12`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();
     if(!j.data?.length){dd.innerHTML='<div style="padding:14px;font-size:12px;color:var(--muted);">No cards found.</div>';return;}
     dd.innerHTML=j.data.map(c=>{const tier=c.tcgplayer?.prices?Object.values(c.tcgplayer.prices)[0]:null;const price=tier?.market||null;const key='sd_'+c.id.replace(/[^a-z0-9]/gi,'_');window._sdCards=window._sdCards||{};window._sdCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.large||c.images?.small||'',rarity:c.rarity||''};
       return `<div class="sd-item" onclick="quickAdd(window._sdCards['${key}'])">${c.images?.small?`<img class="sd-thumb" src="${c.images.small}" alt="${c.name}" loading="lazy">`:'<div class="sd-ph">⟡</div>'}<div style="min-width:0;"><div class="sd-name">${c.name}</div><div class="sd-meta">${c.set?.name||''} · #${c.number||'?'} · ${c.rarity||''}</div></div><div class="sd-price">${price!=null?`<div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div>`:'<div class="sd-plbl">Click to add</div>'}</div></div>`;}).join('');
@@ -8373,7 +8405,7 @@ function onWishSearch(val){
     try{
       const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
       const dexNum=getPokemonDexNumber(val);
-      const qStr=dexNum?`nationalPokedexNumbers:${dexNum}`:`name:${val}`;
+      const qStr=dexNum?`nationalPokedexNumbers:${dexNum}`:buildNameQuery(val);
       const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=24`,{headers:hdrs});
       const j=await r.json();
       if(!j.data?.length){document.getElementById('wish-search-grid').innerHTML='<div class="cs-empty">No results.</div>';return;}
@@ -8828,7 +8860,7 @@ async function doOverviewSearch(q, page=1){
   try{
     const hdrs = keys.ptcg ? {'X-Api-Key':keys.ptcg} : {};
     const pageSize = 24;
-    const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent('name:'+q)}&orderBy=-set.releaseDate&pageSize=${pageSize}&page=${page}`;
+    const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=${pageSize}&page=${page}`;
     const r = await fetch(url, {headers:hdrs});
     if(!r.ok) throw new Error();
     const j = await r.json();
@@ -8994,17 +9026,39 @@ async function doTabSearch(q, page=1){
     qStr = `name:*${_loose.replace(/ /g,'*')}* number:${_cardNum}`;
   } else if (dexNum) {
     qStr = `nationalPokedexNumbers:${dexNum}`;
-  } else {
+  } else if (_work || q) {
     const _ln = (_work || q).replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-    qStr = _ln ? `name:*${_ln.replace(/ /g,'*')}*` : `name:*${(_work||q)}*`;
+    qStr = _ln ? `name:*${_ln.replace(/ /g,'*')}*` : '';
+  } else {
+    qStr = '';   // no search text — browse by set/rarity filter alone
   }
-    if(_tabSetFilter) qStr += ` set.name:"${_tabSetFilter}"`;
-    if(_tabRarity)    qStr += ` rarity:"${_tabRarity}"`;
+    // Set filter: wildcard the set name so apostrophes (McDonald's) don't break Lucene.
+    if(_tabSetFilter){
+      const _sl = _tabSetFilter.replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      const _sq = _sl ? `set.name:*${_sl.replace(/ /g,'*')}*` : '';
+      qStr = qStr ? `${qStr} ${_sq}` : _sq;
+    }
+    if(_tabRarity)    qStr = qStr ? `${qStr} rarity:"${_tabRarity}"` : `rarity:"${_tabRarity}"`;
+    // If somehow still empty (shouldn't happen), bail gracefully.
+    if(!qStr.trim()){ loader.style.display='none'; empty.style.display=''; return; }
 
-    const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=${TAB_PAGE_SIZE}&page=${page}`;
-    const r = await fetch(url, {headers:hdrs});
-    if(!r.ok) throw new Error('API error '+r.status);
-    const j = await r.json();
+    // Perf: request ONLY the fields the grid uses (smaller payload = faster), and
+    // when browsing a single set, sort by card number (cheaper + natural set order).
+    const _select = 'id,name,number,rarity,set,images,tcgplayer';
+    const _order  = (_tabSetFilter && !_work && !_cardNum) ? 'number' : '-set.releaseDate';
+    const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&select=${_select}&orderBy=${_order}&pageSize=${TAB_PAGE_SIZE}&page=${page}`;
+    // Cache: re-clicking the same set/page returns instantly (5 min TTL).
+    window._tabCache = window._tabCache || {};
+    let j;
+    const _cached = window._tabCache[url];
+    if (_cached && (Date.now() - _cached.t) < 300000) {
+      j = _cached.j;
+    } else {
+      const r = await fetch(url, {headers:hdrs});
+      if(!r.ok) throw new Error('API error '+r.status);
+      j = await r.json();
+      window._tabCache[url] = { j, t: Date.now() };
+    }
     _tabTotal = j.totalCount || 0;
     loader.style.display = 'none';
 
@@ -9200,6 +9254,13 @@ const POKEMON_DEX = {
   walkingwake:1009,ironleaves:1010,
 };
 
+// Build a SAFE pokemontcg.io name query. Unquoted multi-word values (name:Dark blastoise)
+// cause Lucene 400 errors; wildcards avoid that AND dodge apostrophes/punctuation.
+function buildNameQuery(raw){
+  const ln = String(raw||'').replace(/[^A-Za-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+  if(!ln) return `name:*${String(raw||'').trim()}*`;
+  return `name:*${ln.replace(/ /g,'*')}*`;
+}
 function getPokemonDexNumber(query) {
   const q = query.toLowerCase().trim()
     .replace(/['']/g, '')
