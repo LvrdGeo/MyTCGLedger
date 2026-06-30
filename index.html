@@ -9042,11 +9042,11 @@ async function doTabSearch(q, page=1){
     // If somehow still empty (shouldn't happen), bail gracefully.
     if(!qStr.trim()){ loader.style.display='none'; empty.style.display=''; return; }
 
-    // Perf: request ONLY the fields the grid uses (smaller payload = faster), and
-    // when browsing a single set, sort by card number (cheaper + natural set order).
-    const _select = 'id,name,number,rarity,set,images,tcgplayer';
+    // NOTE: pokemontcg.io's select= mangles nested objects (images, tcgplayer) — it can
+    // drop the real image URL so cards render as blank card-backs. We fetch full objects
+    // for correctness; the number-sort + cache below still keep set-browsing fast.
     const _order  = (_tabSetFilter && !_work && !_cardNum) ? 'number' : '-set.releaseDate';
-    const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&select=${_select}&orderBy=${_order}&pageSize=${TAB_PAGE_SIZE}&page=${page}`;
+    const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=${_order}&pageSize=${TAB_PAGE_SIZE}&page=${page}`;
     // Cache: re-clicking the same set/page returns instantly (5 min TTL).
     window._tabCache = window._tabCache || {};
     let j;
