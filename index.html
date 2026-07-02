@@ -488,7 +488,60 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   .mob-btn-label{display:inline;margin-left:3px;}
   .ct-actions .btn{padding:8px 6px;font-size:12px;}
   .ct-actions{gap:6px;margin-top:10px;}
-}</style>
+}
+/* ═══════════ ELITE POLISH LAYER ═══════════
+   Pure-CSS elevation appended at end of stylesheet so it overrides via
+   cascade without touching any existing rule. Safe + instantly reversible.
+   1. Depth: layered shadows + top-edge light on surfaces
+   2. Tap feedback: springy :active states (iOS has no hover)
+   3. Motion: modal slide-up entrance, smooth easing curve
+   4. Focus: gold glow ring on inputs
+*/
+*{-webkit-tap-highlight-color:transparent}
+:root{
+  --ease:cubic-bezier(.22,1,.36,1);
+  --shadow-1:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.28);
+  --shadow-2:0 6px 16px rgba(0,0,0,.5),0 20px 56px rgba(0,0,0,.42);
+}
+/* Surfaces: subtle top-light gradient + shadow = layered depth */
+.cat-card,.stat-card,.modal{
+  background-image:linear-gradient(180deg,rgba(255,255,255,.028),rgba(255,255,255,0) 46%);
+}
+.cat-card,.stat-card{box-shadow:var(--shadow-1)}
+.cat-card{transition:transform .3s var(--ease),box-shadow .3s var(--ease),border-color .3s var(--ease)}
+.cat-card:active{transform:scale(.977);border-color:var(--b2)}
+/* Buttons: springy press, gradient + glow on primary */
+.btn{transition:transform .25s var(--ease),background .2s ease,border-color .2s ease,box-shadow .25s var(--ease)}
+.btn:active{transform:scale(.96)}
+.btn-primary{
+  background-image:linear-gradient(180deg,#ffd75e,var(--gold) 55%,#e9b93b);
+  box-shadow:0 1px 2px rgba(0,0,0,.35),0 3px 14px rgba(245,200,66,.20);
+  font-weight:600;
+}
+.btn-primary:active{box-shadow:0 1px 2px rgba(0,0,0,.35),0 2px 7px rgba(245,200,66,.14)}
+.btn-danger:active{background:rgba(255,77,109,.24)}
+.btn-ghost:active{background:var(--bg4)}
+/* Inputs: gold focus ring */
+.input:focus,.select:focus{box-shadow:0 0 0 3px rgba(245,200,66,.13)}
+/* Modals: slide-up entrance + richer backdrop */
+.modal-bg{background:rgba(4,5,9,.72);backdrop-filter:blur(14px) saturate(1.15);-webkit-backdrop-filter:blur(14px) saturate(1.15)}
+.modal-bg.open{animation:mbFade .28s var(--ease)}
+.modal-bg.open .modal{animation:mSlide .38s var(--ease);box-shadow:var(--shadow-2)}
+@keyframes mbFade{from{opacity:0}to{opacity:1}}
+@keyframes mSlide{from{opacity:0;transform:translateY(22px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+/* Grid tiles + rows + nav: tap response */
+.cs-card{transition:transform .25s var(--ease),border-color .2s ease}
+.cs-card:active,.card-tile:active{transform:scale(.975)}
+.holding-row:active{background:var(--bg3)}
+.nav-btn:active{transform:scale(.97)}
+.mob-tab{transition:color .2s var(--ease),transform .2s var(--ease)}
+.mob-tab:active{transform:scale(.93)}
+/* Accessibility: respect reduced-motion */
+@media (prefers-reduced-motion:reduce){
+  .modal-bg.open,.modal-bg.open .modal{animation:none}
+  .btn,.cs-card,.cat-card,.mob-tab{transition:none}
+}
+</style>
 <!-- Supabase (Stage 1: Auth) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
