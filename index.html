@@ -3311,10 +3311,12 @@ async function fetchEbaySold(card) {
       endpoint = `${EBAY_WORKER}/sold?q=${encodeURIComponent(q)}&limit=12`;
     }
     const r = await fetch(endpoint);
-    if (!r.ok) return null;
+    if (!r.ok) { fetchEbaySold._fail = 'http' + r.status; return null; }
     const data = await r.json();
-    return data.error ? null : data;
-  } catch(e) { return null; }
+    if (data.error) { fetchEbaySold._fail = 'worker-error'; return null; }
+    fetchEbaySold._fail = null;
+    return data;
+  } catch(e) { fetchEbaySold._fail = (e && e.name === 'AbortError') ? 'timeout' : 'net'; return null; }
 }
 
 async function testEbayWorker() {
@@ -3522,7 +3524,7 @@ async function fetchLivePrices(card){
   // PriceCharting (ppt) stays null until a real fetch is wired up (Stage 2).
   // A missing TCGPlayer price falls back to the eBay sold average inside analyzeRaw.
   if (!result.psa && card.type==='graded') result.psa = result.ebay; // real eBay comp avg only; null stays null
-  if (card.type==='graded' || card.grade) result._diag = '/graded:' + (result.psa!=null ? '$'+Math.round(result.psa) : 'empty');
+  if (card.type==='graded' || card.grade) result._diag = '/graded:' + (result.psa!=null ? '$'+Math.round(result.psa) : ('empty' + (fetchEbaySold._fail ? '('+fetchEbaySold._fail+')' : '')));
   // A PSA-10 comp below the raw price is a bad match (raw sales leaked into the query).
   // Drop it so the broader /sold keyword search and PokePrice get a chance at a real number.
   if (result.psa && result.tcg && result.psa < result.tcg * 0.9) { result._diag += '(bad<raw,drop)'; result.psa = null; result.ebayN = 0; result.ebay_sales = []; }
