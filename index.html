@@ -541,6 +541,35 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   .modal-bg.open,.modal-bg.open .modal{animation:none}
   .btn,.cs-card,.cat-card,.mob-tab{transition:none}
 }
+/* ── Pricing Evidence card (detail-modal diagnostic revamp · UI-only 2026-07) ──
+   New classes only — no existing rule modified. Rollback: delete this block. */
+.ev-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:12px;min-width:0}
+.ev-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.ev-title{font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2)}
+.ev-refetch{background:transparent;border:1px solid var(--border);color:var(--blue);font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:20px;cursor:pointer;flex-shrink:0;line-height:1.4}
+.ev-refetch:active{background:rgba(79,142,247,.12)}
+.ev-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px 10px;margin-bottom:10px;min-width:0}
+.ev-src{min-width:0}
+.ev-lbl{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:2px}
+.ev-val{font-size:12px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.ev-mono{font-family:var(--mono);font-size:11px}
+.ev-none{color:var(--muted);font-weight:400}
+.ev-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;margin-bottom:10px}
+.ev-pill{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);background:var(--bg4);border:1px solid var(--border);border-radius:20px;padding:3px 9px;white-space:nowrap}
+.ev-log{font-family:var(--mono);font-size:9px;color:var(--muted);line-height:1.6;border-top:1px solid var(--border);padding-top:8px;overflow-wrap:anywhere;word-break:break-word}
+/* ── Pricing Evidence v2 additions (UI-only 2026-07). Rollback: delete these lines. */
+.ev-chip{font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.6px;border-radius:4px;padding:2px 6px;margin-left:8px;vertical-align:1px}
+.ev-chip-sold{color:var(--green);background:rgba(46,204,128,.1);border:1px solid rgba(46,204,128,.3)}
+.ev-chip-ask{color:var(--gold);background:rgba(245,200,66,.1);border:1px solid rgba(245,200,66,.3)}
+.ev-warn{font-size:11px;color:var(--gold);background:rgba(245,200,66,.07);border:1px solid rgba(245,200,66,.22);border-radius:var(--r);padding:8px 10px;margin-bottom:10px;line-height:1.5}
+.ev-pill-link{text-decoration:none;color:var(--text)}
+.ev-pill-link:active{border-color:var(--blue)}
+.ev-pill-date{color:var(--muted2);font-weight:400;font-size:10px}
+.ev-adv summary{list-style:none;cursor:pointer;font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:4px 0;-webkit-tap-highlight-color:transparent}
+.ev-adv summary::-webkit-details-marker{display:none}
+.ev-adv summary::before{content:'\25b8  ';color:var(--muted)}
+.ev-adv[open] summary::before{content:'\25be  '}
+.ev-adv .ev-log{border-top:none;padding-top:4px}
 </style>
 <!-- Supabase (Stage 1: Auth) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -3386,8 +3415,21 @@ async function fetchLivePrices(card){
         .filter(p => p > 0)
         .sort((a,b) => a-b);
       result.ebayN = cleanPrices.length;
+      // v15: the worker tells us whether comps are real SOLDS or active ASKING prices
+      // (scrape failed → Browse-API fallback). Asks are ceilings, not market — the
+      // median of asks is meaningless and badly inflates slabs (Alakazam: ask-median
+      // $12.5k vs real solds $4.8-6.2k). Stamp the source so analyzeGraded can label
+      // honestly, and price asks at the LOWEST ask (the tightest defensible ceiling).
+      const _ebayIsAsk = !!(ebayData.source && ebayData.source !== 'ebay-sold-scrape');
+      result.ebaySource = ebayData.source || '';
+      // v16 Worker evidence fields — display-only passthrough for the Pricing Evidence card
+      if (Array.isArray(ebayData.rejected) && ebayData.rejected.length) result.rejected = ebayData.rejected.slice(0,10);
+      if (ebayData.counts) result.counts = ebayData.counts;
       if (cleanPrices.length) {
         if (card.type === 'graded') {
+          if (_ebayIsAsk) {
+            pricePoint = cleanPrices[0];   // lowest active ask — market ceiling
+          } else {
           // GRADED: MEDIAN of sold comps on the eBay "{grade} Sold" page.
           // Median (not average) so a few inflated/wrong-variant comps can't drag the
           // headline up — e.g. Latias&Latios #170 PSA10 real solds cluster ~$18-20k but
@@ -3395,6 +3437,7 @@ async function fetchLivePrices(card){
           // trim the lowest & highest before taking the median for extra robustness.
           const arr = cleanPrices.length >= 6 ? cleanPrices.slice(1, -1) : cleanPrices;
           pricePoint = medianOf(arr);
+          }
         } else {
           // RAW: median is the robust eBay cross-check (raw headline leads on TCGPlayer).
           pricePoint = medianOf(cleanPrices);
@@ -3423,6 +3466,7 @@ async function fetchLivePrices(card){
         price:     i.price,
         condition: i.condition || card.cond,
         url:       i.url,
+        title:     i.title || '',   // retained for the Pricing Evidence card (2026-07) — display only
       }));
       // Compute trend from real sales
       if (ebayData.items.length >= 3) {
@@ -3465,6 +3509,9 @@ async function fetchLivePrices(card){
       const gr = await fetch(`${EBAY_WORKER}/sold?q=${encodeURIComponent(gq)}&limit=12`);
       if (gr.ok) {
         const gd = await gr.json();
+        // v16 Worker evidence fields — display-only passthrough (fallback path)
+        if (!result.rejected && Array.isArray(gd.rejected) && gd.rejected.length) result.rejected = gd.rejected.slice(0,10);
+        if (!result.counts && gd.counts) result.counts = gd.counts;
         const gprices = (gd.items||[]).map(i=>i.price).filter(v=>typeof v==='number'&&v>0);
         let gpp = (gd.stats && (gd.stats.median||gd.stats.avg)) || (gprices.length ? gprices.reduce((a,b)=>a+b,0)/gprices.length : null);
         const gradedOK = gpp > 0 && (!result.tcg || gpp >= result.tcg * 0.9);
@@ -3476,6 +3523,7 @@ async function fetchLivePrices(card){
             result.ebay_sales = gd.items.slice(0,6).map(i=>({
               date: i.soldDate ? new Date(i.soldDate).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : 'Recent',
               price: i.price, condition: card.grade || 'Graded', url: i.url,
+              title: i.title || '',   // retained for the Pricing Evidence card (2026-07) — display only
             }));
           }
         }
@@ -3647,9 +3695,12 @@ function analyzeGraded(p) {
   // Headline = the average of the eBay "{grade} Sold" page (p.psa carries that mean).
   if (p.psa > 0) {
     const n = p.ebayN || 0;
-    let conf = n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low';
-    let reason = n ? `Median of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
-                   : 'eBay sold comp for this grade';
+    const isAsk = p.ebaySource && p.ebaySource !== 'ebay-sold-scrape';
+    let conf = isAsk ? 'low' : (n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low');
+    let reason = isAsk
+      ? `Lowest of ${n} active eBay asking price${n > 1 ? 's' : ''} — no recent solds found; actual sold value is typically lower`
+      : n ? `Median of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
+          : 'eBay sold comp for this grade';
     // SANITY CHECK: a graded slab should be worth at least as much as the raw card.
     // If the graded comp is well BELOW the raw TCGPlayer price, the comps are likely
     // polluted (cheap junk matched). Flag it so the user knows to verify.
@@ -3709,6 +3760,14 @@ function bestPrice(p, isGraded) {
   return smartPrice(p, isGraded);
 }
 function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);return v.length?Math.max(...v):0;}
+// v15: eBay comps can be real SOLDS or active ASKS (scrape-failed fallback).
+// Every UI surface that names the eBay source routes through this so asks
+// are never presented as sold data.
+function ebaySrcLabel(p){
+  const ask = !!(p && p.ebaySource && p.ebaySource !== 'ebay-sold-scrape');
+  return ask ? {label:'eBay Asks', sub:'Active asking prices \u2014 no recent solds', ask:true}
+             : {label:'eBay Sold', sub:'Recent sold listings', ask:false};
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    UNIVERSAL VALUATION ENGINE — Phase 1 (pure core, additive seam)
@@ -6139,7 +6198,7 @@ function singlesTileHTML(card){
 
 function buildPriceStrip(p,card){
   const best=bestPrice(p,card?.type==='graded'),worst=worstPrice(p);
-  const rows=SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const cls=v===best?'ps-best':v===worst?'ps-high':'';return `<div class="ps-row"><span class="ps-lbl"><span class="ps-bullet" style="background:${s.color}"></span>${s.label}</span><span class="ps-val ${cls}">${fmtPrice(v)}</span></div>`;}).join('');
+  const rows=SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const cls=v===best?'ps-best':v===worst?'ps-high':'';return `<div class="ps-row"><span class="ps-lbl"><span class="ps-bullet" style="background:${s.color}"></span>${s.k==='ebay'?ebaySrcLabel(p).label:s.label}</span><span class="ps-val ${cls}">${fmtPrice(v)}</span></div>`;}).join('');
   const trend=p.trend7!=null?`<span class="ps-trend ${trendClass(p.trend7)}">${fmtTrend(p.trend7)} 7d</span>`:'';
   return rows+`<hr class="ps-divider"><div class="ps-summary"><span>Best: <b style="color:var(--green);font-family:var(--mono)">${fmtPrice(best)}</b></span>${trend}</div>`;
 }
@@ -8048,6 +8107,107 @@ async function repriceCard(id){
   closeModal('detail-modal');
   setTimeout(()=>openDetail(id), 60);
 }
+// ── Pricing Evidence card · v2 (UI-only · 2026-07) ──
+// Displays EXISTING data only: card.type/grade/cardId, p.tcg/ebay/ppt/psa/ebayN/
+// ebay_sales/ebaySource/unverified/_diag, the pcache timestamp (read-only), the
+// synced lastPriced* stamps, and the same analyzePriceRouted() read openDetail
+// already performs one line later (pure function, verified — no state touched).
+// No pricing value is computed or altered here; no fetches; no writes.
+// Rollback: restore v1 of this function (index.html.bak2 / git history).
+function buildPricingEvidence(card, p){
+  const money = v => (v!=null && isFinite(v) && v>0) ? '$'+(+v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : null;
+  const typeLbl = card.type==='graded' ? 'Graded' : card.type==='sealed' ? 'Sealed' : 'Raw';
+  const eb = ebaySrcLabel(p);
+  const diagRaw = p._diag || '';
+  const isGraded = card.type==='graded';
+  // Same pure read openDetail makes for the confidence banner — display only.
+  let pa = null; try { pa = analyzePriceRouted(p, isGraded); } catch(_){}
+  // Cache freshness — pure read of the existing cache entry / synced stamp.
+  let pricedAt = null, pricedVia = '';
+  try {
+    const e = (typeof pcache!=='undefined') ? pcache[cacheKey(card)] : null;
+    if (e && e.ts) { pricedAt = e.ts; pricedVia = 'live cache'; }
+    else if (card.lastPricedAt) { pricedAt = card.lastPricedAt; pricedVia = 'synced stamp'; }
+  } catch(_){}
+  const ageStr = ts => {
+    const m = Math.max(0, Math.round((Date.now()-ts)/60000));
+    return m < 1 ? 'just now' : m < 60 ? m+'m ago' : m < 1440 ? Math.round(m/60)+'h ago' : Math.round(m/1440)+'d ago';
+  };
+  // Display-only parse of the fetch log (log itself rendered verbatim in Advanced Debug)
+  const gm = diagRaw.match(/\/graded:(\$[\d.,]+|empty)/);
+  const sm = diagRaw.match(/\/sold:\d+i(=\$[\d.,]+)?/);
+  const endpoint = gm ? '/graded' : (sm ? '/sold' : null);
+  const returned = gm && gm[1] !== 'empty' ? gm[1] : (sm && sm[1] ? sm[1].slice(1) : null);
+  const srcVals = [p.tcg, p.ebay, p.psa, p.ppt];
+  const have = srcVals.filter(v => v>0).length;
+  const status = !diagRaw ? { t:'cached',  c:'var(--muted2)' }
+    : have===0             ? { t:'empty',   c:'var(--red)' }
+    : have<srcVals.length  ? { t:'partial', c:'var(--gold)' }
+    :                        { t:'success', c:'var(--green)' };
+  const srcRow = (lbl, v) => {
+    const m = money(v);
+    return `<div class="ev-src"><div class="ev-lbl">${lbl}</div><div class="ev-val${m?'':' ev-none'}">${m||'unavailable'}</div></div>`;
+  };
+  const hasEbay = p.ebay>0 || p.psa>0 || (p.ebay_sales&&p.ebay_sales.length);
+  const srcChip = hasEbay ? `<span class="ev-chip ${eb.ask?'ev-chip-ask':'ev-chip-sold'}">${eb.ask?'ASKS':'SOLDS'}</span>` : '';
+  const compsBlock = (p.ebay_sales && p.ebay_sales.length)
+    ? `<div><div class="ev-lbl">Comps used · ${p.ebayN||p.ebay_sales.length} ${eb.ask?'active asks':'sold comps'}</div><div class="ev-pills">${p.ebay_sales.map(s=>{
+        const inner = `$${Math.round(s.price).toLocaleString('en-US')}${s.date?`<span class="ev-pill-date"> · ${s.date}</span>`:''}`;
+        return s.url ? `<a class="ev-pill ev-pill-link" href="${s.url}" target="_blank" rel="noopener">${inner} \u2197</a>`
+                     : `<span class="ev-pill">${inner}</span>`;
+      }).join('')}</div></div>`
+    : '';
+  const unverifiedRow = p.unverified
+    ? `<div class="ev-warn">\u26a0 Identity unverified \u2014 the resolved card number did not match this card during the last fetch. Prices may belong to a different printing.</div>`
+    : '';
+  const basisRow = (pa && pa.reason)
+    ? `<div class="ev-src" style="grid-column:1/-1;"><div class="ev-lbl">Valuation basis \u00b7 ${pa.confidence||''} confidence</div><div class="ev-val" style="font-weight:400;font-size:11px;color:var(--muted2);">${pa.reason}</div></div>`
+    : '';
+  // Per-comp title lines — titles are now retained by the ebay_sales mapping.
+  // Older cache entries (pre-title) simply have no title field and render nothing.
+  const compTitleRows = (p.ebay_sales||[])
+    .filter(s => s.title)
+    .map(s => `<div>comp \u00b7 $${Math.round(s.price).toLocaleString('en-US')}${s.date?(' \u00b7 '+s.date):''} \u00b7 ${String(s.title).slice(0,80)}${String(s.title).length>80?'\u2026':''}</div>`)
+    .join('');
+  // DORMANT: rejected-comp evidence ledger for singles/graded. The Worker does not
+  // send p.rejected yet (spec: worker-changes-spec.md). Renders nothing until it does.
+  const rejectedRows = (Array.isArray(p.rejected) && p.rejected.length)
+    ? p.rejected.slice(0,10).map(r => `<div style="color:var(--red);">rejected \u00b7 ${r.price!=null?('$'+Math.round(r.price).toLocaleString('en-US')+' \u00b7 '):''}${r.reason||'unspecified'}${r.title?(' \u00b7 '+String(r.title).slice(0,60)):''}</div>`).join('')
+    : '';
+  const advRows = [
+    diagRaw ? null : '(cached \u2014 tap Re-fetch for a live fetch log)',
+    diagRaw || null,
+    p.ebaySource ? 'ebay source: '+p.ebaySource : null,
+    p.premiumVintage ? 'premium vintage edition: eBay-led pricing' : null,
+    (p.trend7!=null) ? 'trend7: '+p.trend7+'%' : null,
+    card.lastPriceSource ? 'synced stamp: '+(card.lastMarketValue!=null?('$'+card.lastMarketValue+' \u00b7 '):'')+card.lastPriceSource+(card.lastPriceConfidence?(' \u00b7 '+card.lastPriceConfidence):'') : null,
+  ].filter(Boolean).map(r=>`<div>${r}</div>`).join('') + compTitleRows + rejectedRows;
+  return `<div class="ev-card">
+    <div class="ev-hd"><span class="ev-title">Pricing Evidence${srcChip}</span><button class="ev-refetch" onclick="repriceCard('${card.id}')">\u21bb Re-fetch</button></div>
+    ${unverifiedRow}
+    <div class="ev-meta">
+      <div class="ev-src"><div class="ev-lbl">Valuation type</div><div class="ev-val">${typeLbl}</div></div>
+      <div class="ev-src"><div class="ev-lbl">Item identity</div><div class="ev-val ev-mono">${card.cardId||'unresolved'}</div></div>
+      ${card.grade?`<div class="ev-src"><div class="ev-lbl">Grade</div><div class="ev-val">${card.grade}</div></div>`:''}
+      <div class="ev-src"><div class="ev-lbl">Evidence</div><div class="ev-val${(p.ebayN||0)?'':' ev-none'}">${(p.counts&&p.counts.fetched)?(p.counts.accepted+' of '+p.counts.fetched+' listings used'):((p.ebayN||0)?(p.ebayN+' comp'+(p.ebayN>1?'s':'')+' used'):'no comps')}</div></div>
+    </div>
+    <div class="ev-meta">
+      ${srcRow('TCGPlayer', p.tcg)}
+      ${srcRow(eb.label, p.ebay)}
+      ${srcRow('PSA Market', p.psa)}
+      ${srcRow('PokePrice', p.ppt)}
+    </div>
+    <div class="ev-meta">
+      <div class="ev-src"><div class="ev-lbl">Fetch status</div><div class="ev-val" style="color:${status.c};">${status.t}</div></div>
+      ${endpoint?`<div class="ev-src"><div class="ev-lbl">Endpoint</div><div class="ev-val ev-mono">${endpoint}${returned?' \u2192 '+returned:''}</div></div>`:''}
+      ${pricedAt?`<div class="ev-src"><div class="ev-lbl">Freshness</div><div class="ev-val">${ageStr(pricedAt)}<span class="ev-pill-date"> \u00b7 ${pricedVia}</span></div></div>`:''}
+      ${basisRow}
+    </div>
+    ${compsBlock}
+    <details class="ev-adv"><summary>Advanced Debug</summary><div class="ev-log">${advRows}</div></details>
+  </div>`;
+}
+
 async function openDetail(id){
   const card=collection.find(c=>c.id===id)||((window._detailTransient&&window._detailTransient.id===id)?window._detailTransient:null);if(!card)return;
   const p=pcache[cacheKey(card)]?.data||await getPrices(card);
@@ -8110,11 +8270,11 @@ async function openDetail(id){
         </div>
       </div>
       ${trendBlock}
-      ${(card.grade||card.type==='graded')?`<div style="font-size:10px;font-family:var(--mono);color:var(--muted);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.7;">diag · type:${card.type||'?'} · grade:${card.grade||'none'} · id:${card.cardId||'unresolved'}<br>tcg:${p.tcg!=null?'$'+p.tcg:'—'} · ebay:${p.ebay!=null?'$'+p.ebay:'—'} · ppt:${p.ppt!=null?'$'+p.ppt:'—'} · psa:${p.psa!=null?'$'+p.psa:'—'} · comps:${p.ebayN||0}<br>fetch · ${p._diag||'(cached — tap re-fetch)'}<a onclick="repriceCard('${card.id}')" style="color:var(--blue);cursor:pointer;margin-left:8px;text-decoration:underline;">↻ re-fetch</a>${(p.ebay_sales&&p.ebay_sales.length)?`<br><span style="color:var(--muted2);">comps used:</span> ${p.ebay_sales.map(s=>'$'+Math.round(s.price)).join(' · ')}`:''}</div>`:''}
-      ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}${(()=>{const r=nrvForCard(card,best);if(r.realizable==null)return '';const b=r.breakdown;const discAmt=b.market-b.gross;const taxRow=b.tax>0?`<div style="display:flex;justify-content:space-between;"><span>Tax on gain</span><span>−${moneyFull(b.tax)}</span></div>`:'';return `<div style="margin-bottom:18px;"><details><summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:var(--r);background:rgba(46,204,128,0.06);border:1px solid rgba(46,204,128,0.18);"><span style="font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">Realizable Value</span><span style="font-family:var(--mono);font-weight:700;color:${r.sellable?'var(--green)':'var(--muted)'};">${r.sellable?moneyFull(r.realizable):'Below sale cost'}</span></summary><div style="padding:10px 12px 2px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;"><div style="display:flex;justify-content:space-between;"><span>Market</span><span>${moneyFull(b.market)}</span></div><div style="display:flex;justify-content:space-between;"><span>Expected-sale discount (${Math.round(b.disc*100)}%)</span><span>−${moneyFull(discAmt)}</span></div><div style="display:flex;justify-content:space-between;"><span>eBay fees</span><span>−${moneyFull(b.fees)}</span></div><div style="display:flex;justify-content:space-between;"><span>Shipping</span><span>−${moneyFull(b.shipping)}</span></div>${taxRow}<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;margin-top:2px;color:var(--text);font-weight:600;"><span>Realizable</span><span>${moneyFull(r.realizable)}</span></div><div style="font-size:10px;color:var(--muted2);margin-top:5px;">Net after discount, eBay fees & shipping · tune in Settings → Realizable Value</div></div></details></div>`;})()}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?'Recent sold listings':s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">eBay graded comps</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
+      ${/* Pricing Evidence (UI-only revamp of raw diag · 2026-07). Rollback: restore the original inline diag template here (see git history / index.html.bak). */''}${(card.grade||card.type==='graded')?buildPricingEvidence(card,p):''}
+      ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}${(()=>{const r=nrvForCard(card,best);if(r.realizable==null)return '';const b=r.breakdown;const discAmt=b.market-b.gross;const taxRow=b.tax>0?`<div style="display:flex;justify-content:space-between;"><span>Tax on gain</span><span>−${moneyFull(b.tax)}</span></div>`:'';return `<div style="margin-bottom:18px;"><details><summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:var(--r);background:rgba(46,204,128,0.06);border:1px solid rgba(46,204,128,0.18);"><span style="font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">Realizable Value</span><span style="font-family:var(--mono);font-weight:700;color:${r.sellable?'var(--green)':'var(--muted)'};">${r.sellable?moneyFull(r.realizable):'Below sale cost'}</span></summary><div style="padding:10px 12px 2px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;"><div style="display:flex;justify-content:space-between;"><span>Market</span><span>${moneyFull(b.market)}</span></div><div style="display:flex;justify-content:space-between;"><span>Expected-sale discount (${Math.round(b.disc*100)}%)</span><span>−${moneyFull(discAmt)}</span></div><div style="display:flex;justify-content:space-between;"><span>eBay fees</span><span>−${moneyFull(b.fees)}</span></div><div style="display:flex;justify-content:space-between;"><span>Shipping</span><span>−${moneyFull(b.shipping)}</span></div>${taxRow}<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;margin-top:2px;color:var(--text);font-weight:600;"><span>Realizable</span><span>${moneyFull(r.realizable)}</span></div><div style="font-size:10px;color:var(--muted2);margin-top:5px;">Net after discount, eBay fees & shipping · tune in Settings → Realizable Value</div></div></details></div>`;})()}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.k==='ebay'?ebaySrcLabel(p).label:s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?ebaySrcLabel(p).sub:s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">${ebaySrcLabel(p).ask?'eBay active asks \u2014 no solds found':'eBay graded comps'}</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
-      ${(()=>{const bars=SOURCES.map(s=>({label:s.label,color:s.color,v:p[s.k]})).filter(b=>b.v>0);if(bars.length<2)return '';const mx=Math.max(...bars.map(b=>b.v));return `<div style="margin-bottom:18px;"><div class="sec-title-sm">Price Bar Chart</div><div style="display:flex;flex-direction:column;gap:9px;">${bars.map(b=>`<div style="display:flex;align-items:center;gap:10px;"><div style="width:96px;flex-shrink:0;font-size:12px;color:var(--muted2);display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${b.color};display:inline-block;flex-shrink:0;"></span>${b.label}</div><div style="flex:1;height:9px;background:var(--bg3);border-radius:5px;overflow:hidden;"><div style="width:${Math.max(4,Math.round(b.v/mx*100))}%;height:100%;background:${b.color};border-radius:5px;"></div></div><div style="width:74px;flex-shrink:0;text-align:right;font-family:var(--mono);font-size:12px;font-weight:700;color:${b.v===best?'var(--green)':(b.v===worst&&worst>best?'var(--red)':'var(--text)')};">${fmtPrice(b.v)}</div></div>`).join('')}</div></div>`;})()}
+      ${(()=>{const bars=SOURCES.map(s=>({label:(s.k==='ebay'?ebaySrcLabel(p).label:s.label),color:s.color,v:p[s.k]})).filter(b=>b.v>0);if(bars.length<2)return '';const mx=Math.max(...bars.map(b=>b.v));return `<div style="margin-bottom:18px;"><div class="sec-title-sm">Price Bar Chart</div><div style="display:flex;flex-direction:column;gap:9px;">${bars.map(b=>`<div style="display:flex;align-items:center;gap:10px;"><div style="width:96px;flex-shrink:0;font-size:12px;color:var(--muted2);display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${b.color};display:inline-block;flex-shrink:0;"></span>${b.label}</div><div style="flex:1;height:9px;background:var(--bg3);border-radius:5px;overflow:hidden;"><div style="width:${Math.max(4,Math.round(b.v/mx*100))}%;height:100%;background:${b.color};border-radius:5px;"></div></div><div style="width:74px;flex-shrink:0;text-align:right;font-family:var(--mono);font-size:12px;font-weight:700;color:${b.v===best?'var(--green)':(b.v===worst&&worst>best?'var(--red)':'var(--text)')};">${fmtPrice(b.v)}</div></div>`).join('')}</div></div>`;})()}
       <div style="margin-bottom:18px;"><div class="sec-title-sm">eBay Recent Sold</div><div>${eSales}</div></div>
       ${card.type!=='graded'&&best>0?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">PSA Grading Value Estimates<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">Estimated from market price</span></div><div class="psa-row">${[6,7,8,9,10].map(g=>{const mult={6:.45,7:.7,8:1.25,9:1.75,10:3.0}[g];const est=(best*mult).toFixed(0);const hl=g===10?' hl':'';const realPsa10=g===10&&p.psa&&p.psa>0;const dispPrice=realPsa10?p.psa.toFixed(0):est;const isReal=realPsa10;return `<div class="psa-cell${hl}"><div class="psa-gnum">${g}</div><div class="psa-gprice" style="${g===10?'color:var(--gold);font-weight:700;':''}">${dispPrice>0?'$'+dispPrice:'—'}</div>${isReal?'<div style="font-size:8px;color:var(--green);font-family:var(--mono);margin-top:1px;">live</div>':''}</div>`;}).join('')}</div><div style="font-size:10px;color:var(--muted);margin-top:6px;">PSA 10 typically 3× market · <a href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name+' '+(card.num||'')+' PSA 10')}&LH_Sold=1" target="_blank" style="color:var(--blue);">Check real PSA 10 sold →</a></div></div>`:''}
       ${card.source?`<div style="display:inline-flex;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" style=\"width:10px;height:10px;\"><path d=\"M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/></svg>Purchased from ${card.source}</div>`:''}
