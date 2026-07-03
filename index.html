@@ -570,6 +570,33 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .ev-adv summary::before{content:'\25b8  ';color:var(--muted)}
 .ev-adv[open] summary::before{content:'\25be  '}
 .ev-adv .ev-log{border-top:none;padding-top:4px}
+/* ── Evidence Explorer (beneath Pricing Evidence · UI-only 2026-07). Rollback: delete block. */
+.evx-sec{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
+.evx-sec summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px;-webkit-tap-highlight-color:transparent}
+.evx-sec summary::-webkit-details-marker{display:none}
+.evx-st{font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--text)}
+.evx-count{font-family:var(--mono);font-size:10px;color:var(--muted2)}
+.evx-sec summary::after{content:'\25b8';color:var(--muted);font-size:11px;margin-left:auto}
+.evx-sec[open] summary::after{content:'\25be'}
+.evx-body{padding:0 12px 12px}
+.evx-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.evx-chip{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted2);background:var(--bg4);border:1px solid var(--border);border-radius:20px;padding:4px 10px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.evx-chip-on{color:var(--text);border-color:var(--blue);background:rgba(79,142,247,.12)}
+.evx-list{display:flex;flex-direction:column;gap:8px}
+.evx-item{background:var(--bg4);border:1px solid var(--border);border-radius:10px;padding:10px 11px;min-width:0}
+.evx-title{font-size:11.5px;font-weight:500;color:var(--text);line-height:1.45;margin-bottom:7px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.evx-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.evx-price{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text)}
+.evx-meta{font-family:var(--mono);font-size:10px;color:var(--muted2)}
+.evx-pill{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:4px;padding:2px 7px;border:1px solid}
+.evx-c-green{color:var(--green);background:rgba(46,204,128,.09);border-color:rgba(46,204,128,.3)}
+.evx-c-red{color:var(--red);background:rgba(240,90,90,.09);border-color:rgba(240,90,90,.3)}
+.evx-c-gold{color:var(--gold);background:rgba(245,200,66,.09);border-color:rgba(245,200,66,.3)}
+.evx-c-purple{color:var(--purple);background:rgba(170,120,255,.09);border-color:rgba(170,120,255,.3)}
+.evx-c-muted{color:var(--muted2);background:rgba(255,255,255,.03);border-color:var(--border)}
+.evx-link{font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;margin-left:auto;padding:2px 4px}
+.evx-empty{font-family:var(--mono);font-size:10px;color:var(--muted);padding:2px 0 4px}
+@media (min-width:720px){.evx-list{display:grid;grid-template-columns:1fr 1fr;gap:8px}.evx-item{align-self:start}}
 </style>
 <!-- Supabase (Stage 1: Auth) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -8107,6 +8134,73 @@ async function repriceCard(id){
   closeModal('detail-modal');
   setTimeout(()=>openDetail(id), 60);
 }
+// ── Evidence Explorer · UI-only (2026-07) ──
+// Renders beneath the Pricing Evidence card from EXISTING data only:
+// accepted = p.ebay_sales (comps used in pricing, incl. title/date/url),
+// rejected = p.rejected (v16 Worker evidence ledger, {title,price,reason}).
+// Grade detection and reason color-coding are display-only parses. No pricing
+// read-modifies, no fetches, no writes. Rollback: delete this function, the
+// evxFilter helper, the .evx-* CSS block, and its term in the openDetail call site.
+function evxEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function evxFilter(btn){
+  const sec = btn.closest('.evx-sec'); if(!sec) return;
+  sec.querySelectorAll('.evx-chip').forEach(c=>c.classList.toggle('evx-chip-on', c===btn));
+  const k = btn.dataset.k, v = btn.dataset.v;
+  sec.querySelectorAll('.evx-item').forEach(el=>{ el.style.display = (v==='all' || el.dataset[k]===v) ? '' : 'none'; });
+}
+function buildEvidenceExplorer(card, p){
+  const accepted = (p.ebay_sales||[]).filter(s=>s && s.price>0);
+  const rejected = Array.isArray(p.rejected) ? p.rejected : [];
+  if(!accepted.length && !rejected.length) return '';
+  const eb = ebaySrcLabel(p);
+  const srcLbl = eb.ask ? 'eBay Asks (active)' : 'eBay Solds';
+  const gradeOf = t => { const m = String(t||'').match(/\b(psa|bgs|cgc|sgc|ace)\s*(10|[0-9](?:\.5)?)\b/i); return m ? (m[1].toUpperCase()+' '+m[2]) : null; };
+  const reasonClass = r => {
+    const x = String(r||'').toLowerCase();
+    if(/wrong_set|wrong_number|wrong_or_missing_grade|no_grade_token|wrong_rarity_tier|wrong_type|wrong_lang/.test(x)) return 'evx-c-gold';
+    if(/outlier|high_skew|stale/.test(x)) return 'evx-c-purple';
+    if(/no_title|no_or_invalid|filtered|unknown/.test(x)) return 'evx-c-muted';
+    return 'evx-c-red';
+  };
+  const reasonLbl = r => String(r||'unspecified').replace(/_/g,' ');
+  const money = v => '$'+Math.round(+v).toLocaleString('en-US');
+  const itemCard = (title, price, date, reason, cls, url, grade) => `
+    <div class="evx-item" data-reason="${evxEsc(reason)}" data-grade="${evxEsc(grade||'')}">
+      <div class="evx-title">${evxEsc(title)||'(no title)'}</div>
+      <div class="evx-row">
+        ${price!=null?`<span class="evx-price">${money(price)}</span>`:''}
+        ${date?`<span class="evx-meta">${evxEsc(date)}</span>`:''}
+        ${grade?`<span class="evx-pill evx-c-green" style="color:var(--text);background:var(--bg3);border-color:var(--border);">${evxEsc(grade)}</span>`:''}
+        <span class="evx-pill ${cls}">${evxEsc(reasonLbl(reason))}</span>
+        <span class="evx-meta">${srcLbl}</span>
+        ${url?`<a class="evx-link" href="${evxEsc(url)}" target="_blank" rel="noopener">View \u2197</a>`:''}
+      </div>
+    </div>`;
+  // Accepted section — grade chips when >1 distinct detected grade
+  const accRows = accepted.map(s=>{
+    const g = gradeOf(s.title) || (card.grade||null);
+    return itemCard(s.title||'(title unavailable \u2014 older cache entry)', s.price, s.date, 'used_in_pricing', 'evx-c-green', s.url, g);
+  }).join('');
+  const accGrades = [...new Set(accepted.map(s=>gradeOf(s.title)||(card.grade||'')).filter(Boolean))];
+  const accChips = accGrades.length>1
+    ? `<div class="evx-chips"><button class="evx-chip evx-chip-on" data-k="grade" data-v="all" onclick="evxFilter(this)">All</button>${accGrades.map(g=>`<button class="evx-chip" data-k="grade" data-v="${evxEsc(g)}" onclick="evxFilter(this)">${evxEsc(g)}</button>`).join('')}</div>` : '';
+  // Rejected section — reason chips
+  const rejRows = rejected.map(r=>itemCard(r.title, r.price, r.date, r.reason||'unspecified', reasonClass(r.reason), r.url, gradeOf(r.title))).join('');
+  const rejReasons = [...new Set(rejected.map(r=>r.reason||'unspecified'))];
+  const rejChips = rejReasons.length>1
+    ? `<div class="evx-chips"><button class="evx-chip evx-chip-on" data-k="reason" data-v="all" onclick="evxFilter(this)">All</button>${rejReasons.map(r=>`<button class="evx-chip" data-k="reason" data-v="${evxEsc(r)}" onclick="evxFilter(this)">${evxEsc(reasonLbl(r))}</button>`).join('')}</div>` : '';
+  const rejNote = (p.counts && p.counts.rejected > rejected.length)
+    ? `<div class="evx-empty">showing ${rejected.length} of ${p.counts.rejected} rejections (Worker caps the ledger at 10)</div>` : '';
+  return `
+    <details class="evx-sec"${accepted.length?'':' style="display:none;"'}>
+      <summary><span class="evx-st">Accepted Evidence</span><span class="evx-count">${accepted.length} comp${accepted.length===1?'':'s'}</span></summary>
+      <div class="evx-body">${accChips}<div class="evx-list">${accRows}</div></div>
+    </details>
+    <details class="evx-sec"${rejected.length?'':' style="display:none;"'}>
+      <summary><span class="evx-st">Rejected Evidence</span><span class="evx-count">${rejected.length}${(p.counts&&p.counts.rejected>rejected.length)?' of '+p.counts.rejected:''}</span></summary>
+      <div class="evx-body">${rejChips}${rejNote}<div class="evx-list">${rejRows}</div></div>
+    </details>`;
+}
 // ── Pricing Evidence card · v2 (UI-only · 2026-07) ──
 // Displays EXISTING data only: card.type/grade/cardId, p.tcg/ebay/ppt/psa/ebayN/
 // ebay_sales/ebaySource/unverified/_diag, the pcache timestamp (read-only), the
@@ -8270,7 +8364,7 @@ async function openDetail(id){
         </div>
       </div>
       ${trendBlock}
-      ${/* Pricing Evidence (UI-only revamp of raw diag · 2026-07). Rollback: restore the original inline diag template here (see git history / index.html.bak). */''}${(card.grade||card.type==='graded')?buildPricingEvidence(card,p):''}
+      ${/* Pricing Evidence (UI-only revamp of raw diag · 2026-07). Rollback: restore the original inline diag template here (see git history / index.html.bak). */''}${(card.grade||card.type==='graded')?(buildPricingEvidence(card,p)+buildEvidenceExplorer(card,p)):''}
       ${priceAnalysis.confidence&&priceAnalysis.confidence!=='none'?`<div style="margin-bottom:14px;padding:10px 12px;border-radius:var(--r);background:${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.08)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.08)':'rgba(255,77,109,0.08)'};border:1px solid ${priceAnalysis.confidence==='high'?'rgba(46,204,128,0.25)':priceAnalysis.confidence==='medium'?'rgba(245,200,66,0.25)':'rgba(255,77,109,0.25)'};"><div style="display:flex;align-items:center;gap:7px;"><span style="font-size:13px;">${priceAnalysis.confidence==='high'?'✓':priceAnalysis.confidence==='medium'?'⚠️':'⚠️'}</span><div><div style="font-size:11px;font-weight:700;color:${priceAnalysis.confidence==='high'?'var(--green)':priceAnalysis.confidence==='medium'?'var(--gold)':'var(--red)'};text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">${priceAnalysis.confidence} confidence</div><div style="font-size:11px;color:var(--muted);margin-top:1px;">${priceAnalysis.reason}</div></div></div></div>`:''}${(()=>{const r=nrvForCard(card,best);if(r.realizable==null)return '';const b=r.breakdown;const discAmt=b.market-b.gross;const taxRow=b.tax>0?`<div style="display:flex;justify-content:space-between;"><span>Tax on gain</span><span>−${moneyFull(b.tax)}</span></div>`:'';return `<div style="margin-bottom:18px;"><details><summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:var(--r);background:rgba(46,204,128,0.06);border:1px solid rgba(46,204,128,0.18);"><span style="font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);">Realizable Value</span><span style="font-family:var(--mono);font-weight:700;color:${r.sellable?'var(--green)':'var(--muted)'};">${r.sellable?moneyFull(r.realizable):'Below sale cost'}</span></summary><div style="padding:10px 12px 2px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;"><div style="display:flex;justify-content:space-between;"><span>Market</span><span>${moneyFull(b.market)}</span></div><div style="display:flex;justify-content:space-between;"><span>Expected-sale discount (${Math.round(b.disc*100)}%)</span><span>−${moneyFull(discAmt)}</span></div><div style="display:flex;justify-content:space-between;"><span>eBay fees</span><span>−${moneyFull(b.fees)}</span></div><div style="display:flex;justify-content:space-between;"><span>Shipping</span><span>−${moneyFull(b.shipping)}</span></div>${taxRow}<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:5px;margin-top:2px;color:var(--text);font-weight:600;"><span>Realizable</span><span>${moneyFull(r.realizable)}</span></div><div style="font-size:10px;color:var(--muted2);margin-top:5px;">Net after discount, eBay fees & shipping · tune in Settings → Realizable Value</div></div></details></div>`;})()}<div style="margin-bottom:18px;"><div class="sec-title-sm">Live Price Comparison</div><div class="price-sources-grid">${SOURCES.map(s=>{const v=p[s.k];if(!v)return'';const isBest=v===best;return `<div class="psrc"><div class="psrc-name"><span class="ps-bullet" style="background:${s.color};width:6px;height:6px;border-radius:50%;display:inline-block"></span>${s.k==='ebay'?ebaySrcLabel(p).label:s.label}${isBest?' ✓':''}</div><div class="psrc-price ${isBest?'best-src':''}">${fmtPrice(v)}</div><div class="psrc-sub">${s.k==='tcg'?'Market price · most accurate':s.k==='ebay'?ebaySrcLabel(p).sub:s.k==='ppt'?'PokePrice aggregated':s.k==='psa'?card.grade||'Graded':''}</div></div>`;}).join('')}${card.grade?`<div class="psrc" style="border:1px solid rgba(245,200,66,.25);background:rgba(245,200,66,.05);"><div class="psrc-name"><span class="ps-bullet" style="background:var(--gold);width:6px;height:6px;border-radius:50%;display:inline-block"></span>${card.grade}</div><div class="psrc-price" style="color:var(--gold);">${fmtPrice(p.psa)}</div><div class="psrc-sub">${ebaySrcLabel(p).ask?'eBay active asks \u2014 no solds found':'eBay graded comps'}</div><a href="https://www.ebay.com/sch/i.html?_nkw=${ebayGradeQ}&LH_Sold=1&LH_Complete=1" target="_blank" style="display:inline-block;margin-top:7px;font-size:11px;color:var(--gold);text-decoration:none;">View sold →</a></div>`:''}</div></div>
       ${card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm">PSA Population Report</div><div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;"><div class="psa-row">${[7,8,9,9.5,10].map(g=>`<div class="psa-cell${card.grade&&parseFloat((card.grade.match(/[\d.]+/)||['0'])[0])===g?' hl':''}"><div class="psa-gnum">${g}</div><div class="psa-gprice">—</div></div>`).join('')}</div><div style="font-size:11px;color:var(--muted);margin-top:8px;">Pop data when eBay API connected. <a href="https://www.psacard.com/pop" target="_blank" style="color:var(--blue);">PSA Pop →</a></div></div></div>`:''}
       ${card.type==='graded'&&card.grade?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">eBay Active Listings<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">${card.grade} · Live</span></div><div class="active-listings-panel" id="al-panel-${card.id}"><div class="al-loading"><div class="spinner" style="width:10px;height:10px;border-width:1.5px;"></div>Fetching active listings…</div></div></div>`:''}
