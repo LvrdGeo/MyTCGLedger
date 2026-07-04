@@ -88,7 +88,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .dot-on{background:var(--green);box-shadow:0 0 5px var(--green)}.dot-warn{background:var(--gold)}.dot-off{background:var(--muted)}
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:40}
-.page-title{font-family:var(--disp);font-size:17px;font-weight:700;flex:1}
+.page-title{font-family:var(--disp);font-size:17px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .page-title small{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;margin-left:8px}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r);border:1px solid transparent;font-family:var(--font);font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .15s}
 .btn svg{width:13px;height:13px}
@@ -328,11 +328,13 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .mob-more-row:active{background:var(--bg3);}
 .mob-more-row svg{width:20px;height:20px;color:var(--muted);flex-shrink:0;}
 .mob-fab{display:none;position:fixed;bottom:calc(96px + env(safe-area-inset-bottom,16px));right:16px;z-index:101;width:46px;height:46px;border-radius:50%;background:rgba(245,200,66,0.75);color:#08090e;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(245,200,66,.3);align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
-.mob-account-btn{display:none;position:fixed;top:calc(env(safe-area-inset-top,0px) / 2 + 6px);right:12px;z-index:60;width:34px;height:34px;border-radius:50%;background:var(--bg3);color:var(--text);border:1px solid var(--border);cursor:pointer;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}
+.mob-account-btn{display:none;position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);right:14px;z-index:60;width:38px;height:38px;border-radius:50%;background:var(--bg3);color:var(--text);border:1px solid var(--border);cursor:pointer;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;box-shadow:0 2px 10px rgba(0,0,0,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .1s;}
+.mob-account-btn:active{transform:scale(.92);background:var(--bg4)}
+.mob-account-btn svg{width:19px;height:19px}
 .mob-account-btn svg{width:18px;height:18px;}
 @media(max-width:768px){
   .sidebar{display:none!important}.mobile-tabs{display:grid}.mob-fab{display:flex}.mob-account-btn{display:flex}
-  .toast{bottom:80px}.topbar{padding:calc(10px + env(safe-area-inset-top,0px)) 52px 10px 14px;gap:8px}
+  .toast{bottom:80px}.topbar{padding:calc(env(safe-area-inset-top,0px) + 12px) 62px 12px 16px;gap:8px;min-height:34px}
   .page-title small{display:none}.topbar .btn-ghost{display:none}.topbar .btn-primary{display:none}.topbar .topbar-sold-btn{display:inline-flex!important}
   .port-hero{padding:16px 14px 0}.port-total{font-size:32px}
   .kpi-row{grid-template-columns:1fr 1fr 1fr}.kpi{padding:10px 12px}.kpi-val{font-size:14px}
@@ -570,6 +572,9 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .ev-adv summary::before{content:'\25b8  ';color:var(--muted)}
 .ev-adv[open] summary::before{content:'\25be  '}
 .ev-adv .ev-log{border-top:none;padding-top:4px}
+/* Foil / Variant selector pills (2026-07). Rollback: delete this block + the #variant-pills markup. */
+.var-pill{font-family:var(--mono);font-size:11px;color:var(--muted2);background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:7px 12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.var-pill.active{color:var(--text);border-color:var(--blue);background:rgba(79,142,247,.12)}
 /* ── Evidence Explorer (beneath Pricing Evidence · UI-only 2026-07). Rollback: delete block. */
 .evx-sec{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
 .evx-sec summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px;-webkit-tap-highlight-color:transparent}
@@ -1636,6 +1641,15 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
         <div class="form-group" style="grid-column:1/-1;position:relative;"><div class="form-label">Card Name *</div><input class="input" id="f-name" placeholder="e.g. Charizard" oninput="onModalSearch(this.value)" autocomplete="off" style="font-size:14px;font-weight:500;"><div class="search-dd" id="modal-name-dd" style="z-index:300;"></div></div>
         <div class="form-group"><div class="form-label">Set</div><input class="input" id="f-set" placeholder="e.g. Base Set" oninput="updateAddPreview();refreshEditionSection()"></div>
         <div class="form-group"><div class="form-label">Card Number</div><input class="input" id="f-num" placeholder="e.g. 4/102" oninput="updateAddPreview()"></div>
+        <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Foil / Variant</div>
+          <div id="variant-pills" style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="var-pill active" data-val="" onclick="selectVariant('',this)">Auto</button>
+            <button type="button" class="var-pill" data-val="normal" onclick="selectVariant('normal',this)">Non-Holo</button>
+            <button type="button" class="var-pill" data-val="holo" onclick="selectVariant('holo',this)">Holo</button>
+            <button type="button" class="var-pill" data-val="reverse" onclick="selectVariant('reverse',this)">Reverse Holo</button>
+          </div>
+          <input type="hidden" id="f-variant" value="">
+        </div>
         <input type="hidden" id="f-cardid"><input type="hidden" id="f-img">
       </div>
       <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;margin-top:14px;">Card Type</div>
@@ -3108,6 +3122,17 @@ function editionSearchTerm(card){
   const e = cardEdition(card);
   return e === '1stEdition' ? '1st Edition' : e === 'shadowless' ? 'Shadowless' : '';
 }
+// Explicit foil/variant. Prefers the stored card.variant field; falls back to
+// the legacy /reverse/ sniff on rarity/notes so pre-variant cards still work.
+function cardVariant(card){
+  if(card && card.variant) return card.variant;             // 'holo'|'reverse'|'normal'
+  if(/reverse/i.test(card&&card.rarity||'')||/reverse/i.test(card&&card.notes||'')) return 'reverse';
+  return '';                                                 // '' = auto/unspecified
+}
+function variantSearchTerm(card){
+  const v = cardVariant(card);
+  return v === 'reverse' ? 'reverse holo' : v === 'holo' ? 'holo' : '';
+}
 // Edition-aware TCGPlayer tier selection. Returns a price number or null.
 function pickTcgTier(prices, card){
   if(!prices) return null;
@@ -3249,8 +3274,9 @@ async function fetchEbaySold(card) {
       // Edition matters enormously for vintage slabs (1st-Ed PSA 10 ≫ Unlimited PSA 10),
       // so fold it into the search name AND pass it explicitly to the worker.
       const edTerm = editionSearchTerm(card);
-      const gradedName = edTerm ? `${card.name} ${edTerm}` : card.name;
-      endpoint = `${EBAY_WORKER}/graded?name=${encodeURIComponent(gradedName)}&number=${encodeURIComponent(card.num||'')}&set=${encodeURIComponent(card.set||'')}&grade=${encodeURIComponent(card.grade||'')}&rarity=${encodeURIComponent(card.rarity||'')}&edition=${encodeURIComponent(edTerm)}`;
+      const varTerm = variantSearchTerm(card);
+      const gradedName = [card.name, edTerm, varTerm].filter(Boolean).join(' ');
+      endpoint = `${EBAY_WORKER}/graded?name=${encodeURIComponent(gradedName)}&number=${encodeURIComponent(card.num||'')}&set=${encodeURIComponent(card.set||'')}&grade=${encodeURIComponent(card.grade||'')}&rarity=${encodeURIComponent(card.rarity||'')}&edition=${encodeURIComponent(edTerm)}&variant=${encodeURIComponent(cardVariant(card))}`;
       console.log('[eBay] Graded query:', gradedName, card.grade, 'set:', card.set, 'num:', card.num, 'ed:', edTerm || 'unlimited');
     } else {
       // Build a precise, contextual query using everything we know about the card
@@ -3258,12 +3284,13 @@ async function fetchEbaySold(card) {
       const rarity   = (card.rarity || card.type || '').toLowerCase();
       const setName  = (card.set || '');
 
-      // Detect card characteristics
-      const isReverse  = rarity.includes('reverse');
+      // Detect card characteristics — explicit variant selector wins over rarity sniff.
+      const _v         = cardVariant(card);
+      const isReverse  = _v ? _v === 'reverse' : rarity.includes('reverse');
       const isVintage  = /base set|jungle|fossil|team rocket|gym heroes|gym challenge|neo genesis|neo discovery|neo destiny|neo revelation|e-card|skyridge|aquapolis|expedition|wizards|wotc|legend/i.test(setName);
       const is1st       = card.edition === '1stEdition' || (card.notes && /1st|first edition/i.test(card.notes));
       const isShadowless= card.edition === 'shadowless' || (card.notes && /shadowless/i.test(card.notes));
-      const isHolo     = rarity.includes('holo') && !isReverse;
+      const isHolo     = _v ? _v === 'holo' : (rarity.includes('holo') && !isReverse);
 
       // Detect premium cards by BOTH rarity field AND card number
       // Cards numbered above their set total (e.g. 125/094) are always secret/special
@@ -7754,9 +7781,10 @@ function renderSealedQuickAdd(setName,setLogo){const panel=document.getElementBy
 function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.getElementById('sp-name').value=name;document.getElementById('sp-set').value=setName;document.getElementById('sp-type').value=type;document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const pill=document.querySelector(`#sealed-modal .type-pill[data-val="${type}"]`);if(pill)pill.classList.add('active');updateSealedPreview();}
 
 // ═══ CARD CRUD ═══
-function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
-function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);updateAddPreview();openModal('add-modal');}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId){collection=collection.map(c=>c.id===editingId?data:c);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'edit',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:null,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card updated','green');}else{collection.push(data);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card added','green');}}
+function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));selectVariant('',document.querySelector('#variant-pills .var-pill[data-val=""]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
+function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);const _v=card.variant||'';const _vP=document.querySelector(`#variant-pills .var-pill[data-val="${_v}"]`);if(_vP)selectVariant(_v,_vP);updateAddPreview();openModal('add-modal');}
+function selectVariant(v,btn){document.getElementById('f-variant').value=v;document.querySelectorAll('#variant-pills .var-pill').forEach(p=>p.classList.toggle('active',p===btn));updateAddPreview();}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',variant:document.getElementById('f-variant').value||'',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId){collection=collection.map(c=>c.id===editingId?data:c);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'edit',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:null,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card updated','green');}else{collection.push(data);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card added','green');}}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -8618,7 +8646,7 @@ function addToWatchlistFromPicker(card,edition,kind,grade){
   const kindLabel=kind==='graded'?(grade||'Graded'):kind==='sealed'?'Sealed':'Single';
   toast(card.name+' ('+kindLabel+') added to Watchlist','green');
 }
-function prefillAddForm(card,chosenType){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';
+function prefillAddForm(card,chosenType){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';document.getElementById('f-name').value=card.name;document.getElementById('f-set').value=card.set;document.getElementById('f-num').value=card.num;document.getElementById('f-cardid').value=card.id;document.getElementById('f-img').value=card.img;document.getElementById('f-qty').value=1;document.getElementById('f-paid').value='';document.getElementById('f-notes').value='';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';{const _pv=/reverse/i.test(card.rarity||'')?'reverse':/holo/i.test(card.rarity||'')?'holo':'';const _pvP=document.querySelector(`#variant-pills .var-pill[data-val="${_pv}"]`);if(_pvP)selectVariant(_pv,_pvP);}
   if(chosenType==='graded'){const grader=document.getElementById('picker-grader').value;const grade=document.getElementById('picker-grade-sel').value;const cert=document.getElementById('picker-cert').value.trim();const tP=document.querySelector('.type-pill[data-val="graded"]');if(tP)selectType('graded',tP);document.getElementById('f-grader').value=grader;document.getElementById('f-grade-sel').value=grade;document.getElementById('f-cert').value=cert;document.getElementById('f-grade').value=grader+' '+grade;document.getElementById('f-cond').value='NM';}
   else{const r=(card.rarity||'').toLowerCase();let gt='standard';if(r.includes('ex')||r.includes('gx')||r.includes(' v')||r.includes('vmax'))gt='ex';else if(r.includes('holo'))gt='holo';else if(r.includes('reverse'))gt='reverse';const tP=document.querySelector(`.type-pill[data-val="${gt}"]`);if(tP)selectType(gt,tP);const cP=document.querySelector('.cond-pill[data-val="NM"]');if(cP)selectCond('NM',cP);document.getElementById('f-grade').value='';document.getElementById('f-cert').value='';}
   document.getElementById('f-edition').value=(card.edition||'unlimited');refreshEditionSection();const _pcEd=document.getElementById('f-edition').value;const _pcP=document.querySelector(`#edition-section .ed-pill[data-val="${_pcEd}"]`);if(_pcP)selectEdition(_pcEd,_pcP);
@@ -9855,6 +9883,7 @@ function updateFab(name){
 function goPage(name,el){
   _currentPage=name;
   try { localStorage.setItem(STORAGE_KEYS.lastPage, name); } catch(e){}
+  try { const _ab=document.getElementById('mob-account-btn'); if(_ab) _ab.style.visibility = (name==='settings') ? 'hidden' : ''; } catch(_){}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
