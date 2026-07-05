@@ -328,16 +328,14 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .mob-more-row:active{background:var(--bg3);}
 .mob-more-row svg{width:20px;height:20px;color:var(--muted);flex-shrink:0;}
 .mob-fab{display:none;position:fixed;bottom:calc(96px + env(safe-area-inset-bottom,16px));right:16px;z-index:101;width:46px;height:46px;border-radius:50%;background:rgba(245,200,66,0.75);color:#08090e;border:none;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(245,200,66,.3);align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
-.mob-account-btn{display:none;position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);right:14px;z-index:61;width:38px;height:38px;border-radius:50%;background:var(--bg2);color:var(--text);border:1px solid var(--border);cursor:pointer;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;box-shadow:0 2px 12px rgba(0,0,0,.6);transition:background .15s,transform .1s;}
+/* ── Mobile account avatar (2026-07, consolidated). Single source of truth:
+   one size rule, no scrim, sits cleanly in the top-right of the header row. ── */
+.mob-account-btn{display:none;position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);right:16px;z-index:61;width:34px;height:34px;padding:0;border-radius:50%;background:var(--bg3);color:var(--text);border:1px solid var(--border);cursor:pointer;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;box-shadow:0 1px 6px rgba(0,0,0,.4);transition:background .15s,transform .1s;}
 .mob-account-btn:active{transform:scale(.92);background:var(--bg4)}
-.mob-account-btn svg{width:19px;height:19px}
-/* Top scrim: solid strip behind the status-bar / notch so scrolling content and the
-   account avatar never float on bare card art. Mobile only (enabled in @media). */
-.mob-topscrim{display:none;position:fixed;top:0;left:0;right:0;height:calc(env(safe-area-inset-top,0px) + 54px);z-index:59;background:linear-gradient(to bottom,var(--bg) 0%,var(--bg) 55%,transparent 100%);pointer-events:none}
-.mob-account-btn svg{width:18px;height:18px;}
+.mob-account-btn svg{width:17px;height:17px;flex-shrink:0}
 @media(max-width:768px){
-  .sidebar{display:none!important}.mobile-tabs{display:grid}.mob-fab{display:flex}.mob-account-btn{display:flex}.mob-topscrim{display:block}
-  .toast{bottom:80px}.topbar{padding:calc(env(safe-area-inset-top,0px) + 12px) 62px 12px 16px;gap:8px;min-height:34px}
+  .sidebar{display:none!important}.mobile-tabs{display:grid}.mob-fab{display:flex}.mob-account-btn{display:flex}
+  .toast{bottom:80px}.topbar{padding:calc(env(safe-area-inset-top,0px) + 12px) 60px 12px 16px;gap:8px;min-height:34px}
   .page-title small{display:none}.topbar .btn-ghost{display:none}.topbar .btn-primary{display:none}.topbar .topbar-sold-btn{display:inline-flex!important}
   .port-hero{padding:16px 14px 0}.port-total{font-size:32px}
   .kpi-row{grid-template-columns:1fr 1fr 1fr}.kpi{padding:10px 12px}.kpi-val{font-size:14px}
@@ -1520,7 +1518,6 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   </button>
 </nav>
 <button class="mob-fab" id="mob-fab" onclick="fabAction()" title="Add card" aria-label="Add card">+</button>
-<div class="mob-topscrim"></div>
 <button class="mob-account-btn" id="mob-account-btn" onclick="mobGoPage('settings','')" title="Account" aria-label="Account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></button>
 
 <!-- CARD PICKER -->
@@ -9887,7 +9884,7 @@ function updateFab(name){
 function goPage(name,el){
   _currentPage=name;
   try { localStorage.setItem(STORAGE_KEYS.lastPage, name); } catch(e){}
-  try { const _ab=document.getElementById('mob-account-btn'); if(_ab) _ab.style.visibility = (name==='settings') ? 'hidden' : ''; const _sc=document.querySelector('.mob-topscrim'); if(_sc) _sc.style.visibility = (name==='settings') ? 'hidden' : ''; } catch(_){}
+  try { const _ab=document.getElementById('mob-account-btn'); if(_ab) _ab.style.visibility = (name==='settings') ? 'hidden' : ''; } catch(_){}
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
