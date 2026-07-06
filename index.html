@@ -603,6 +603,107 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .evx-link{font-family:var(--mono);font-size:10px;color:var(--blue);text-decoration:none;margin-left:auto;padding:2px 4px}
 .evx-empty{font-family:var(--mono);font-size:10px;color:var(--muted);padding:2px 0 4px}
 @media (min-width:720px){.evx-list{display:grid;grid-template-columns:1fr 1fr;gap:8px}.evx-item{align-self:start}}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PHASE 1 · DESIGN SYSTEM NORMALIZATION  (2026-07, additive UI-only polish)
+   One appended layer. Uses ONLY existing tokens (--r,--r2,--ease,--shadow-1/2,
+   palette). No class/ID renames, no layout changes, no structural overrides.
+   ROLLBACK: delete everything from this banner to the matching END banner.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Buttons: unified hover/active feedback (base transition already exists) ── */
+.btn{transition:background .15s var(--ease),border-color .15s var(--ease),transform .1s var(--ease),box-shadow .15s var(--ease)}
+.btn:hover{filter:brightness(1.06)}
+.btn:active{transform:translateY(.5px) scale(.985)}
+.btn-primary:hover{box-shadow:0 2px 10px rgba(245,200,66,.28)}
+.btn-ghost:hover{border-color:var(--muted2)}
+.btn-danger:hover{background:rgba(255,77,109,.16);border-color:rgba(255,77,109,.34)}
+.btn:disabled,.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn:disabled:hover,.btn[disabled]:hover{filter:none;box-shadow:none}
+
+/* ── Interactive cards: consistent easing + lift, harmonized borders ── */
+.cat-card,.stat-card,.set-card-item,.set-card-item:hover{transition:transform .25s var(--ease),box-shadow .25s var(--ease),border-color .25s var(--ease)}
+.cat-card:hover,.set-card-item:hover{transform:translateY(-2px);box-shadow:var(--shadow-1);border-color:var(--b2)}
+.set-card-item:active,.cat-card:active{transform:translateY(0) scale(.99)}
+
+/* ── Inputs & selects: shared focus ring already present; add hover affordance ── */
+.input:hover:not(:focus),.select:hover:not(:focus){border-color:var(--muted2)}
+.select{cursor:pointer}
+
+/* ── Pill / chip / badge family: one consistent shape + press feedback ──
+   Covers the existing evidence pills, explorer chips, edition & variant pills.
+   Shape/color unchanged where set; only easing + active state normalized. */
+.ev-pill,.evx-chip,.evx-pill,.var-pill,.ed-pill,.ev-refetch,.ev-chip{
+  transition:background .15s var(--ease),border-color .15s var(--ease),color .15s var(--ease),transform .1s var(--ease)}
+.evx-chip:active,.var-pill:active,.ed-pill:active,.ev-refetch:active,.ev-pill-link:active{transform:scale(.94)}
+
+/* ── Modals: consistent surface + scrollbar polish (animation/shape unchanged) ── */
+.modal-body{scrollbar-width:thin;scrollbar-color:var(--b2) transparent}
+.modal-body::-webkit-scrollbar{width:8px}
+.modal-body::-webkit-scrollbar-thumb{background:var(--b2);border-radius:8px}
+.modal-body::-webkit-scrollbar-track{background:transparent}
+
+/* ── Nav & mobile tabs: unified active-state easing (no color/layout change) ── */
+.nav-btn{transition:background .15s var(--ease),color .15s var(--ease),transform .12s var(--ease)}
+.nav-btn:hover:not(.active){background:rgba(255,255,255,.03);color:var(--text)}
+
+/* ── Focus-visible accessibility ring (keyboard only; no effect on tap/mouse) ── */
+.btn:focus-visible,.nav-btn:focus-visible,.mob-tab:focus-visible{outline:2px solid rgba(245,200,66,.5);outline-offset:2px}
+
+/* ── Respect reduced-motion: neutralize the added transforms/transitions ── */
+@media (prefers-reduced-motion:reduce){
+  .btn,.cat-card,.stat-card,.set-card-item,.ev-pill,.evx-chip,.var-pill,.ed-pill,.nav-btn{transition:none!important}
+  .btn:active,.cat-card:hover,.set-card-item:hover,.cat-card:active,.set-card-item:active,.evx-chip:active,.var-pill:active{transform:none!important}
+}
+/* ═══════════════════════ END · DESIGN SYSTEM NORMALIZATION ═══════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PHASE 1.1 · VISUAL QA MICRO-CORRECTIONS  (2026-07, additive UI-only)
+   Fixes two issues the Phase 1 block introduced:
+   (A) iOS Safari :hover sticks after tap → hover-lift stayed "stuck up" on
+       tapped cards. Scope all hover-lift to real pointers via @media(hover:hover).
+   (B) Phase 1's generic lift overrode the set tiles' original gold zoom and
+       the cat-card's original -1px. Restore their intended character.
+   ROLLBACK: delete this block only (banner to END banner) to undo 1.1;
+   delete the Phase 1 block above to undo the whole normalization.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* (A) Only apply the Phase 1 hover-lift on devices with a true hover pointer.
+       On touch (your iPhone) the lift no longer sticks after a tap. */
+@media (hover:none){
+  .cat-card:hover,.set-card-item:hover{transform:none;box-shadow:none}
+}
+
+/* (B) Restore the set tiles' signature gold zoom (was scale(1.03)+gold border,
+       flattened by Phase 1) and the cat-card's gentler -1px — real pointers only. */
+@media (hover:hover){
+  .set-card-item:hover{transform:scale(1.03);border-color:var(--gold);box-shadow:var(--shadow-1)}
+  .cat-card:hover{transform:translateY(-1px)}
+}
+/* ═══════════════════════ END · VISUAL QA MICRO-CORRECTIONS ═══════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PHASE 1.2 · MOBILE INTERACTION QA  (2026-07, additive UI-only)
+   (A) iOS Safari :hover sticks after a tap. Several primary tappable card
+       types have :hover transforms that were NOT scoped to real pointers, so
+       on iPhone they stay "stuck" lifted/shadowed after a tap until you touch
+       elsewhere. Neutralize their hover transform/shadow on touch devices.
+       (Desktop hover is untouched — this only applies under @media(hover:none).)
+   (B) The floating add button (FAB) had no press feedback. Add a subtle
+       :active scale so it feels responsive on tap, matching every other control.
+   ROLLBACK: delete this block only (banner → END) to undo 1.2.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* (A) On touch devices, cancel sticky hover-lift on all tappable card types. */
+@media (hover:none){
+  .psa-card:hover,.card-tile:hover,.cs-card:hover,.set-tile:hover,
+  .db-card:hover,.db-kpi-click:hover{transform:none;box-shadow:none;border-color:var(--border)}
+}
+
+/* (B) FAB press feedback (mobile only element; -webkit-tap-highlight already off). */
+.mob-fab{transition:transform .1s var(--ease),box-shadow .15s var(--ease)}
+.mob-fab:active{transform:scale(.92)}
+/* ═══════════════════════ END · MOBILE INTERACTION QA ═══════════════════════ */
 </style>
 <!-- Supabase (Stage 1: Auth) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
