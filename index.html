@@ -9214,7 +9214,8 @@ function renderWishlist(){
           <canvas id="wsp-${w.id}" width="120" height="32" style="display:block;margin-top:4px;opacity:.8;pointer-events:none;"></canvas>
         </div>
         <div style="display:flex;gap:4px;margin-top:8px;">
-          <button class="btn btn-primary btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();moveWishToVault(w.id)">+ Vault</button>
+          <button class="btn btn-primary btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();wishAddToPortfolio(w.id)">+ Portfolio</button>
+          <button class="btn btn-ghost btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();wishLogDeal(w.id)">＄ Deal</button>
           <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();removeWish(w.id)">✕</button>
         </div>
       </div>
@@ -9257,6 +9258,24 @@ function moveWishToVault(id){
   }
   // Once saved, this watchlist entry moves into the portfolio.
   window._pendingWishRemoval=id;
+}
+
+// Watchlist → Portfolio: reuses moveWishToVault but guards against a missing form
+// field silently aborting before the Add modal opens (the old "+ Vault did nothing"
+// bug). If prefill throws, we still surface the modal so the action never dead-ends.
+function wishAddToPortfolio(id){
+  try {
+    moveWishToVault(id);
+  } catch(e){
+    console.warn('[wishAddToPortfolio] prefill issue, opening add modal anyway:', e);
+    try { window._pendingWishRemoval=id; openModal('add-modal'); } catch(_){}
+  }
+}
+
+// Watchlist → Log a Deal: maps the watched card into the existing deal picker.
+function wishLogDeal(id){
+  const w=wishlist.find(x=>x.id===id); if(!w) return;
+  dealPickCard({ id:w.cardId||'', name:w.name, set:w.set||'', num:w.num||'', img:w.img||'' });
 }
 
 // ═══ NAV + MOBILE ═══
