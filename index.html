@@ -3578,7 +3578,9 @@ async function fetchLivePrices(card){
       // median of asks is meaningless and badly inflates slabs (Alakazam: ask-median
       // $12.5k vs real solds $4.8-6.2k). Stamp the source so analyzeGraded can label
       // honestly, and price asks at the LOWEST ask (the tightest defensible ceiling).
-      const _ebayIsAsk = !!(ebayData.source && ebayData.source !== 'ebay-sold-scrape');
+      const _SOLD_SOURCES = ['ebay-sold-scrape','ebay-sold-cache'];   // v21: cached solds are SOLDS
+      const _ebayIsAsk = !!(ebayData.source && !_SOLD_SOURCES.includes(ebayData.source));
+      if (ebayData.cachedAt) result.soldCachedAt = ebayData.cachedAt;   // v21: age of cached comps
       result.ebaySource = ebayData.source || '';
       // v16 Worker evidence fields — display-only passthrough for the Pricing Evidence card
       if (Array.isArray(ebayData.rejected) && ebayData.rejected.length) result.rejected = ebayData.rejected.slice(0,10);
@@ -3586,7 +3588,12 @@ async function fetchLivePrices(card){
       if (cleanPrices.length) {
         if (card.type === 'graded') {
           if (_ebayIsAsk) {
-            pricePoint = cleanPrices[0];   // lowest active ask — market ceiling
+            // ASKS → SOLD ESTIMATE (2026-07 accuracy fix). The old heuristic took the
+            // single LOWEST ask, which a lowball/damaged listing drags under real value
+            // (Umbreon VMAX #215 PSA10: lowest ask $3,500 vs REAL solds $4,350–$5,000).
+            // Sellers list above what cards sell for, so: trimmed median of asks × 0.90,
+            // calibrated against real sold-vs-ask pairs. Labeled LOW confidence + ASKS.
+            pricePoint = askSoldEstimate(cleanPrices);
           } else {
           // GRADED: MEDIAN of sold comps on the eBay "{grade} Sold" page.
           // Median (not average) so a few inflated/wrong-variant comps can't drag the
@@ -3853,10 +3860,10 @@ function analyzeGraded(p) {
   // Headline = the average of the eBay "{grade} Sold" page (p.psa carries that mean).
   if (p.psa > 0) {
     const n = p.ebayN || 0;
-    const isAsk = p.ebaySource && p.ebaySource !== 'ebay-sold-scrape';
+    const isAsk = p.ebaySource && p.ebaySource !== 'ebay-sold-scrape' && p.ebaySource !== 'ebay-sold-cache';   // v21: cached solds are SOLDS
     let conf = isAsk ? 'low' : (n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low');
     let reason = isAsk
-      ? `Lowest of ${n} active eBay asking price${n > 1 ? 's' : ''} — no recent solds found; actual sold value is typically lower`
+      ? `Estimated sold value from ${n} active eBay ask${n > 1 ? 's' : ''} (trimmed median × 0.90) — no recent solds found`
       : n ? `Median of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
           : 'eBay sold comp for this grade';
     // SANITY CHECK: a graded slab should be worth at least as much as the raw card.
@@ -3906,6 +3913,18 @@ function findConsensus(sources) {
   return { price: lo, basis: 'lower estimate', label: 'conservative', outlier: null };
 }
 
+// Estimate realistic SOLD value from active ASKING prices (2026-07). Sellers list
+// above what cards actually sell for, and the single lowest ask is unreliable —
+// a lowball/damaged listing drags it under real value. Trimmed median × 0.90,
+// calibrated on real sold-vs-ask pairs (Umbreon VMAX #215 PSA10: asks median
+// ~$5.1k, real solds $4,350–$5,000 → factor ≈0.87–0.92). Expects ASC-sorted prices.
+function askSoldEstimate(sortedAsks){
+  if (!sortedAsks || !sortedAsks.length) return null;
+  const arr = sortedAsks.length >= 6 ? sortedAsks.slice(1, -1) : sortedAsks;
+  const med = medianOf(arr);
+  return med > 0 ? +(med * 0.90).toFixed(2) : null;
+}
+
 function medianOf(arr) {
   if (!arr.length) return 0;
   const s = [...arr].sort((a,b)=>a-b);
@@ -3922,7 +3941,13 @@ function worstPrice(p){const v=SOURCES.map(s=>p[s.k]).filter(v=>v!=null&&v>0);re
 // Every UI surface that names the eBay source routes through this so asks
 // are never presented as sold data.
 function ebaySrcLabel(p){
-  const ask = !!(p && p.ebaySource && p.ebaySource !== 'ebay-sold-scrape');
+  const src = p && p.ebaySource;
+  const isSold = src === 'ebay-sold-scrape' || src === 'ebay-sold-cache';   // v21
+  const ask = !!(src && !isSold);
+  if (src === 'ebay-sold-cache') {
+    const age = p.soldCachedAt ? Math.max(1, Math.round((Date.now()-p.soldCachedAt)/86400000)) : null;
+    return {label:'eBay Sold', sub:'Recent sold listings'+(age?` \u00b7 cached ${age}d ago`:' \u00b7 cached'), ask:false};
+  }
   return ask ? {label:'eBay Asks', sub:'Active asking prices \u2014 no recent solds', ask:true}
              : {label:'eBay Sold', sub:'Recent sold listings', ask:false};
 }
