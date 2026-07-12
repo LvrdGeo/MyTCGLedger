@@ -1028,6 +1028,11 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
         onkeydown="if(event.key==='Escape'){this.value='';clearTabSearch();}">
       <button class="card-search-clear" id="tab-search-clear" onclick="document.getElementById('tab-search-input').value='';clearTabSearch();" style="display:none;">✕</button>
     </div>
+    <!-- Language toggle: English (pokemontcg.io) / Japanese (PPT via Worker) -->
+    <div id="lang-toggle" style="display:flex;gap:6px;margin-bottom:14px;">
+      <button class="era-pill active" data-lang="EN" onclick="setSearchLang('EN',this)">English</button>
+      <button class="era-pill" data-lang="JP" onclick="setSearchLang('JP',this)">Japanese 🇯🇵</button>
+    </div>
     <!-- Filters row -->
     <div id="tab-search-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
       <select class="select" id="tab-search-set" style="width:auto;font-size:12px;padding:6px 26px 6px 10px;" onchange="onTabSearchSetFilter()">
@@ -3377,7 +3382,8 @@ async function fetchEbaySold(card) {
       // so fold it into the search name AND pass it explicitly to the worker.
       const edTerm = editionSearchTerm(card);
       const varTerm = variantSearchTerm(card);
-      const gradedName = [card.name, edTerm, varTerm].filter(Boolean).join(' ');
+      const jpTerm = card.lang === 'JP' ? 'Japanese' : '';   // JP cards: comp against Japanese listings
+      const gradedName = [card.name, edTerm, varTerm, jpTerm].filter(Boolean).join(' ');
       endpoint = `${EBAY_WORKER}/graded?name=${encodeURIComponent(gradedName)}&number=${encodeURIComponent(card.num||'')}&set=${encodeURIComponent(card.set||'')}&grade=${encodeURIComponent(card.grade||'')}&rarity=${encodeURIComponent(card.rarity||'')}&edition=${encodeURIComponent(edTerm)}&variant=${encodeURIComponent(cardVariant(card))}`;
       console.log('[eBay] Graded query:', gradedName, card.grade, 'set:', card.set, 'num:', card.num, 'ed:', edTerm || 'unlimited');
     } else {
@@ -3433,6 +3439,7 @@ async function fetchEbaySold(card) {
 
       // Always include the set name — critical for disambiguation
       if (setName) parts.push(setName);
+      if (card.lang === 'JP') parts.push('japanese');
       parts.push('pokemon card');
 
       const q = parts.filter(Boolean).join(' ');
@@ -7908,10 +7915,10 @@ function renderSealedQuickAdd(setName,setLogo){const panel=document.getElementBy
 function quickAddSealed(name,type,setName,setLogo){openSealedModal();document.getElementById('sp-name').value=name;document.getElementById('sp-set').value=setName;document.getElementById('sp-type').value=type;document.querySelectorAll('#sealed-modal .type-pill').forEach(b=>b.classList.remove('active'));const pill=document.querySelector(`#sealed-modal .type-pill[data-val="${type}"]`);if(pill)pill.classList.add('active');updateSealedPreview();}
 
 // ═══ CARD CRUD ═══
-function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));selectVariant('',document.querySelector('#variant-pills .var-pill[data-val=""]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
+function openAddModal(forceGraded){editingId=null;window._pendingWishRemoval=null;document.getElementById('modal-title').textContent='Add Card';['f-name','f-set','f-num','f-cardid','f-grade','f-cert','f-paid','f-source','f-notes','f-img'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-qty').value=1;document.getElementById('cert-msg').innerHTML='';window._pendingRarity='';window._pendingLang=null;const t=forceGraded?'graded':'standard';selectType(t,document.querySelector(`.type-pill[data-val="${t}"]`));selectCond('NM',document.querySelector('.cond-pill[data-val="NM"]'));document.getElementById('f-edition').value='unlimited';selectEdition('unlimited',document.querySelector('#edition-section .ed-pill[data-val="unlimited"]'));selectVariant('',document.querySelector('#variant-pills .var-pill[data-val=""]'));refreshEditionSection();updateAddPreview();openModal('add-modal');}
 function editCard(id){const card=collection.find(x=>x.id===id);if(!card)return;editingId=id;document.getElementById('modal-title').textContent='Edit Card';document.getElementById('f-name').value=card.name||'';document.getElementById('f-set').value=card.set||'';document.getElementById('f-num').value=card.num||'';document.getElementById('f-cardid').value=card.cardId||'';document.getElementById('f-cert').value=card.cert||'';document.getElementById('f-qty').value=card.qty||1;document.getElementById('f-paid').value=card.paid||'';document.getElementById('f-source').value=card.source||'';document.getElementById('f-notes').value=card.notes||'';document.getElementById('f-img').value=card.img||'';document.getElementById('cert-msg').innerHTML='';window._pendingRarity=card.rarity||'';const tP=document.querySelector(`.type-pill[data-val="${card.type||'standard'}"]`);if(tP)selectType(card.type||'standard',tP);const cP=document.querySelector(`.cond-pill[data-val="${card.cond||'NM'}"]`);if(cP)selectCond(card.cond||'NM',cP);if(card.type==='graded'&&card.grade){const parts=card.grade.match(/^(\w+)\s+(.+)$/);if(parts){document.getElementById('f-grader').value=parts[1];document.getElementById('f-grade-sel').value=parts[2];}document.getElementById('f-grade').value=card.grade;}const _ed=card.edition||'unlimited';document.getElementById('f-edition').value=_ed;refreshEditionSection();const _curEd=document.getElementById('f-edition').value;const _eP=document.querySelector(`#edition-section .ed-pill[data-val="${_curEd}"]`);if(_eP)selectEdition(_curEd,_eP);const _v=card.variant||'';const _vP=document.querySelector(`#variant-pills .var-pill[data-val="${_v}"]`);if(_vP)selectVariant(_v,_vP);updateAddPreview();openModal('add-modal');}
 function selectVariant(v,btn){document.getElementById('f-variant').value=v;document.querySelectorAll('#variant-pills .var-pill').forEach(p=>p.classList.toggle('active',p===btn));updateAddPreview();}
-function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',variant:document.getElementById('f-variant').value||'',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId){collection=collection.map(c=>c.id===editingId?data:c);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'edit',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:null,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card updated','green');}else{collection.push(data);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card added','green');}}
+function saveCard(){const name=document.getElementById('f-name').value.trim();if(!name){toast('Card name required','red');return;}const _t=document.getElementById('f-type').value;const data={id:editingId||newId('c'),name,set:document.getElementById('f-set').value.trim(),num:document.getElementById('f-num').value.trim(),cardId:document.getElementById('f-cardid').value.trim(),type:_t,cond:document.getElementById('f-cond').value,edition:document.getElementById('f-edition').value||'unlimited',variant:document.getElementById('f-variant').value||'',grade:document.getElementById('f-grade').value.trim(),cert:document.getElementById('f-cert').value.trim(),qty:parseInt(document.getElementById('f-qty').value)||1,paid:document.getElementById('f-paid').value,source:document.getElementById('f-source').value,notes:document.getElementById('f-notes').value.trim(),img:document.getElementById('f-img').value.trim(),rarity:window._pendingRarity||(editingId?(collection.find(c=>c.id===editingId)||{}).rarity:'')||'',added:editingId?(collection.find(c=>c.id===editingId)||{}).added:new Date().toISOString()};if(window._pendingLang){data.lang=window._pendingLang;window._pendingLang=null;}else if(editingId){const _pc=collection.find(c=>c.id===editingId);if(_pc&&_pc.lang)data.lang=_pc.lang;}if((data.grade&&data.grade.trim())||(data.cert&&data.cert.trim())){data.type='graded';}delete pcache[cacheKey(data)];idbDelete(cacheKey(data));if(editingId){collection=collection.map(c=>c.id===editingId?data:c);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'edit',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:null,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card updated','green');}else{collection.push(data);if(window._pendingWishRemoval){wishlist=wishlist.filter(x=>x.id!==window._pendingWishRemoval);}window._pendingWishRemoval=null;save();saveHoldingToDatabase(data);saveTransactionToDatabase({client_id:data.id,txn_type:'add',card_name:data.name,quantity:parseInt(data.qty,10)||1,unit_price:data.paid,cost_basis:data.paid,source:data.source||null,occurred_at:data.added});closeModal('add-modal');renderAll();toast('Card added','green');}}
 function openSoldHistory(){
   renderSoldHistory();
   openModal('sold-history-modal');
@@ -9442,6 +9449,7 @@ function rerunTabSearch(){
 function onTabSearch(val){
   clearTimeout(_tabTimer);
   document.getElementById('tab-search-clear').style.display = val ? '' : 'none';
+  if (window._searchLang === 'JP') { jpOnSearch(val); return; }   // JP mode (2026-07)
   if(!val.trim()){ clearTabSearch(); return; }
   // Don't fire until user has typed at least 3 characters
   if(val.trim().length < 3){
@@ -9974,7 +9982,236 @@ function renderSetCardsGrid(cards) {
   }).join('');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// JAPANESE SEARCH & BROWSE (2026-07) — mirrors the English flow using the
+// Worker's /jp-sets and /jp-cards routes (PokemonPriceTracker, PPT_TOKEN).
+// Reuses the SAME grids, tiles, and card classes as English; separate jp*
+// functions so the English path is untouched. Field names from PPT are
+// normalized defensively (shape can vary). Rollback: remove this block, the
+// #lang-toggle markup, and the six small hooks tagged "(2026-07)"/"JP mode".
+// ═══════════════════════════════════════════════════════════════════════
+window._searchLang = 'EN';
+let _jpSets = null, _jpSetCards = {}, _jpTimer = null;
+
+function setSearchLang(lang, btn){
+  window._searchLang = lang;
+  document.querySelectorAll('#lang-toggle .era-pill').forEach(b=>b.classList.toggle('active', b===btn));
+  // reset any active search
+  const inp = document.getElementById('tab-search-input');
+  if (inp) { inp.value=''; }
+  try { clearTabSearch(); } catch(_){}
+  const filters = document.getElementById('tab-search-filters');
+  const eras    = document.getElementById('set-era-filters');
+  if (lang === 'JP') {
+    if (filters) filters.style.display = 'none';          // EN set/rarity selects
+    if (eras)    eras.style.display    = 'none';          // EN era pills
+    if (inp) inp.placeholder = 'Search any Japanese card…';
+    jpShowSets();
+  } else {
+    if (filters) filters.style.display = 'flex';
+    if (eras)    eras.style.display    = 'flex';
+    if (inp) inp.placeholder = 'Search any Pokémon card across all sets…';
+    // restore English browser
+    const cGrid = document.getElementById('cs-set-cards-grid');
+    if (cGrid) { cGrid.style.display='none'; cGrid.innerHTML=''; }
+    const grid = document.getElementById('set-browser-grid');
+    if (grid) grid.style.display='';
+    const backBtn = document.getElementById('set-back-btn');
+    if (backBtn) backBtn.style.display='none';
+    document.getElementById('set-browser-set-name').style.display='none';
+    renderSetBrowser();
+  }
+}
+
+// ── defensive normalizers: PPT field names vary, so try every plausible key ──
+function jpNormSet(s){
+  return {
+    id:   String(s.id ?? s._id ?? s.setId ?? s.code ?? s.slug ?? s.name ?? ''),
+    name: String(s.name ?? s.setName ?? s.title ?? 'Unknown Set'),
+    total: s.total ?? s.cardCount ?? s.numCards ?? s.count ?? s.printedTotal ?? '',
+    date:  String(s.releaseDate ?? s.release_date ?? s.date ?? ''),
+    img:   String(s.image ?? s.imageUrl ?? s.logo ?? s.symbol ?? '')
+  };
+}
+function jpNormCard(c, setName){
+  const img = c.image ?? c.imageUrl ?? (c.images && (c.images.small || c.images.large)) ?? c.photo ?? '';
+  let price = null;
+  try {
+    price = c.marketPrice ?? c.price ??
+            (c.prices && (c.prices.market ?? (c.prices.raw && (c.prices.raw.market ?? c.prices.raw)) ?? null));
+    if (typeof price !== 'number') price = null;
+  } catch(_){ price = null; }
+  return {
+    id:    'jp-' + String(c.id ?? c._id ?? c.cardId ?? ((c.name||'') + '-' + (c.number||''))).replace(/[^a-zA-Z0-9_-]/g,'_'),
+    name:  String(c.name ?? c.cardName ?? 'Unknown'),
+    set:   String(c.setName ?? c.set ?? setName ?? ''),
+    num:   String(c.number ?? c.cardNumber ?? c.num ?? c.no ?? ''),
+    img:   String(img || ''),
+    rarity:String(c.rarity ?? ''),
+    price
+  };
+}
+
+async function jpEnsureSets(){
+  if (_jpSets && _jpSets.length) return _jpSets;
+  // localStorage cache (7d) so the sets list is instant across sessions
+  try {
+    const raw = localStorage.getItem('pkv2_jpsets');
+    if (raw) { const c = JSON.parse(raw); if (c && c.t && Date.now()-c.t < 7*86400000 && Array.isArray(c.data) && c.data.length) { _jpSets = c.data; return _jpSets; } }
+  } catch(_){}
+  const r = await fetch(`${EBAY_WORKER}/jp-sets`);
+  const j = await r.json();
+  if (j && j.error) throw new Error(String(j.error));
+  const arr = Array.isArray(j.data) ? j.data : [];
+  _jpSets = arr.map(jpNormSet).filter(s => s.name && s.name !== 'Unknown Set');
+  // newest first when dates exist
+  _jpSets.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  try { localStorage.setItem('pkv2_jpsets', JSON.stringify({t:Date.now(), data:_jpSets})); } catch(_){}
+  return _jpSets;
+}
+
+async function jpShowSets(){
+  const grid  = document.getElementById('set-browser-grid');
+  const cGrid = document.getElementById('cs-set-cards-grid');
+  const load  = document.getElementById('cs-set-cards-loading');
+  const backBtn = document.getElementById('set-back-btn');
+  if (cGrid) { cGrid.style.display='none'; cGrid.innerHTML=''; }
+  if (load) load.style.display='none';
+  if (backBtn) backBtn.style.display='none';
+  document.getElementById('set-browser-set-name').style.display='none';
+  document.getElementById('set-browser-all-sets').textContent = 'ALL SETS · JAPANESE';
+  grid.style.display='';
+  grid.innerHTML = '<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--muted);">Loading Japanese sets…</div>';
+  try {
+    const sets = await jpEnsureSets();
+    if (!sets.length) { grid.innerHTML = '<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--muted);">No Japanese sets returned. <a href="#" onclick="_jpSets=null;localStorage.removeItem(\'pkv2_jpsets\');jpShowSets();return false;" style="color:var(--gold);">Retry</a></div>'; return; }
+    document.getElementById('set-browser-count').textContent = sets.length + ' sets';
+    window._jpSetMap = {};
+    grid.innerHTML = sets.map((s,i) => {
+      const key = 'jset_' + i;
+      window._jpSetMap[key] = s;
+      const year = (s.date||'').slice(0,4);
+      return `<div class="set-tile" onclick="jpBrowseSet('${key}')">
+        <div class="set-tile-logo">${s.img ? `<img src="${s.img}" alt="" loading="lazy">` : '<div class="set-tile-logo-ph">🇯🇵</div>'}</div>
+        <div class="set-tile-body">
+          <div class="set-tile-name">${s.name}</div>
+          <div class="set-tile-meta"><span>${year||'JP'}</span><span>${s.total ? s.total+' cards' : ''}</span></div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    const isToken = /PPT_TOKEN/i.test(e.message||'');
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--red);line-height:1.6;">
+      ${isToken
+        ? 'Japanese data needs the <b>PPT_TOKEN</b> secret (PokemonPriceTracker) on the Cloudflare Worker.<br><span style="color:var(--muted);">Dashboard → mytcgledger-ebay → Settings → Variables and Secrets → add PPT_TOKEN.</span>'
+        : 'Failed to load Japanese sets — ' + (e.message||'network error')}
+      <br><a href="#" onclick="jpShowSets();return false;" style="color:var(--gold);">Retry</a></div>`;
+  }
+}
+
+async function jpBrowseSet(key){
+  const s = (window._jpSetMap||{})[key]; if (!s) return;
+  const grid  = document.getElementById('set-browser-grid');
+  const cGrid = document.getElementById('cs-set-cards-grid');
+  const load  = document.getElementById('cs-set-cards-loading');
+  document.getElementById('set-browser-set-label').textContent = s.name;
+  document.getElementById('set-browser-set-name').style.display='inline-flex';
+  const backBtn = document.getElementById('set-back-btn');
+  if (backBtn) backBtn.style.display='inline-flex';
+  grid.style.display='none'; cGrid.style.display='none'; if (load) load.style.display='';
+  try {
+    let cards = _jpSetCards[s.id];
+    if (!cards) {
+      // try set id first, then set name (PPT accepts either depending on data)
+      let j = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.id)}&limit=60`)).json();
+      let arr = (j && Array.isArray(j.data)) ? j.data : [];
+      if (!arr.length && s.name && s.name !== s.id) {
+        j = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.name)}&limit=60`)).json();
+        arr = (j && Array.isArray(j.data)) ? j.data : [];
+      }
+      if (j && j.error && !arr.length) throw new Error(String(j.error));
+      cards = arr.map(c => jpNormCard(c, s.name));
+      _jpSetCards[s.id] = cards;
+    }
+    if (load) load.style.display='none';
+    document.getElementById('set-browser-count').textContent = cards.length + ' cards';
+    cGrid.innerHTML = `
+      <div class="set-cards-header">
+        ${s.img ? `<img src="${s.img}" alt="">` : ''}
+        <div>
+          <div style="font-size:15px;font-weight:700;">${s.name} <span style="font-family:var(--mono);font-size:10px;color:var(--gold);">JP</span></div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${cards.length} cards${cards.length>=60?' · first 60 shown — use search for more':''}</div>
+        </div>
+      </div>
+      <div class="cs-grid" id="jp-cards-inner" style="max-height:none;padding:0;"></div>`;
+    cGrid.style.display='';
+    jpRenderCardsInto('jp-cards-inner', cards);
+  } catch(e) {
+    if (load) load.style.display='none';
+    cGrid.style.display='';
+    cGrid.innerHTML = `<div style="padding:20px;font-size:12px;color:var(--red);">Failed to load set — ${e.message||'network error'} <a href="#" onclick="delete _jpSetCards['${s.id}'];jpBrowseSet('${key}');return false;" style="color:var(--gold);">Retry</a></div>`;
+  }
+}
+
+function jpRenderCardsInto(innerId, cards){
+  const inner = document.getElementById(innerId); if (!inner) return;
+  window._jpPick = window._jpPick || {};
+  inner.innerHTML = cards.map((c,i) => {
+    const key = innerId + '_' + i;
+    window._jpPick[key] = c;
+    const inVault = collection.some(x => x.name===c.name && x.num===c.num && (x.set===c.set || (x.lang==='JP' && x.name===c.name)));
+    return `<div class="cs-card" onclick="jpPickCard('${key}')">
+      <div class="cs-img-wrap">${c.img ? `<img src="${c.img}" alt="" loading="lazy">` : '<div class="cs-img-ph">🇯🇵</div>'}</div>
+      <div class="cs-body">
+        <div class="cs-set-pill">#${c.num || '?'}</div>
+        <div class="cs-name">${c.name}</div>
+        <div class="cs-set">${c.rarity || c.set || ''}</div>
+        ${c.price != null ? `<div class="cs-price">$${(+c.price).toFixed(2)}</div>` : '<div class="cs-price" style="color:var(--muted);">—</div>'}
+      </div>
+      <button class="cs-add" title="${inVault?'In vault':'Add to vault'}" style="${inVault?'background:var(--green);opacity:1;':''}"
+        onclick="event.stopPropagation();jpPickCard('${key}')">${inVault?'✓':'+'}</button>
+    </div>`;
+  }).join('') || '<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--muted);">No cards found.</div>';
+}
+
+function jpPickCard(key){
+  const c = (window._jpPick||{})[key]; if (!c) return;
+  window._pendingLang = 'JP';   // saveCard persists lang:'JP' → pricing adds "Japanese" to eBay queries
+  quickAdd({ id:'', name:c.name, set:c.set, num:c.num, img:c.img, rarity:c.rarity });
+}
+
+function jpOnSearch(val){
+  clearTimeout(_jpTimer);
+  const q = String(val||'').trim();
+  const cGrid = document.getElementById('cs-set-cards-grid');
+  const grid  = document.getElementById('set-browser-grid');
+  const load  = document.getElementById('cs-set-cards-loading');
+  if (!q) { jpShowSets(); return; }
+  _jpTimer = setTimeout(async () => {
+    grid.style.display='none'; cGrid.style.display='none'; if (load) load.style.display='';
+    document.getElementById('set-browser-set-label').textContent = 'Search: ' + q;
+    document.getElementById('set-browser-set-name').style.display='inline-flex';
+    const backBtn = document.getElementById('set-back-btn');
+    if (backBtn) backBtn.style.display='inline-flex';
+    try {
+      const j = await (await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(q)}&limit=40`)).json();
+      if (j && j.error && !(Array.isArray(j.data) && j.data.length)) throw new Error(String(j.error));
+      const cards = (Array.isArray(j.data)?j.data:[]).map(c => jpNormCard(c, ''));
+      if (load) load.style.display='none';
+      document.getElementById('set-browser-count').textContent = cards.length + ' results';
+      cGrid.innerHTML = `<div class="cs-grid" id="jp-search-inner" style="max-height:none;padding:0;"></div>`;
+      cGrid.style.display='';
+      jpRenderCardsInto('jp-search-inner', cards);
+    } catch(e) {
+      if (load) load.style.display='none';
+      cGrid.style.display='';
+      cGrid.innerHTML = `<div style="padding:20px;font-size:12px;color:var(--red);">Japanese search failed — ${e.message||'network error'}</div>`;
+    }
+  }, 350);
+}
+
 function closeBrowseSet() {
+  if (window._searchLang === 'JP') { jpShowSets(); return; }   // JP mode (2026-07)
   _browseSetId = null;
   window._browseSetCards = [];
   // Show sets grid + era filters
