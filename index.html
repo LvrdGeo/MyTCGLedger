@@ -10025,31 +10025,69 @@ function setSearchLang(lang, btn){
 
 // ── defensive normalizers: PPT field names vary, so try every plausible key ──
 function jpNormSet(s){
+  // TCGdex: cardCount is an OBJECT {total, official}; logo/symbol are extension-less
+  // asset URLs (append .png/.webp). Legacy PPT keys kept as fallbacks.
+  let total = '';
+  const cc = s.cardCount;
+  if (cc && typeof cc === 'object') total = cc.total ?? cc.official ?? '';
+  else total = cc ?? s.total ?? s.numCards ?? s.count ?? s.printedTotal ?? '';
+  const logo = s.logo ?? s.image ?? s.imageUrl ?? s.symbol ?? '';
   return {
     id:   String(s.id ?? s._id ?? s.setId ?? s.code ?? s.slug ?? s.name ?? ''),
     name: String(s.name ?? s.setName ?? s.title ?? 'Unknown Set'),
-    total: s.total ?? s.cardCount ?? s.numCards ?? s.count ?? s.printedTotal ?? '',
+    total: total === '' ? '' : Number(total) || '',
     date:  String(s.releaseDate ?? s.release_date ?? s.date ?? ''),
-    img:   String(s.image ?? s.imageUrl ?? s.logo ?? s.symbol ?? '')
+    img:   logo ? jpAsset(String(logo), 'logo') : ''
   };
 }
+// TCGdex asset URLs carry NO extension — you append quality+format yourself.
+// Cards: {url}/low.webp | {url}/high.webp   ·   Logos/symbols: {url}.webp
+function jpAsset(url, kind, quality){
+  if (!url) return '';
+  if (/\.(png|jpg|jpeg|webp)$/i.test(url)) return url;   // already complete (PPT legacy)
+  if (kind === 'logo' || kind === 'symbol') return url + '.webp';
+  return url + '/' + (quality || 'low') + '.webp';
+}
 function jpNormCard(c, setName){
-  const img = c.image ?? c.imageUrl ?? (c.images && (c.images.small || c.images.large)) ?? c.photo ?? '';
+  // TCGdex card brief: {id, localId, name, image}. `localId` is the printed card
+  // number; `image` has NO extension. TCGdex carries no prices (it's a catalog, not a
+  // price feed) — pricing comes from eBay via the Worker, same as English cards.
+  const rawImg = c.image ?? c.imageUrl ?? (c.images && (c.images.small || c.images.large)) ?? c.photo ?? '';
   let price = null;
   try {
     price = c.marketPrice ?? c.price ??
             (c.prices && (c.prices.market ?? (c.prices.raw && (c.prices.raw.market ?? c.prices.raw)) ?? null));
     if (typeof price !== 'number') price = null;
   } catch(_){ price = null; }
+  const num = String(c.localId ?? c.number ?? c.cardNumber ?? c.num ?? c.no ?? '');
   return {
-    id:    'jp-' + String(c.id ?? c._id ?? c.cardId ?? ((c.name||'') + '-' + (c.number||''))).replace(/[^a-zA-Z0-9_-]/g,'_'),
+    id:    'jp-' + String(c.id ?? c._id ?? c.cardId ?? ((c.name||'') + '-' + num)).replace(/[^a-zA-Z0-9_-]/g,'_'),
     name:  String(c.name ?? c.cardName ?? 'Unknown'),
     set:   String(c.setName ?? c.set ?? setName ?? ''),
-    num:   String(c.number ?? c.cardNumber ?? c.num ?? c.no ?? ''),
-    img:   String(img || ''),
+    num,
+    img:     rawImg ? jpAsset(String(rawImg), 'card', 'low')  : '',   // grid thumb
+    imgHigh: rawImg ? jpAsset(String(rawImg), 'card', 'high') : '',   // saved to collection
     rarity:String(c.rarity ?? ''),
     price
   };
+}
+
+// 7-day persistent cache for JP payloads — protects the free tier's request quota.
+function jpCacheGet(key){
+  try { const raw = localStorage.getItem(key); if(!raw) return null;
+    const c = JSON.parse(raw);
+    if (c && c.t && Date.now()-c.t < 7*86400000 && Array.isArray(c.data) && c.data.length) return c.data;
+  } catch(_){} return null;
+}
+function jpCacheSet(key, data){
+  try { localStorage.setItem(key, JSON.stringify({t:Date.now(), data})); } catch(_){}
+}
+// Human-readable PPT errors — 429 = free-tier quota exhausted, not a bug.
+function jpErrMsg(e){
+  const m = String((e && e.message) || e || '');
+  if (/429/.test(m)) return 'Upstream rate limit — please try again in a moment.';
+  if (/404/.test(m)) return 'That set has no Japanese card data in the catalog yet.';
+  return 'Failed to load — ' + (m || 'network error') + '<br><span style="color:var(--muted);">Japanese data comes from TCGdex (free, no key).</span>';
 }
 
 async function jpEnsureSets(){
@@ -10120,19 +10158,16 @@ async function jpBrowseSet(key){
   if (backBtn) backBtn.style.display='inline-flex';
   grid.style.display='none'; cGrid.style.display='none'; if (load) load.style.display='';
   try {
-    let cards = _jpSetCards[s.id];
+    let cards = _jpSetCards[s.id] || jpCacheGet('pkv2_jpcards_' + s.id);
     if (!cards) {
-      // try set id first, then set name (PPT accepts either depending on data)
-      let j = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.id)}&limit=60`)).json();
-      let arr = (j && Array.isArray(j.data)) ? j.data : [];
-      if (!arr.length && s.name && s.name !== s.id) {
-        j = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.name)}&limit=60`)).json();
-        arr = (j && Array.isArray(j.data)) ? j.data : [];
-      }
+      // ONE call per set (v22: the old id-then-name retry double-spent the rate limit).
+      const j = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.id)}&limit=300`)).json();
+      const arr = (j && Array.isArray(j.data)) ? j.data : [];
       if (j && j.error && !arr.length) throw new Error(String(j.error));
-      cards = arr.map(c => jpNormCard(c, s.name));
+      cards = arr.map(c => jpNormCard(c, j.setName || s.name));
       _jpSetCards[s.id] = cards;
-    }
+      jpCacheSet('pkv2_jpcards_' + s.id, cards);   // 7d persistent → re-opening costs 0 API calls
+    } else { _jpSetCards[s.id] = cards; }
     if (load) load.style.display='none';
     document.getElementById('set-browser-count').textContent = cards.length + ' cards';
     cGrid.innerHTML = `
@@ -10140,7 +10175,7 @@ async function jpBrowseSet(key){
         ${s.img ? `<img src="${s.img}" alt="">` : ''}
         <div>
           <div style="font-size:15px;font-weight:700;">${s.name} <span style="font-family:var(--mono);font-size:10px;color:var(--gold);">JP</span></div>
-          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${cards.length} cards${cards.length>=60?' · first 60 shown — use search for more':''}</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${cards.length} cards</div>
         </div>
       </div>
       <div class="cs-grid" id="jp-cards-inner" style="max-height:none;padding:0;"></div>`;
@@ -10149,7 +10184,7 @@ async function jpBrowseSet(key){
   } catch(e) {
     if (load) load.style.display='none';
     cGrid.style.display='';
-    cGrid.innerHTML = `<div style="padding:20px;font-size:12px;color:var(--red);">Failed to load set — ${e.message||'network error'} <a href="#" onclick="delete _jpSetCards['${s.id}'];jpBrowseSet('${key}');return false;" style="color:var(--gold);">Retry</a></div>`;
+    cGrid.innerHTML = `<div style="padding:20px;font-size:12px;color:var(--red);line-height:1.6;">${jpErrMsg(e)} <a href="#" onclick="delete _jpSetCards['${s.id}'];jpBrowseSet('${key}');return false;" style="color:var(--gold);">Retry</a></div>`;
   }
 }
 
@@ -10177,7 +10212,7 @@ function jpRenderCardsInto(innerId, cards){
 function jpPickCard(key){
   const c = (window._jpPick||{})[key]; if (!c) return;
   window._pendingLang = 'JP';   // saveCard persists lang:'JP' → pricing adds "Japanese" to eBay queries
-  quickAdd({ id:'', name:c.name, set:c.set, num:c.num, img:c.img, rarity:c.rarity });
+  quickAdd({ id:'', name:c.name, set:c.set, num:c.num, img:(c.imgHigh||c.img), rarity:c.rarity });
 }
 
 function jpOnSearch(val){
@@ -10205,7 +10240,7 @@ function jpOnSearch(val){
     } catch(e) {
       if (load) load.style.display='none';
       cGrid.style.display='';
-      cGrid.innerHTML = `<div style="padding:20px;font-size:12px;color:var(--red);">Japanese search failed — ${e.message||'network error'}</div>`;
+      cGrid.innerHTML = `<div style="padding:20px;font-size:12px;color:var(--red);line-height:1.6;">${jpErrMsg(e)}</div>`;
     }
   }, 350);
 }
