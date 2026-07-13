@@ -9990,6 +9990,25 @@ function renderSetCardsGrid(cards) {
 // normalized defensively (shape can vary). Rollback: remove this block, the
 // #lang-toggle markup, and the six small hooks tagged "(2026-07)"/"JP mode".
 // ═══════════════════════════════════════════════════════════════════════
+// Cache keys are VERSIONED by data source. Bumping JP_SRC invalidates every cached
+// payload from the previous source automatically — no manual clearing, ever. (v3 =
+// TCGdex; v1/v2 were PokemonPriceTracker and are purged on load.)
+const JP_SRC = 'v3tcgdex';
+const JP_SETS_KEY     = 'pkjp_' + JP_SRC + '_sets';
+const JP_CARDS_PREFIX = 'pkjp_' + JP_SRC + '_cards_';
+(function jpPurgeOldCaches(){
+  try {
+    const kill = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      // old PPT-era keys, and any versioned key that isn't the current source
+      if (k === 'pkv2_jpsets' || k.startsWith('pkv2_jpcards_') ||
+          (k.startsWith('pkjp_') && !k.startsWith('pkjp_' + JP_SRC + '_'))) kill.push(k);
+    }
+    kill.forEach(k => { try { localStorage.removeItem(k); } catch(_){} });
+  } catch(_){}
+})();
 window._searchLang = 'EN';
 let _jpSets = null, _jpSetCards = {}, _jpTimer = null;
 
@@ -10094,17 +10113,18 @@ async function jpEnsureSets(){
   if (_jpSets && _jpSets.length) return _jpSets;
   // localStorage cache (7d) so the sets list is instant across sessions
   try {
-    const raw = localStorage.getItem('pkv2_jpsets');
+    const raw = localStorage.getItem(JP_SETS_KEY);
     if (raw) { const c = JSON.parse(raw); if (c && c.t && Date.now()-c.t < 7*86400000 && Array.isArray(c.data) && c.data.length) { _jpSets = c.data; return _jpSets; } }
   } catch(_){}
   const r = await fetch(`${EBAY_WORKER}/jp-sets`);
   const j = await r.json();
   if (j && j.error) throw new Error(String(j.error) + (j.body ? ' \u2014 ' + String(j.body).slice(0,160) : ''));
   const arr = Array.isArray(j.data) ? j.data : [];
+  window._jpSource = j.source || '';
   _jpSets = arr.map(jpNormSet).filter(s => s.name && s.name !== 'Unknown Set');
   // newest first when dates exist
   _jpSets.sort((a,b) => (b.date||'').localeCompare(a.date||''));
-  try { localStorage.setItem('pkv2_jpsets', JSON.stringify({t:Date.now(), data:_jpSets})); } catch(_){}
+  try { localStorage.setItem(JP_SETS_KEY, JSON.stringify({t:Date.now(), data:_jpSets})); } catch(_){}
   return _jpSets;
 }
 
@@ -10123,7 +10143,7 @@ async function jpShowSets(){
   try {
     const sets = await jpEnsureSets();
     if (!sets.length) { grid.innerHTML = '<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--muted);">No Japanese sets returned. <a href="#" onclick="_jpSets=null;localStorage.removeItem(\'pkv2_jpsets\');jpShowSets();return false;" style="color:var(--gold);">Retry</a></div>'; return; }
-    document.getElementById('set-browser-count').textContent = sets.length + ' sets';
+    document.getElementById('set-browser-count').textContent = sets.length + ' sets' + (window._jpSource ? ' \u00b7 ' + window._jpSource : '');
     window._jpSetMap = {};
     grid.innerHTML = sets.map((s,i) => {
       const key = 'jset_' + i;
@@ -10158,7 +10178,7 @@ async function jpBrowseSet(key){
   if (backBtn) backBtn.style.display='inline-flex';
   grid.style.display='none'; cGrid.style.display='none'; if (load) load.style.display='';
   try {
-    let cards = _jpSetCards[s.id] || jpCacheGet('pkv2_jpcards_' + s.id);
+    let cards = _jpSetCards[s.id] || jpCacheGet(JP_CARDS_PREFIX + s.id);
     if (!cards) {
       // ONE call per set (v22: the old id-then-name retry double-spent the rate limit).
       const j = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.id)}&limit=300`)).json();
@@ -10166,7 +10186,7 @@ async function jpBrowseSet(key){
       if (j && j.error && !arr.length) throw new Error(String(j.error));
       cards = arr.map(c => jpNormCard(c, j.setName || s.name));
       _jpSetCards[s.id] = cards;
-      jpCacheSet('pkv2_jpcards_' + s.id, cards);   // 7d persistent → re-opening costs 0 API calls
+      jpCacheSet(JP_CARDS_PREFIX + s.id, cards);   // 7d persistent → re-opening costs 0 API calls
     } else { _jpSetCards[s.id] = cards; }
     if (load) load.style.display='none';
     document.getElementById('set-browser-count').textContent = cards.length + ' cards';
