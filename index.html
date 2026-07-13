@@ -10061,7 +10061,7 @@ async function jpEnsureSets(){
   } catch(_){}
   const r = await fetch(`${EBAY_WORKER}/jp-sets`);
   const j = await r.json();
-  if (j && j.error) throw new Error(String(j.error));
+  if (j && j.error) throw new Error(String(j.error) + (j.body ? ' \u2014 ' + String(j.body).slice(0,160) : ''));
   const arr = Array.isArray(j.data) ? j.data : [];
   _jpSets = arr.map(jpNormSet).filter(s => s.name && s.name !== 'Unknown Set');
   // newest first when dates exist
