@@ -703,6 +703,10 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 /* (B) FAB press feedback (mobile only element; -webkit-tap-highlight already off). */
 .mob-fab{transition:transform .1s var(--ease),box-shadow .15s var(--ease)}
 .mob-fab:active{transform:scale(.92)}
+/* Japanese set tiles: clean lettermark when a set has no logo/symbol art, plus the
+   English-equivalent subtitle. Additive — remove this block to revert. */
+.jp-mark{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:44px;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--muted2);background:linear-gradient(135deg,var(--bg3),var(--bg2));border-radius:var(--r)}
+.jp-en{font-size:11px;color:var(--muted2);line-height:1.3;margin-top:1px}
 /* ═══════════════════════ END · MOBILE INTERACTION QA ═══════════════════════ */
 </style>
 <!-- Supabase (Stage 1: Auth) -->
@@ -9990,6 +9994,53 @@ function renderSetCardsGrid(cards) {
 // normalized defensively (shape can vary). Rollback: remove this block, the
 // #lang-toggle markup, and the six small hooks tagged "(2026-07)"/"JP mode".
 // ═══════════════════════════════════════════════════════════════════════
+// ═══ Japanese set → English equivalent (display only) ═══════════════════════
+// Keyed on TCGdex's stable set IDs. This NEVER affects identity or pricing — the
+// Japanese name stays the source of truth for eBay comps (sellers list JP cards
+// under their Japanese names). This is purely a human-readable subtitle.
+// Unmapped sets simply show no subtitle. Add rows freely.
+const JP_SET_EN = {
+  // ── Scarlet & Violet era ──
+  'SV1a':'Triplet Beat','SV1S':'Scarlet ex','SV1V':'Violet ex','SV2a':'Pokémon 151',
+  'SV2D':'Clay Burst','SV2P':'Snow Hazard','SV3':'Ruler of the Black Flame',
+  'SV3a':'Raging Surf','SV4a':'Shiny Treasure ex','SV4K':'Ancient Roar','SV4M':'Future Flash',
+  'SV5a':'Crimson Haze','SV5K':'Wild Force','SV5M':'Cyber Judge','SV6':'Transformation Mask',
+  'SV6a':'Night Wanderer','SV7':'Stellar Miracle','SV7a':'Paradise Dragona',
+  'SV8':'Super Electric Breaker','SV8a':'Terastal Fest ex','SV9':'Battle Partners',
+  'SV9a':'Heat Wave Arena','SV10':'Glory of Team Rocket','SV11B':'Black Bolt','SV11W':'White Flare',
+  // ── Sword & Shield era ──
+  'S1H':'Shield','S1W':'Sword','S1a':'VMAX Rising','S2':'Rebellion Crash','S2a':'Explosive Walker',
+  'S3':'Infinity Zone','S3a':'Legendary Heartbeat','S4':'Astonishing Volt Tackle',
+  'S4a':'Shiny Star V','S5I':'Single Strike Master','S5R':'Rapid Strike Master',
+  'S6H':'Silver Lance','S6K':'Jet-Black Spirit','S6a':'Eevee Heroes','S7D':'Skyscraping Perfection',
+  'S7R':'Blue Sky Stream','S8':'Fusion Arts','S8a':'25th Anniversary Collection',
+  'S8b':'VMAX Climax','S9':'Star Birth','S9a':'Battle Region','S10D':'Time Gazer',
+  'S10P':'Space Juggler','S10a':'Dark Phantasma','S11':'Lost Abyss','S11a':'Incandescent Arcana',
+  'S12':'Paradigm Trigger','S12a':'VSTAR Universe',
+  // ── Sun & Moon era ──
+  'SM1S':'Collection Sun','SM1M':'Collection Moon','SM2K':'Islands Await You',
+  'SM2L':'Alolan Moonlight','SM3H':'Darkness that Consumes Light','SM3N':'To Have Seen the Battle Rainbow',
+  'SM4A':'Ultradimensional Beast','SM4S':'Awakened Heroes','SM5M':'Ultra Moon','SM5S':'Ultra Sun',
+  'SM6':'Forbidden Light','SM6a':'Dragon Storm','SM6b':'Champion Road','SM7':'Charisma of the Wrecked Sky',
+  'SM7a':'Thunderclap Spark','SM7b':'Fairy Rise','SM8':'Explosive Impact','SM8a':'Dark Order',
+  'SM8b':'GX Ultra Shiny','SM9':'Tag Bolt','SM9a':'Night Unison','SM9b':'Full Metal Wall',
+  'SM10':'Double Blaze','SM10a':'GG End','SM10b':'Sky Legend','SM11':'Miracle Twin',
+  'SM11a':'Remix Bout','SM11b':'Dream League','SM12':'Alter Genesis','SM12a':'Tag Team GX All Stars',
+  // ── XY era ──
+  'XY1a':'Collection X','XY1b':'Collection Y','XY2':'Wild Blaze','XY3':'Rising Fist',
+  'XY4':'Phantom Gate','XY5a':'Gaia Volcano','XY5b':'Tidal Storm','XY6':'Emerald Break',
+  'XY7':'Bandit Ring','XY8a':'Blue Shock','XY8b':'Red Flash','XY9':'Rage of the Broken Heavens',
+  'XY10':'Awakening Psychic King','XY11a':'Explosive Fighter','XY11b':'Cruel Traitor',
+  // ── Older / classic ──
+  'PMCG1':'Base Set','PMCG2':'Jungle','PMCG3':'Fossil','PMCG4':'Team Rocket',
+  'PMCG5':'Leaders\' Stadium','PMCG6':'Challenge from the Darkness',
+  'neo1':'Neo Genesis','neo2':'Neo Discovery','neo3':'Neo Revelation','neo4':'Neo Destiny',
+  'E1':'Expedition Base Set','E2':'Town on No Map','E3':'Wind from the Sea',
+  'E4':'Split Earth','E5':'Mysterious Mountains',
+  'L1a':'HeartGold Collection','L1b':'SoulSilver Collection','L2':'Revived Legends',
+  'L3':'Clash at the Summit','LL':'Lost Link',
+};
+
 // Cache keys are VERSIONED by data source. Bumping JP_SRC invalidates every cached
 // payload from the previous source automatically — no manual clearing, ever. (v3 =
 // TCGdex; v1/v2 were PokemonPriceTracker and are purged on load.)
@@ -10050,13 +10101,17 @@ function jpNormSet(s){
   const cc = s.cardCount;
   if (cc && typeof cc === 'object') total = cc.total ?? cc.official ?? '';
   else total = cc ?? s.total ?? s.numCards ?? s.count ?? s.printedTotal ?? '';
-  const logo = s.logo ?? s.image ?? s.imageUrl ?? s.symbol ?? '';
+  const logo = s.logo ?? s.image ?? s.imageUrl ?? '';
+  const sym  = s.symbol ?? '';
+  const id   = String(s.id ?? s._id ?? s.setId ?? s.code ?? s.slug ?? s.name ?? '');
   return {
-    id:   String(s.id ?? s._id ?? s.setId ?? s.code ?? s.slug ?? s.name ?? ''),
+    id,
     name: String(s.name ?? s.setName ?? s.title ?? 'Unknown Set'),
+    en:   JP_SET_EN[id] || '',                       // English equivalent (see table)
     total: total === '' ? '' : Number(total) || '',
     date:  String(s.releaseDate ?? s.release_date ?? s.date ?? ''),
-    img:   logo ? jpAsset(String(logo), 'logo') : ''
+    img:   logo ? jpAsset(String(logo), 'logo') : '',   // banner (many old JP sets lack one)
+    sym:   sym  ? jpAsset(String(sym),  'symbol') : ''  // small icon — graceful fallback
   };
 }
 // TCGdex asset URLs carry NO extension — you append quality+format yourself.
@@ -10149,10 +10204,17 @@ async function jpShowSets(){
       const key = 'jset_' + i;
       window._jpSetMap[key] = s;
       const year = (s.date||'').slice(0,4);
+      // art: logo → symbol → clean lettermark (never a broken-image glyph)
+      const art = s.img
+        ? `<img src="${s.img}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'jp-mark',textContent:'${(s.id||'JP').slice(0,4)}'}))">`
+        : (s.sym
+            ? `<img src="${s.sym}" alt="" loading="lazy" style="max-height:38px;" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'jp-mark',textContent:'${(s.id||'JP').slice(0,4)}'}))">`
+            : `<div class="jp-mark">${(s.id||'JP').slice(0,4)}</div>`);
       return `<div class="set-tile" onclick="jpBrowseSet('${key}')">
-        <div class="set-tile-logo">${s.img ? `<img src="${s.img}" alt="" loading="lazy">` : '<div class="set-tile-logo-ph">🇯🇵</div>'}</div>
+        <div class="set-tile-logo">${art}</div>
         <div class="set-tile-body">
           <div class="set-tile-name">${s.name}</div>
+          ${s.en ? `<div class="jp-en">${s.en}</div>` : ''}
           <div class="set-tile-meta"><span>${year||'JP'}</span><span>${s.total ? s.total+' cards' : ''}</span></div>
         </div>
       </div>`;
@@ -10195,6 +10257,7 @@ async function jpBrowseSet(key){
         ${s.img ? `<img src="${s.img}" alt="">` : ''}
         <div>
           <div style="font-size:15px;font-weight:700;">${s.name} <span style="font-family:var(--mono);font-size:10px;color:var(--gold);">JP</span></div>
+          ${s.en ? `<div class="jp-en" style="margin:2px 0 3px;">${s.en}</div>` : ''}
           <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${cards.length} cards</div>
         </div>
       </div>
