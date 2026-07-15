@@ -10044,7 +10044,7 @@ const JP_SET_EN = {
 // Cache keys are VERSIONED by data source. Bumping JP_SRC invalidates every cached
 // payload from the previous source automatically — no manual clearing, ever. (v3 =
 // TCGdex; v1/v2 were PokemonPriceTracker and are purged on load.)
-const JP_SRC = 'v3tcgdex';
+const JP_SRC = 'v4tcgdex_en';
 const JP_SETS_KEY     = 'pkjp_' + JP_SRC + '_sets';
 const JP_CARDS_PREFIX = 'pkjp_' + JP_SRC + '_cards_';
 (function jpPurgeOldCaches(){
@@ -10137,6 +10137,8 @@ function jpNormCard(c, setName){
   return {
     id:    'jp-' + String(c.id ?? c._id ?? c.cardId ?? ((c.name||'') + '-' + num)).replace(/[^a-zA-Z0-9_-]/g,'_'),
     name:  String(c.name ?? c.cardName ?? 'Unknown'),
+    en:    '',                                     // filled from the EN locale twin
+
     set:   String(c.setName ?? c.set ?? setName ?? ''),
     num,
     img:     rawImg ? jpAsset(String(rawImg), 'card', 'low')  : '',   // grid thumb
@@ -10247,6 +10249,26 @@ async function jpBrowseSet(key){
       const arr = (j && Array.isArray(j.data)) ? j.data : [];
       if (j && j.error && !arr.length) throw new Error(String(j.error));
       cards = arr.map(c => jpNormCard(c, j.setName || s.name));
+      // Enrich from the SAME set in TCGdex's English locale: gives a readable English
+      // name and — critically — an image for vintage sets whose ja locale has none.
+      // Best-effort: any failure leaves the Japanese data exactly as-is.
+      try {
+        const je = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.id)}&limit=300&lang=en`)).json();
+        const en = (je && Array.isArray(je.data)) ? je.data : [];
+        if (en.length) {
+          const byNum = {};
+          en.forEach(c => { const k = String(c.localId ?? c.number ?? ''); if (k) byNum[k] = c; });
+          cards.forEach(c => {
+            const m = byNum[String(c.num)];
+            if (!m) return;
+            if (m.name && m.name !== c.name) c.en = String(m.name);
+            if (!c.img && m.image) {           // ja had no art → borrow the EN render
+              c.img     = jpAsset(String(m.image), 'card', 'low');
+              c.imgHigh = jpAsset(String(m.image), 'card', 'high');
+            }
+          });
+        }
+      } catch(_){}
       _jpSetCards[s.id] = cards;
       jpCacheSet(JP_CARDS_PREFIX + s.id, cards);   // 7d persistent → re-opening costs 0 API calls
     } else { _jpSetCards[s.id] = cards; }
@@ -10279,10 +10301,11 @@ function jpRenderCardsInto(innerId, cards){
     window._jpPick[key] = c;
     const inVault = collection.some(x => x.name===c.name && x.num===c.num && (x.set===c.set || (x.lang==='JP' && x.name===c.name)));
     return `<div class="cs-card" onclick="jpPickCard('${key}')">
-      <div class="cs-img-wrap">${c.img ? `<img src="${c.img}" alt="" loading="lazy">` : '<div class="cs-img-ph">🇯🇵</div>'}</div>
+      <div class="cs-img-wrap">${c.img ? `<img src="${c.img}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cs-img-ph',textContent:'\u{1F1EF}\u{1F1F5}'}))">` : '<div class="cs-img-ph">🇯🇵</div>'}</div>
       <div class="cs-body">
         <div class="cs-set-pill">#${c.num || '?'}</div>
         <div class="cs-name">${c.name}</div>
+        ${c.en ? `<div class="jp-en">${c.en}</div>` : ''}
         <div class="cs-set">${c.rarity || c.set || ''}</div>
         ${c.price != null ? `<div class="cs-price">$${(+c.price).toFixed(2)}</div>` : '<div class="cs-price" style="color:var(--muted);">—</div>'}
       </div>
@@ -10295,7 +10318,7 @@ function jpRenderCardsInto(innerId, cards){
 function jpPickCard(key){
   const c = (window._jpPick||{})[key]; if (!c) return;
   window._pendingLang = 'JP';   // saveCard persists lang:'JP' → pricing adds "Japanese" to eBay queries
-  quickAdd({ id:'', name:c.name, set:c.set, num:c.num, img:(c.imgHigh||c.img), rarity:c.rarity });
+  quickAdd({ id:'', name:(c.en || c.name), set:c.set, num:c.num, img:(c.imgHigh||c.img), rarity:c.rarity });
 }
 
 function jpOnSearch(val){
