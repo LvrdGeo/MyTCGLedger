@@ -1063,19 +1063,19 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
     <!-- Set Browser (shown when not searching) -->
     <div id="tab-search-empty">
       <!-- Set browser header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <div id="set-browser-breadcrumb" style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--muted);">
-          <span id="set-browser-all-sets" style="color:var(--text);font-weight:600;">ALL SETS</span>
-          <span id="set-browser-set-name" style="display:none;align-items:center;gap:6px;">
-            <span style="opacity:.4;">›</span>
-            <span id="set-browser-set-label" style="color:var(--gold);"></span>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:nowrap;">
+        <!-- Back button — shown inside a set; leads the row so it never gets crushed -->
+        <button id="set-back-btn" onclick="closeBrowseSet()" style="display:none;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:6px 12px;border-radius:20px;cursor:pointer;transition:all .15s;flex:0 0 auto;white-space:nowrap;-webkit-tap-highlight-color:transparent;" onmouseover="this.style.borderColor='var(--gold)'" onmouseout="this.style.borderColor='var(--border)'">
+          ← Back
+        </button>
+        <div id="set-browser-breadcrumb" style="display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--muted);min-width:0;flex:1 1 auto;overflow:hidden;">
+          <span id="set-browser-all-sets" style="color:var(--text);font-weight:600;white-space:nowrap;">ALL SETS</span>
+          <span id="set-browser-set-name" style="display:none;align-items:center;gap:6px;min-width:0;overflow:hidden;">
+            <span style="opacity:.4;flex:0 0 auto;">›</span>
+            <span id="set-browser-set-label" style="color:var(--gold);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
           </span>
         </div>
-        <!-- Back button — only shown when inside a set -->
-        <button id="set-back-btn" onclick="closeBrowseSet()" style="display:none;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:5px 12px;border-radius:20px;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--gold)'" onmouseout="this.style.borderColor='var(--border)'">
-          ← Back to Sets
-        </button>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);" id="set-browser-count"></div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);flex:0 0 auto;white-space:nowrap;" id="set-browser-count"></div>
       </div>
       <!-- Era filter pills -->
       <div id="set-era-filters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
@@ -10044,7 +10044,7 @@ const JP_SET_EN = {
 // Cache keys are VERSIONED by data source. Bumping JP_SRC invalidates every cached
 // payload from the previous source automatically — no manual clearing, ever. (v3 =
 // TCGdex; v1/v2 were PokemonPriceTracker and are purged on load.)
-const JP_SRC = 'v4tcgdex_en';
+const JP_SRC = 'v5tcgdex_img';
 const JP_SETS_KEY     = 'pkjp_' + JP_SRC + '_sets';
 const JP_CARDS_PREFIX = 'pkjp_' + JP_SRC + '_cards_';
 (function jpPurgeOldCaches(){
@@ -10249,24 +10249,45 @@ async function jpBrowseSet(key){
       const arr = (j && Array.isArray(j.data)) ? j.data : [];
       if (j && j.error && !arr.length) throw new Error(String(j.error));
       cards = arr.map(c => jpNormCard(c, j.setName || s.name));
+      // v25: build deterministic TCGdex asset URLs from serie+set+localId. The image
+      // URL is predictable (docs: assets.tcgdex.net/{lang}/{serie}/{set}/{num}/{q}.webp)
+      // so we DON'T need the API's `image` field — we construct EN + JP candidates and
+      // let the <img> onerror chain pick whichever actually exists.
+      const _serie = j.serie || '';
+      const _sid   = j.setId || s.id;
+      if (_serie && _sid) {
+        cards.forEach(c => {
+          if (!c.num) return;
+          const n = String(c.num).replace(/^0+/, '') || c.num;   // TCGdex uses unpadded ids
+          if (!c.img) {
+            c.img     = `https://assets.tcgdex.net/en/${_serie}/${_sid}/${n}/low.webp`;
+            c.imgHigh = `https://assets.tcgdex.net/en/${_serie}/${_sid}/${n}/high.webp`;
+          }
+          // JP-locale candidate as the onerror fallback (some art is JP-only)
+          c.imgAlt  = `https://assets.tcgdex.net/ja/${_serie}/${_sid}/${n}/low.webp`;
+        });
+      }
       // Enrich from the SAME set in TCGdex's English locale: gives a readable English
       // name and — critically — an image for vintage sets whose ja locale has none.
       // Best-effort: any failure leaves the Japanese data exactly as-is.
       try {
         const je = await (await fetch(`${EBAY_WORKER}/jp-cards?set=${encodeURIComponent(s.id)}&limit=300&lang=en`)).json();
         const en = (je && Array.isArray(je.data)) ? je.data : [];
+        const nk = v => String(v==null?'':v).replace(/^0+/,'').split('/')[0].trim().toLowerCase(); // normalize card number
         if (en.length) {
           const byNum = {};
-          en.forEach(c => { const k = String(c.localId ?? c.number ?? ''); if (k) byNum[k] = c; });
+          en.forEach(c => { const k = nk(c.localId ?? c.number); if (k) byNum[k] = c; });
+          let matched = 0, arted = 0;
           cards.forEach(c => {
-            const m = byNum[String(c.num)];
+            const m = byNum[nk(c.num)];
             if (!m) return;
+            matched++;
             if (m.name && m.name !== c.name) c.en = String(m.name);
-            if (!c.img && m.image) {           // ja had no art → borrow the EN render
-              c.img     = jpAsset(String(m.image), 'card', 'low');
-              c.imgHigh = jpAsset(String(m.image), 'card', 'high');
-            }
+            if (!c.img && m.image) { c.img = jpAsset(String(m.image),'card','low'); c.imgHigh = jpAsset(String(m.image),'card','high'); arted++; }
           });
+          window._jpEnrich = { set:s.id, enCount:en.length, matched, arted };   // diagnostic
+        } else {
+          window._jpEnrich = { set:s.id, enCount:0, note:'no EN data (worker may be pre-v24, or set has no EN release)' };
         }
       } catch(_){}
       _jpSetCards[s.id] = cards;
@@ -10301,7 +10322,7 @@ function jpRenderCardsInto(innerId, cards){
     window._jpPick[key] = c;
     const inVault = collection.some(x => x.name===c.name && x.num===c.num && (x.set===c.set || (x.lang==='JP' && x.name===c.name)));
     return `<div class="cs-card" onclick="jpPickCard('${key}')">
-      <div class="cs-img-wrap">${c.img ? `<img src="${c.img}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cs-img-ph',textContent:'\u{1F1EF}\u{1F1F5}'}))">` : '<div class="cs-img-ph">🇯🇵</div>'}</div>
+      <div class="cs-img-wrap">${c.img ? `<img src="${c.img}" alt="" loading="lazy" data-alt="${c.imgAlt||''}" onerror="jpImgFallback(this)">` : '<div class="cs-img-ph">🇯🇵</div>'}</div>
       <div class="cs-body">
         <div class="cs-set-pill">#${c.num || '?'}</div>
         <div class="cs-name">${c.name}</div>
@@ -10313,6 +10334,14 @@ function jpRenderCardsInto(innerId, cards){
         onclick="event.stopPropagation();jpPickCard('${key}')">${inVault?'✓':'+'}</button>
     </div>`;
   }).join('') || '<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--muted);">No cards found.</div>';
+}
+
+// Image fallback: first onerror tries the JP-locale asset; second gives the placeholder.
+function jpImgFallback(img){
+  const alt = img.getAttribute('data-alt');
+  if (alt && img.src.indexOf('/ja/') === -1) { img.removeAttribute('data-alt'); img.src = alt; return; }
+  const ph = document.createElement('div'); ph.className = 'cs-img-ph'; ph.textContent = '\u{1F1EF}\u{1F1F5}';
+  img.replaceWith(ph);
 }
 
 function jpPickCard(key){
