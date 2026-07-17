@@ -707,6 +707,10 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
    English-equivalent subtitle. Additive — remove this block to revert. */
 .jp-mark{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:44px;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--muted2);background:linear-gradient(135deg,var(--bg3),var(--bg2));border-radius:var(--r)}
 .jp-en{font-size:11px;color:var(--muted2);line-height:1.3;margin-top:1px}
+@media(max-width:768px){
+  /* breadcrumb set-label duplicates the big title below and crushes the Back row */
+  #set-browser-set-name{display:none!important}
+}
 /* ═══════════════════════ END · MOBILE INTERACTION QA ═══════════════════════ */
 </style>
 <!-- Supabase (Stage 1: Auth) -->
@@ -10194,7 +10198,7 @@ async function jpShowSets(){
   if (load) load.style.display='none';
   if (backBtn) backBtn.style.display='none';
   document.getElementById('set-browser-set-name').style.display='none';
-  document.getElementById('set-browser-all-sets').textContent = 'ALL SETS · JAPANESE';
+  document.getElementById('set-browser-all-sets').textContent = 'ALL SETS · JP';
   grid.style.display='';
   grid.innerHTML = '<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--muted);">Loading Japanese sets…</div>';
   try {
@@ -10328,7 +10332,7 @@ function jpRenderCardsInto(innerId, cards){
         <div class="cs-name">${c.name}</div>
         ${c.en ? `<div class="jp-en">${c.en}</div>` : ''}
         <div class="cs-set">${c.rarity || c.set || ''}</div>
-        ${c.price != null ? `<div class="cs-price">$${(+c.price).toFixed(2)}</div>` : '<div class="cs-price" style="color:var(--muted);">—</div>'}
+        ${c.price != null ? `<div class="cs-price">$${(+c.price).toFixed(2)}</div>` : '<div class="cs-price" style="color:var(--muted);font-size:9px;">priced on add</div>'}
       </div>
       <button class="cs-add" title="${inVault?'In vault':'Add to vault'}" style="${inVault?'background:var(--green);opacity:1;':''}"
         onclick="event.stopPropagation();jpPickCard('${key}')">${inVault?'✓':'+'}</button>
