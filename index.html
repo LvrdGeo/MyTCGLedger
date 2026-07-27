@@ -750,7 +750,38 @@ body.sheet-open .main{overflow:hidden!important}
 
 /* Respect reduced-motion for the smooth-scroll addition */
 @media (prefers-reduced-motion:reduce){ .main{scroll-behavior:auto} }
-/* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   PHASE 2.1 · FROSTED-GLASS MORE SHEET  (2026-07, additive)
+   Makes the More sheet translucent — the screen behind shows through, softened
+   by a blur, while text/icons stay fully crisp on top. Tiles get a subtle glass
+   fill instead of solid panels. Rollback: delete this block (banner → END).
+   ═══════════════════════════════════════════════════════════════════════ */
+.mob-more-sheet{
+  background:rgba(15,16,22,.62)!important;                 /* --bg2 @ ~62% */
+  -webkit-backdrop-filter:blur(22px) saturate(150%);
+  backdrop-filter:blur(22px) saturate(150%);
+  border-top:1px solid rgba(255,255,255,.10)!important;
+  box-shadow:0 -8px 40px rgba(0,0,0,.55)!important;
+}
+/* Tiles: faint glass fill so labels/icons read but the blur still shows behind */
+.mob-more-tile{
+  background:rgba(255,255,255,.05)!important;
+  border-color:rgba(255,255,255,.08)!important;
+  -webkit-backdrop-filter:blur(4px);
+  backdrop-filter:blur(4px);
+}
+.mob-more-tile:active{background:rgba(255,255,255,.10)!important;}
+/* Keep text/icons at full strength on the translucent surface */
+.mob-more-sheet .mob-more-tile span,
+.mob-more-sheet .mob-more-row{color:var(--text)!important;}
+.mob-more-sheet .mob-more-label{color:var(--muted2)!important;}
+.mob-more-sep{background:rgba(255,255,255,.09)!important;}
+/* Fallback: browsers without backdrop-filter get a more solid sheet so text stays legible */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .mob-more-sheet{background:rgba(15,16,22,.94)!important;}
+  .mob-more-tile{background:var(--bg3)!important;}
+}
+/* ═══════════════════════ END · FROSTED-GLASS MORE SHEET ═══════════════════════ *//* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
 </style>
 <!-- Supabase (Stage 1: Auth) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
