@@ -721,6 +721,36 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
   #set-browser-set-name{display:none!important}
 }
 /* ═══════════════════════ END · MOBILE INTERACTION QA ═══════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PHASE 2 · SCROLL BEHAVIOUR  (2026-07, additive)
+   The app had NO overscroll-behavior anywhere, so every scrollable area
+   "chained" its scroll to the page behind it — scrolling the More sheet or a
+   modal to its end started dragging the page, which is the "funny" feeling.
+   Also gives the More sheet a real max-height so it scrolls internally instead
+   of running under the tab bar.
+   ROLLBACK: delete this block (banner → END banner).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Stop scroll chaining + rubber-band bleed at the document level */
+html,body{overscroll-behavior-y:none}
+
+/* Main app scroll container: contained, momentum, no layout shift from scrollbar */
+.main{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scroll-behavior:smooth;scrollbar-gutter:stable}
+
+/* Modals scroll independently of the page behind them */
+.modal-body{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+
+/* More sheet: scrolls itself, never bleeds, never hides under the tab bar */
+.mob-more-sheet{max-height:min(70vh,520px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.mob-more-sheet::-webkit-scrollbar{width:0;height:0}
+
+/* While a bottom sheet is open, freeze the page underneath (scroll position kept) */
+body.sheet-open .main{overflow:hidden!important}
+
+/* Respect reduced-motion for the smooth-scroll addition */
+@media (prefers-reduced-motion:reduce){ .main{scroll-behavior:auto} }
+/* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
 </style>
 <!-- Supabase (Stage 1: Auth) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -10567,7 +10597,7 @@ function openMobileCollection() {
 function openMobileMore() {
   updateMobTabs('mt-more');
   const existing = document.getElementById('mob-more-sheet');
-  if (existing) { existing.remove(); return; }
+  if (existing) { existing.remove(); document.body.classList.remove('sheet-open'); return; }
 
   const sheet = document.createElement('div');
   sheet.id = 'mob-more-sheet';
@@ -10609,10 +10639,12 @@ function openMobileMore() {
     </button>`;
 
   document.body.appendChild(sheet);
+  document.body.classList.add('sheet-open');   // freeze page scroll behind the sheet
   setTimeout(() => {
     document.addEventListener('click', function dismiss(e) {
       if (!sheet.contains(e.target) && e.target.id !== 'mt-more' && !e.target.closest('#mt-more')) {
         sheet.remove();
+        document.body.classList.remove('sheet-open');
         document.removeEventListener('click', dismiss);
       }
     });
@@ -10622,6 +10654,7 @@ function openMobileMore() {
 function closeMobileMore() {
   const s = document.getElementById('mob-more-sheet');
   if (s) s.remove();
+  document.body.classList.remove('sheet-open');
 }
 
 function mobGoPage(page,tabId){goPage(page,null);updateMobTabs(tabId);}
