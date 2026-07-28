@@ -781,7 +781,21 @@ body.sheet-open .main{overflow:hidden!important}
   .mob-more-sheet{background:rgba(15,16,22,.94)!important;}
   .mob-more-tile{background:var(--bg3)!important;}
 }
-/* ═══════════════════════ END · FROSTED-GLASS MORE SHEET ═══════════════════════ *//* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
+/* Fit: extra bottom breathing room + height capped so the sheet never runs under
+   the tab bar even before the JS measurement lands. */
+.mob-more-sheet{padding-bottom:14px!important;max-height:min(62vh,500px)!important}
+/* ═══════════════════════ END · FROSTED-GLASS MORE SHEET ═══════════════════════ */
+
+/* ═══ PHASE 2.2 · TIMELINE CHART REVAMP (2026-07, additive) ═══
+   Floating tooltip removed — a fixed readout ABOVE the chart shows date/value/
+   change while you scrub, so neither finger nor tooltip ever covers the line.
+   Short "Jun 23" dates, real %-baseline, touch snap-back. */
+.dbr{display:flex;align-items:baseline;gap:10px;min-height:24px;margin:2px 2px 8px;font-family:var(--mono);flex-wrap:wrap}
+.dbr-val{font-size:17px;font-weight:700;color:var(--text);letter-spacing:.01em}
+.dbr-chg{font-size:11.5px;font-weight:600}
+.dbr-date{font-size:10.5px;color:var(--muted);margin-left:auto}
+@media(max-width:640px){.dbr-val{font-size:16px}}
+/* ═══ END · TIMELINE CHART REVAMP ═══ *//* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
 </style>
 <!-- Supabase (Stage 1: Auth) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -843,9 +857,10 @@ body.sheet-open .main{overflow:hidden!important}
       </div>
     </div>
     <div style="position:relative;height:180px;">
+      <div id="db-chart-readout" class="dbr"></div>
       <canvas id="db-chart" role="img" aria-label="Portfolio timeline"></canvas>
     </div>
-    <div class="tl-labels" id="db-chart-labels" style="margin-top:8px;margin-bottom:4px;"></div>
+    <div class="tl-labels" id="db-chart-labels" style="display:none;"></div>
   </div>
 
   <div style="padding:16px 24px;display:flex;flex-direction:column;gap:14px;">
@@ -5700,6 +5715,13 @@ function renderDashboard() {
   }
 }
 
+// "2026-06-23" → "Jun 23" (keeps non-ISO labels like "Start" untouched)
+function fmtChartDate(d){
+  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return d;
+  return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1] + ' ' + (+m[3]);
+}
+
 function renderDBChart() {
   // Read from both history keys — use richer ph2 if available, fall back to vh
   const ph2 = JSON.parse(localStorage.getItem('pkv2_ph2') || '[]');
@@ -5747,28 +5769,48 @@ function renderDBChart() {
     return;
   }
 
-  const up = pts[pts.length-1].v >= pts[0].v;
+  // Baseline for change-% = first REAL (non-zero) snapshot. The old code measured
+  // from the forced $0 "Start" point, so pct divided by zero and rendered "(−%)".
+  const first = pts.find(p => p.v > 0) || pts[0];
+  const last  = pts[pts.length - 1];
+  const up = last.v >= first.v;
   const col = up ? '#2ecc80' : '#ff4d6d';
-  const colFill = up ? 'rgba(46,204,128,0.15)' : 'rgba(255,77,109,0.15)';
+  const colFill = up ? 'rgba(46,204,128,0.16)' : 'rgba(255,77,109,0.16)';
   const colFade = up ? 'rgba(46,204,128,0)' : 'rgba(255,77,109,0)';
+  const isNarrow = (window.innerWidth || 800) < 640;
 
+  const readoutEl = document.getElementById('db-chart-readout');
+  const changeOf = v => {
+    const diff = v - first.v;
+    const pct = first.v > 0 ? ` (${diff >= 0 ? '+' : ''}${((diff / first.v) * 100).toFixed(1)}%)` : '';
+    return { diff, txt: `${diff >= 0 ? '▲' : '▼'} ${diff >= 0 ? '+' : '−'}$${Math.abs(diff).toLocaleString('en-US', { maximumFractionDigits: 0 })}${pct}` };
+  };
+  const setReadout = (pt, live) => {
+    if (!readoutEl) return;
+    const c = changeOf(pt.v);
+    readoutEl.innerHTML =
+      `<span class="dbr-val">${fmtPrice(pt.v)}</span>` +
+      `<span class="dbr-chg" style="color:${c.diff >= 0 ? 'var(--green)' : 'var(--red)'}">${c.txt}</span>` +
+      `<span class="dbr-date">${live ? fmtChartDate(pt.d) : fmtChartDate(pt.d) + ' · latest'}</span>`;
+  };
+
+  // Crosshair + glow dot drawn on-canvas (replaces the floating tooltip box)
   const crosshairPlugin = {
     id: 'dbCrosshair',
     afterDraw(chart) {
-      if (chart.tooltip._active && chart.tooltip._active.length) {
-        const ctx = chart.ctx;
-        const x = chart.tooltip._active[0].element.x;
-        const top = chart.scales.y.top;
-        const bottom = chart.scales.y.bottom;
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(x, top); ctx.lineTo(x, bottom);
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.restore();
-      }
+      const act = chart.tooltip && chart.tooltip._active;
+      if (!act || !act.length) return;
+      const ctx = chart.ctx, el = act[0].element;
+      const top = chart.scales.y.top, bottom = chart.scales.y.bottom;
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(el.x, top); ctx.lineTo(el.x, bottom);
+      ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.setLineDash([4, 4]); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(el.x, el.y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = up ? 'rgba(46,204,128,0.18)' : 'rgba(255,77,109,0.18)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(el.x, el.y, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = col; ctx.strokeStyle = '#0b0c11'; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
   };
 
@@ -5779,10 +5821,9 @@ function renderDBChart() {
       labels: pts.map(p => p.d),
       datasets: [{
         data: pts.map(p => p.v),
-        borderColor: col, borderWidth: 2,
-        pointRadius: 0, pointHoverRadius: 6,
-        pointHoverBackgroundColor: col, pointHoverBorderColor: '#0f0f14', pointHoverBorderWidth: 2,
-        tension: 0.4, fill: true,
+        borderColor: col, borderWidth: 2.5,
+        pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 28,
+        tension: 0.35, fill: true,
         backgroundColor: (ctx) => {
           const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
           g.addColorStop(0, colFill); g.addColorStop(1, colFade); return g;
@@ -5791,56 +5832,46 @@ function renderDBChart() {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          mode: 'index', intersect: false,
-          backgroundColor: 'rgba(15,15,22,0.95)',
-          borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1,
-          titleColor: 'rgba(255,255,255,0.5)', bodyColor: col,
-          bodyFont: { family: 'monospace', size: 14, weight: '700' },
-          titleFont: { family: 'monospace', size: 10 },
-          padding: 12, displayColors: false,
-          callbacks: {
-            title: items => items[0].label,
-            label: ctx => {
-              const v = ctx.parsed.y;
-              const diff = v - pts[0].v;
-              const pct = pts[0].v > 0 ? ((diff/pts[0].v)*100).toFixed(1) : null;
-              return ['$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
-                pct ? (diff>=0?'▲ +':'▼ ')+'$'+Math.abs(diff).toFixed(2)+' ('+pct+'%)' : ''].filter(Boolean);
-            }
+      animation: { duration: 300 },
+      layout: { padding: { top: 6 } },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: {
+        x: {
+          grid: { display: false }, border: { display: false },
+          ticks: {
+            color: 'rgba(255,255,255,0.28)', font: { family: 'monospace', size: 10 },
+            maxTicksLimit: isNarrow ? 4 : 7, maxRotation: 0, autoSkipPadding: 18,
+            callback: function (v) { return fmtChartDate(this.getLabelForValue(v)); }
+          }
+        },
+        y: {
+          position: 'left',
+          grid: { color: 'rgba(255,255,255,0.04)', drawBorder: false }, border: { display: false },
+          ticks: {
+            color: 'rgba(255,255,255,0.28)', font: { family: 'monospace', size: 10 }, maxTicksLimit: 5,
+            callback: v => v === 0 ? '$0' : v >= 1000 ? '$' + (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : '$' + Math.round(v)
           }
         }
-      },
-      scales: {
-        x: { grid:{color:'rgba(255,255,255,0.03)',drawBorder:false}, ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:10},maxTicksLimit:6,maxRotation:0}, border:{display:false} },
-        y: { position:'left', grid:{color:'rgba(255,255,255,0.03)',drawBorder:false}, ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:10},maxTicksLimit:5,callback:v=>v===0?'$0':v>=1000?'$'+(v/1000).toFixed(v>=10000?0:1)+'k':'$'+Math.round(v)}, border:{display:false} }
       },
       interaction: { mode: 'index', intersect: false },
       onHover: (e, elements) => {
         if (!elements.length) return;
-        const idx = elements[0].index;
-        const pt = pts[idx];
-        const diff = pt.v - pts[0].v;
-        const pct = pts[0].v > 0 ? ((diff/pts[0].v)*100).toFixed(1) : null;
-        const lbl = document.getElementById('db-chart-labels');
-        if (lbl) lbl.innerHTML = `<span style="color:rgba(255,255,255,0.4)">${pt.d}</span><span style="color:${col};font-weight:600;">${diff>=0?'▲ +':'▼ '}${fmtPrice(diff)} (${pct||'—'}%) from start</span><span style="color:rgba(255,255,255,0.9);font-weight:600;">${fmtPrice(pt.v)}</span>`;
+        const pt = pts[elements[0].index];
+        if (pt) setReadout(pt, true);
       }
     }
   });
 
-  canvas.addEventListener('mouseleave', () => {
-    const gain = pts[pts.length-1].v - pts[0].v;
-    const gainPct = pts[0].v > 0 ? ((gain/pts[0].v)*100).toFixed(1) : null;
-    const lbl = document.getElementById('db-chart-labels');
-    if (lbl) lbl.innerHTML = `<span>${pts[0].d}: <b>${fmtPrice(pts[0].v)}</b></span><span style="color:${col};font-weight:600;">${gain>=0?'▲ +':'▼ '}${fmtPrice(gain)} (${gainPct||'—'}%) since ${pts[0].d}</span><span>${pts[pts.length-1].d}: <b>${fmtPrice(pts[pts.length-1].v)}</b></span>`;
-  });
+  // Scrubbing ends → snap the readout back to the latest value (touch AND mouse).
+  const resetReadout = () => {
+    try { _dbChart.setActiveElements([]); _dbChart.update('none'); } catch (_) {}
+    setReadout(last, false);
+  };
+  canvas.addEventListener('mouseleave', resetReadout);
+  canvas.addEventListener('touchend', resetReadout, { passive: true });
+  canvas.addEventListener('touchcancel', resetReadout, { passive: true });
 
-  // Initial labels
-  const gain = pts[pts.length-1].v - pts[0].v;
-  const gainPct = pts[0].v > 0 ? ((gain/pts[0].v)*100).toFixed(1) : null;
-  labels.innerHTML = `<span>${pts[0].d}: <b>${fmtPrice(pts[0].v)}</b></span><span style="color:${col};font-weight:600;">${gain>=0?'▲ +':'▼ '}${fmtPrice(gain)} (${gainPct||'—'}%) since ${pts[0].d}</span><span>${pts[pts.length-1].d}: <b>${fmtPrice(pts[pts.length-1].v)}</b></span>`;
+  setReadout(last, false);
 }
 
 function renderDBKPIs() {
@@ -10670,6 +10701,16 @@ function openMobileMore() {
     </button>`;
 
   document.body.appendChild(sheet);
+  // Sit exactly on top of the REAL tab bar. The old CSS hardcoded 58px, but the bar's
+  // height varies by device (padding + icon + label + safe-area inset), so the last
+  // row could overlap the tabs. Measuring guarantees a flush fit on every screen.
+  try {
+    const tabs = document.querySelector('.mobile-tabs');
+    if (tabs) {
+      const h = Math.round(tabs.getBoundingClientRect().height);
+      if (h > 0) sheet.style.bottom = h + 'px';
+    }
+  } catch(_){}
   document.body.classList.add('sheet-open');   // freeze page scroll behind the sheet
   setTimeout(() => {
     document.addEventListener('click', function dismiss(e) {
