@@ -7108,7 +7108,7 @@ function onDLPickerSearch(val) {
       const isNumber = /^\d+$/.test(val.trim()); // user typed a card number like "234"
       let qStr;
       if (dexNum) {
-        qStr = `nationalPokedexNumbers:${dexNum}`;
+        qStr = buildDexNameQuery(val, dexNum);
       } else if (isNumber) {
         qStr = `number:${val.trim()}`; // search by card number
       } else {
@@ -7557,7 +7557,7 @@ async function doDealSearch(q) {
       const _loose = _work.replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
       qStr = `name:*${_loose.replace(/ /g,'*')}* number:${_cardNum}`;
     } else if (dexNum) {
-      qStr = `nationalPokedexNumbers:${dexNum}`;
+      qStr = buildDexNameQuery(_work || q, dexNum);
     } else {
       const _ln = (_work || q).replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
       qStr = _ln ? `name:*${_ln.replace(/ /g,'*')}*` : `name:*${_work || q}*`;
@@ -8759,7 +8759,7 @@ async function doModalSearch(q){
     const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
     // Use dex number for known pokemon, name search for everything else
     const dexNum = getPokemonDexNumber(q);
-    const qStr   = dexNum ? `nationalPokedexNumbers:${dexNum}` : buildNameQuery(q);
+    const qStr   = dexNum ? buildDexNameQuery(q, dexNum) : buildNameQuery(q);
     const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=20`,{headers:hdrs});
     if(!r.ok)throw new Error('API '+r.status);
     const j=await r.json();
@@ -8953,7 +8953,7 @@ function onWishSearch(val){
     try{
       const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
       const dexNum=getPokemonDexNumber(val);
-      const qStr=dexNum?`nationalPokedexNumbers:${dexNum}`:buildNameQuery(val);
+      const qStr=dexNum?buildDexNameQuery(val, dexNum):buildNameQuery(val);
       const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=24`,{headers:hdrs});
       const j=await r.json();
       if(!j.data?.length){document.getElementById('wish-search-grid').innerHTML='<div class="cs-empty">No results.</div>';return;}
@@ -9593,7 +9593,12 @@ async function doTabSearch(q, page=1){
     const _loose = _work.replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
     qStr = `name:*${_loose.replace(/ /g,'*')}* number:${_cardNum}`;
   } else if (dexNum) {
-    qStr = `nationalPokedexNumbers:${dexNum}`;
+    // Dex number alone MISSES vintage cards: many WOTC-era prints (Jungle 1999,
+    // Gym, Neo…) have no nationalPokedexNumbers field in pokemontcg.io, so a pure
+    // dex query silently drops the entire back catalogue (Eevee returned 85 cards,
+    // none older than 2019). OR the dex match with a name match so we get both the
+    // dex-indexed cards AND every card actually named after the Pokémon.
+    qStr = buildDexNameQuery(_work || q, dexNum);
   } else if (_work || q) {
     const _ln = (_work || q).replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
     qStr = _ln ? `name:*${_ln.replace(/ /g,'*')}*` : '';
@@ -9824,6 +9829,17 @@ const POKEMON_DEX = {
 
 // Build a SAFE pokemontcg.io name query. Unquoted multi-word values (name:Dark blastoise)
 // cause Lucene 400 errors; wildcards avoid that AND dodge apostrophes/punctuation.
+// Dex+name query. A bare nationalPokedexNumbers: query MISSES vintage cards —
+// many WOTC-era prints (Jungle 1999, Gym, Neo) have no dex field in pokemontcg.io,
+// so dex-only silently drops the whole back catalogue. ORing in a name match returns
+// both the dex-indexed cards AND every card actually named after the Pokémon.
+function buildDexNameQuery(input, dexNum){
+  const n = String(input||'').replace(/[^A-Za-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+  if (!dexNum) return n ? `name:*${n.replace(/ /g,'*')}*` : '';
+  if (!n)      return `nationalPokedexNumbers:${dexNum}`;
+  return `(nationalPokedexNumbers:${dexNum} OR name:*${n.replace(/ /g,'*')}*)`;
+}
+
 function buildNameQuery(raw){
   const ln = String(raw||'').replace(/[^A-Za-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
   if(!ln) return `name:*${String(raw||'').trim()}*`;
