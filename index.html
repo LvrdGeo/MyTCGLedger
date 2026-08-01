@@ -795,6 +795,22 @@ body.sheet-open .main{overflow:hidden!important}
 .dbr-chg{font-size:11.5px;font-weight:600}
 .dbr-date{font-size:10.5px;color:var(--muted);margin-left:auto}
 @media(max-width:640px){.dbr-val{font-size:16px}}
+/* Canvas owns its own box so x-axis labels can never spill onto the cards below */
+.dbc-wrap{position:relative;height:190px;width:100%}
+@media(min-width:900px){.dbc-wrap{height:260px}}
+/* ═══ PHASE 2.3 · SEARCH PAGINATION CLEARANCE (2026-07, additive) ═══
+   The results grid had bottom padding to clear the tab bar, but the pagination
+   block sits AFTER the grid and had none — so "Page 1 of 3", Next, and the
+   40/80/120/200 selector slid under the tab bar, with the FAB landing on Next.
+   Rollback: delete this block. */
+.cs-pager{padding:14px 0 calc(96px + env(safe-area-inset-bottom,20px))}
+@media(min-width:769px){.cs-pager{padding:14px 0 20px}}
+/* Keep the Next button clear of the floating + button on phones */
+@media(max-width:768px){
+  #tab-search-pager-btns{padding-right:60px}
+  #tab-perpage-btns{flex-wrap:wrap;justify-content:flex-end}
+}
+/* ═══ END · SEARCH PAGINATION CLEARANCE ═══ */
 /* ═══ END · TIMELINE CHART REVAMP ═══ *//* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
 </style>
 <!-- Supabase (Stage 1: Auth) -->
@@ -856,8 +872,8 @@ body.sheet-open .main{overflow:hidden!important}
         <button class="tl-btn" onclick="setDBRange('1m',this)">1M</button>
       </div>
     </div>
-    <div style="position:relative;height:180px;">
-      <div id="db-chart-readout" class="dbr"></div>
+    <div id="db-chart-readout" class="dbr"></div>
+    <div class="dbc-wrap">
       <canvas id="db-chart" role="img" aria-label="Portfolio timeline"></canvas>
     </div>
     <div class="tl-labels" id="db-chart-labels" style="display:none;"></div>
@@ -974,10 +990,11 @@ body.sheet-open .main{overflow:hidden!important}
         <button class="tl-btn" onclick="setTLRange('1m',this)">1M</button>
       </div>
     </div>
-    <div style="position:relative;height:170px;">
+    <div id="tl-chart-readout" class="dbr"></div>
+    <div class="dbc-wrap">
       <canvas id="tl-canvas" role="img" aria-label="Portfolio value timeline chart" style="display:block;"></canvas>
     </div>
-    <div class="tl-labels" id="tl-labels" style="margin-top:8px;"></div>
+    <div class="tl-labels" id="tl-labels" style="display:none;"></div>
     <div id="tl-empty" style="text-align:center;padding:24px;font-size:12px;color:var(--muted);display:none;">Add purchase prices to build your timeline. Each day you open the app, a snapshot is saved automatically.</div>
   </div>
   <!-- PORTFOLIO HISTORY -->
@@ -1194,9 +1211,9 @@ body.sheet-open .main{overflow:hidden!important}
       <div class="spinner" style="margin:0 auto 10px;"></div>Searching all sets…
     </div>
     <!-- Results grid -->
-    <div class="cs-grid" id="tab-search-grid" style="max-height:none;padding:0;padding-bottom:calc(100px + env(safe-area-inset-bottom, 20px));"></div>
+    <div class="cs-grid" id="tab-search-grid" style="max-height:none;padding:0;padding-bottom:12px;"></div>
     <!-- Pagination -->
-    <div id="tab-search-pagination" style="display:none;flex-direction:column;gap:10px;padding:14px 0;border-top:1px solid var(--border);margin-top:10px;">
+    <div id="tab-search-pagination" class="cs-pager" style="display:none;flex-direction:column;gap:10px;border-top:1px solid var(--border);margin-top:10px;">
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <span style="font-family:var(--mono);font-size:11px;color:var(--muted);" id="tab-search-pager-info"></span>
         <div style="display:flex;gap:8px;" id="tab-search-pager-btns"></div>
@@ -6125,11 +6142,6 @@ function renderTimeline(){
   pts=[{d:'Start',v:0},...pts];
   empty.style.display='none';
 
-  const up=pts[pts.length-1].v>=pts[0].v;
-  const col=up?'#2ecc80':'#ff4d6d';
-  const colFade=up?'rgba(46,204,128,0)':'rgba(255,77,109,0)';
-  const colFill=up?'rgba(46,204,128,0.15)':'rgba(255,77,109,0.15)';
-
   const canvas=document.getElementById('tl-canvas');
   if(!canvas)return;
   if(typeof Chart==='undefined'){
@@ -6139,131 +6151,82 @@ function renderTimeline(){
     document.head.appendChild(s);
     return;
   }
-
   if(_tlChart){_tlChart.destroy();_tlChart=null;}
 
-  // Crosshair plugin — draws a vertical line at hovered position
+  // Same engine as the dashboard timeline: fixed readout above (no floating tooltip
+  // covering the line), %-baseline from the first REAL value, short dates, fat touch
+  // targets, snap-back on release.
+  const first = pts.find(p=>p.v>0) || pts[0];
+  const last  = pts[pts.length-1];
+  const up    = last.v >= first.v;
+  const col   = up?'#2ecc80':'#ff4d6d';
+  const colFill = up?'rgba(46,204,128,0.16)':'rgba(255,77,109,0.16)';
+  const colFade = up?'rgba(46,204,128,0)':'rgba(255,77,109,0)';
+  const isNarrow = (window.innerWidth||800) < 640;
+  const readoutEl = document.getElementById('tl-chart-readout');
+
+  const setReadout = (pt, live) => {
+    if(!readoutEl) return;
+    const diff = pt.v - first.v;
+    const pct  = first.v>0 ? ` (${diff>=0?'+':''}${((diff/first.v)*100).toFixed(1)}%)` : '';
+    readoutEl.innerHTML =
+      `<span class="dbr-val">${fmtPrice(pt.v)}</span>`+
+      `<span class="dbr-chg" style="color:${diff>=0?'var(--green)':'var(--red)'}">${diff>=0?'▲':'▼'} ${diff>=0?'+':'−'}$${Math.abs(diff).toLocaleString('en-US',{maximumFractionDigits:0})}${pct}</span>`+
+      `<span class="dbr-date">${fmtChartDate(pt.d)}${live?'':' · latest'}</span>`;
+  };
+
   const crosshairPlugin = {
-    id:'crosshair',
+    id:'tlCrosshair',
     afterDraw(chart){
-      if(chart.tooltip._active&&chart.tooltip._active.length){
-        const ctx=chart.ctx;
-        const x=chart.tooltip._active[0].element.x;
-        const top=chart.scales.y.top;
-        const bottom=chart.scales.y.bottom;
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(x,top);
-        ctx.lineTo(x,bottom);
-        ctx.lineWidth=1;
-        ctx.strokeStyle='rgba(255,255,255,0.15)';
-        ctx.setLineDash([4,4]);
-        ctx.stroke();
-        ctx.restore();
-      }
+      const act = chart.tooltip && chart.tooltip._active;
+      if(!act || !act.length) return;
+      const ctx=chart.ctx, el=act[0].element;
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(el.x, chart.scales.y.top); ctx.lineTo(el.x, chart.scales.y.bottom);
+      ctx.lineWidth=1; ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.setLineDash([4,4]); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(el.x, el.y, 9, 0, Math.PI*2);
+      ctx.fillStyle = up?'rgba(46,204,128,0.18)':'rgba(255,77,109,0.18)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(el.x, el.y, 4.5, 0, Math.PI*2);
+      ctx.fillStyle=col; ctx.strokeStyle='#0b0c11'; ctx.lineWidth=2; ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
   };
 
-  _tlChart=new Chart(canvas,{
+  _tlChart = new Chart(canvas, {
     type:'line',
     plugins:[crosshairPlugin],
-    data:{
-      labels:pts.map(p=>p.d),
-      datasets:[{
-        data:pts.map(p=>p.v),
-        borderColor:col,
-        borderWidth:2.5,
-        pointRadius:0,
-        pointHoverRadius:7,
-        pointHoverBackgroundColor:'#fff',
-        pointHoverBorderColor:col,
-        pointHoverBorderWidth:2.5,
-        tension:0.4,
-        fill:true,
-        backgroundColor:(ctx)=>{
-          const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
-          g.addColorStop(0,colFill);
-          g.addColorStop(0.65,up?'rgba(46,204,128,0.04)':'rgba(255,77,109,0.04)');
-          g.addColorStop(1,'rgba(0,0,0,0)');
-          return g;
-        }
-      }]
-    },
+    data:{ labels:pts.map(p=>p.d), datasets:[{
+      data:pts.map(p=>p.v), borderColor:col, borderWidth:2.5,
+      pointRadius:0, pointHoverRadius:0, pointHitRadius:28,
+      tension:0.35, fill:true,
+      backgroundColor:(c)=>{const g=c.chart.ctx.createLinearGradient(0,0,0,c.chart.height);g.addColorStop(0,colFill);g.addColorStop(1,colFade);return g;}
+    }]},
     options:{
-      responsive:true,
-      maintainAspectRatio:false,
-      plugins:{
-        legend:{display:false},
-        tooltip:{
-          mode:'index',intersect:false,
-          backgroundColor:'rgba(10,10,18,0.97)',
-          borderColor:col,borderWidth:1,
-          titleColor:'rgba(255,255,255,0.45)',
-          bodyColor:'#fff',
-          bodyFont:{family:'monospace',size:15,weight:'700'},
-          titleFont:{family:'monospace',size:10},
-          padding:14,displayColors:false,
-          cornerRadius:10,
-          callbacks:{
-            title:items=>items[0].label,
-            label:ctx=>{
-              const v=ctx.parsed.y;
-              const first=pts.find(p=>p.v>0);
-              const diff=first?v-first.v:0;
-              const pct=first&&first.v>0?((diff/first.v)*100).toFixed(1):null;
-              const sign=diff>=0?'+':'';
-              const arrow=diff>=0?'▲':'▼';
-              return ['$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
-                pct?`${arrow} ${sign}$${Math.abs(diff).toLocaleString('en-US',{maximumFractionDigits:0})} (${sign}${pct}%)`:''].filter(Boolean);
-            }
-          }
-        }
-      },
+      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      layout:{padding:{top:6}},
+      plugins:{legend:{display:false}, tooltip:{enabled:false}},
       scales:{
-        x:{
-          grid:{color:'rgba(255,255,255,0.03)',drawBorder:false},
-          ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:10},maxTicksLimit:5,maxRotation:0},
-          border:{display:false}
-        },
-        y:{
-          position:'left',
-          grid:{color:'rgba(255,255,255,0.03)',drawBorder:false},
-          ticks:{color:'rgba(255,255,255,0.25)',font:{family:'monospace',size:10},maxTicksLimit:5,
-            callback:v=>v===0?'$0':v>=1000?'$'+(v/1000).toFixed(v>=10000?0:1)+'k':'$'+Math.round(v)},
-          border:{display:false}
-        }
+        x:{ grid:{display:false}, border:{display:false},
+            ticks:{color:'rgba(255,255,255,0.28)',font:{family:'monospace',size:10},
+                   maxTicksLimit:isNarrow?4:7,maxRotation:0,autoSkipPadding:18,
+                   callback:function(v){return fmtChartDate(this.getLabelForValue(v));}} },
+        y:{ position:'left', grid:{color:'rgba(255,255,255,0.04)',drawBorder:false}, border:{display:false},
+            ticks:{color:'rgba(255,255,255,0.28)',font:{family:'monospace',size:10},maxTicksLimit:5,
+                   callback:v=>v===0?'$0':v>=1000?'$'+(v/1000).toFixed(v>=10000?0:1)+'k':'$'+Math.round(v)} }
       },
       interaction:{mode:'index',intersect:false},
-      onHover:(e,elements)=>{
-        if(!elements.length)return;
-        const idx=elements[0].index;
-        const pt=pts[idx];
-        const first=pts.find(p=>p.v>0);
-        const gain=first?pt.v-first.v:0;
-        const gainPct=first&&first.v>0?((gain/first.v)*100).toFixed(1):null;
-        const gainCol=gain>=0?'#2ecc80':'#ff4d6d';
-        const labEl=document.getElementById('tl-labels');
-        if(labEl)labEl.innerHTML=
-          `<span style="color:rgba(255,255,255,0.4);font-family:monospace;font-size:11px;">${pt.d}</span>`+
-          `<span style="color:${gainCol};font-weight:700;font-family:monospace;font-size:11px;">${gain>=0?'▲ +':'▼ '}${fmtPrice(gain)} (${gainPct?gainPct+'%':'—'})</span>`+
-          `<span style="color:#fff;font-weight:700;font-family:monospace;font-size:12px;">${fmtPrice(pt.v)}</span>`;
-      }
+      onHover:(e,els)=>{ if(els.length){const pt=pts[els[0].index]; if(pt) setReadout(pt,true);} }
     }
   });
-  canvas.addEventListener('mouseleave',()=>{
-    const gain=pts[pts.length-1].v-pts[0].v;
-    const gainPct=pts[0].v>0?((gain/pts[0].v)*100).toFixed(1):null;
-    const gainText=gainPct?`${gain>=0?'▲ +':'▼ '}${fmtPrice(gain)} (${gainPct}%) since ${pts[0].d}`:'';
-    const labels=document.getElementById('tl-labels');
-    if(labels) labels.innerHTML=`<span>${pts[0].d}: <b>${fmtPrice(pts[0].v)}</b></span><span style="color:${col};font-weight:600;">${gainText}</span><span>${pts[pts.length-1].d}: <b>${fmtPrice(pts[pts.length-1].v)}</b></span>`;
-  });
 
-  // Initial summary labels (updated live on hover)
-  const gain=pts[pts.length-1].v-pts[0].v;
-  const gainPct=pts[0].v>0?((gain/pts[0].v)*100).toFixed(1):null;
-  const gainText=gainPct?`${gain>=0?'▲ +':'▼ '}${fmtPrice(gain)} (${gainPct}%) since ${pts[0].d}`:'';
-  labels.innerHTML=`<span>${pts[0].d}: <b>${fmtPrice(pts[0].v)}</b></span><span style="color:${col};font-weight:600;">${gainText}</span><span>${pts[pts.length-1].d}: <b>${fmtPrice(pts[pts.length-1].v)}</b></span>`;
+  const resetTL = () => { try{_tlChart.setActiveElements([]);_tlChart.update('none');}catch(_){}; setReadout(last,false); };
+  canvas.addEventListener('mouseleave', resetTL);
+  canvas.addEventListener('touchend', resetTL, {passive:true});
+  canvas.addEventListener('touchcancel', resetTL, {passive:true});
+  setReadout(last,false);
 }
+
 // tl tip functions removed — Chart.js handles tooltips natively
 
 // ═══ PSA SLABS ═══
