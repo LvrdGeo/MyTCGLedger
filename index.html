@@ -384,6 +384,10 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .cs-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;}
 .cs-set{font-size:9.5px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px;}
 .cs-price{font-family:var(--mono);font-size:11px;color:var(--green);font-weight:500;}
+/* Printing/variant chips: holo vs reverse holo vs 1st ed, each with its own price */
+.cs-vars{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.cs-var{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:2px 6px;white-space:nowrap}
+.cs-var-l{color:var(--muted2)}
 .cs-add{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:var(--gold);color:#0a0a0f;border:none;cursor:pointer;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s;}
 .cs-card:hover .cs-add{opacity:1;}
 .cs-footer{padding:10px 16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);}
@@ -810,6 +814,11 @@ body.sheet-open .main{overflow:hidden!important}
   #tab-search-pager-btns{padding-right:60px}
   #tab-perpage-btns{flex-wrap:wrap;justify-content:flex-end}
 }
+/* Japanese cross-catalogue hint (tap to switch) */
+.jp-hint-btn{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--text);background:rgba(245,200,66,.08);border:1px solid rgba(245,200,66,.28);border-radius:20px;padding:7px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s,border-color .15s,transform .1s}
+.jp-hint-btn b{color:var(--gold)}
+.jp-hint-btn:active{transform:scale(.97);background:rgba(245,200,66,.14)}
+.jp-hint-arrow{color:var(--gold)}
 /* ═══ END · SEARCH PAGINATION CLEARANCE ═══ */
 /* ═══ END · TIMELINE CHART REVAMP ═══ *//* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
 </style>
@@ -1211,6 +1220,7 @@ body.sheet-open .main{overflow:hidden!important}
       <div class="spinner" style="margin:0 auto 10px;"></div>Searching all sets…
     </div>
     <!-- Results grid -->
+    <div id="tab-search-jp-hint" style="display:none;margin:2px 0 10px;"></div>
     <div class="cs-grid" id="tab-search-grid" style="max-height:none;padding:0;padding-bottom:12px;"></div>
     <!-- Pagination -->
     <div id="tab-search-pagination" class="cs-pager" style="display:none;flex-direction:column;gap:10px;border-top:1px solid var(--border);margin-top:10px;">
@@ -9619,19 +9629,38 @@ async function doTabSearch(q, page=1){
     // drop the real image URL so cards render as blank card-backs. We fetch full objects
     // for correctness; the number-sort + cache below still keep set-browsing fast.
     const _order  = (_tabSetFilter && !_work && !_cardNum) ? 'number' : '-set.releaseDate';
-    const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=${_order}&pageSize=${TAB_PAGE_SIZE}&page=${page}`;
-    // Cache: re-clicking the same set/page returns instantly (5 min TTL).
-    window._tabCache = window._tabCache || {};
-    let j;
-    const _cached = window._tabCache[url];
-    if (_cached && (Date.now() - _cached.t) < 300000) {
-      j = _cached.j;
-    } else {
-      const r = await fetch(url, {headers:hdrs});
-      if(!r.ok) throw new Error('API error '+r.status);
-      j = await r.json();
-      window._tabCache[url] = { j, t: Date.now() };
+
+    // pokemontcg.io's Lucene backend intermittently 500s on some wildcard/OR shapes
+    // ("Pidge" works, "Pidgey" errors — same dex, same structure). Rather than guess
+    // which terms it dislikes, try progressively simpler queries and use the first
+    // that answers. Only a total failure surfaces an error to the user.
+    const _suffix = qStr.replace(/^\((?:[^)]*)\)\s*/, '').trim();   // trailing set/rarity filters
+    const _candidates = [qStr];
+    if (dexNum) {
+      const _dexQ = `nationalPokedexNumbers:${dexNum}`;
+      _candidates.push(_suffix ? `${_dexQ} ${_suffix}` : _dexQ);      // dex only
+      const _nm = (_work || q).replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (_nm) {
+        const _nameQ = `name:*${_nm.replace(/ /g,'*')}*`;
+        _candidates.push(_suffix ? `${_nameQ} ${_suffix}` : _nameQ);  // name only
+      }
     }
+
+    window._tabCache = window._tabCache || {};
+    let j = null, _lastErr = null, url = '';
+    for (const _q of _candidates) {
+      url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(_q)}&orderBy=${_order}&pageSize=${TAB_PAGE_SIZE}&page=${page}`;
+      const _cached = window._tabCache[url];
+      if (_cached && (Date.now() - _cached.t) < 300000) { j = _cached.j; break; }
+      try {
+        const r = await fetch(url, {headers:hdrs});
+        if (!r.ok) { _lastErr = new Error('API error ' + r.status); continue; }
+        j = await r.json();
+        window._tabCache[url] = { j, t: Date.now() };
+        break;
+      } catch(err) { _lastErr = err; }
+    }
+    if (!j) throw (_lastErr || new Error('Search unavailable'));
     _tabTotal = j.totalCount || 0;
     loader.style.display = 'none';
 
@@ -9647,10 +9676,11 @@ async function doTabSearch(q, page=1){
     count.textContent = dexUsed
       ? `${_tabTotal.toLocaleString()} cards found (Pokédex #${dexUsed})`
       : `${_tabTotal.toLocaleString()} cards found`;
+    jpAlsoAvailable(q);   // offer Japanese versions of this Pokémon
 
     grid.innerHTML = j.data.map(card=>{
-      const tier  = card.tcgplayer?.prices ? Object.values(card.tcgplayer.prices)[0] : null;
-      const price = tier?.market || null;
+      const price = tcgPrimaryPrice(card);
+      const varChips = tcgVariantChips(card);
       const key   = 'ts_'+card.id.replace(/[^a-z0-9]/gi,'_');
       window._tsCards = window._tsCards||{};
       window._tsCards[key] = {id:card.id,name:card.name,set:card.set?.name||'',num:card.number||'',img:card.images?.large||card.images?.small||'',rarity:card.rarity||''};
@@ -9664,6 +9694,7 @@ async function doTabSearch(q, page=1){
           <div class="cs-name">${card.name}</div>
           <div class="cs-set">${card.rarity||''}</div>
           ${price?`<div class="cs-price">$${price.toFixed(2)}</div>`:'<div class="cs-price" style="color:var(--muted);">—</div>'}
+          ${varChips}
         </div>
         <button class="cs-add" title="${inVault?'In vault':'Add to vault'}" style="${inVault?'background:var(--green);opacity:1;':''}" onclick="event.stopPropagation();tabPickCard(window._tsCards['${key}'])">${inVault?'✓':'+'}</button>
       </div>`;
@@ -9684,7 +9715,9 @@ async function doTabSearch(q, page=1){
     if(page > 1) grid.scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){
     loader.style.display = 'none';
-    grid.innerHTML = `<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--red);">Search failed — ${e.message}. Check your pokemontcg.io key in Settings.</div>`;
+    if (count) count.textContent = '';                    // don't leave a stale count
+    const _hint = document.getElementById('tab-search-jp-hint'); if (_hint) _hint.style.display='none';
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:20px;font-size:12px;color:var(--red);">Search failed — ${e.message}. <a href="#" onclick="doTabSearch('${String(q).replace(/'/g,"")}',1);return false;" style="color:var(--gold);">Retry</a></div>`;
   }
 }
 
@@ -9833,6 +9866,32 @@ const POKEMON_DEX = {
 // many WOTC-era prints (Jungle 1999, Gym, Neo) have no dex field in pokemontcg.io,
 // so dex-only silently drops the whole back catalogue. ORing in a name match returns
 // both the dex-indexed cards AND every card actually named after the Pokémon.
+// pokemontcg.io returns ONE record per card with a price tier per PRINTING
+// (normal / holofoil / reverseHolofoil / 1stEdition…). The grid used
+// Object.values(prices)[0] — an ARBITRARY tier depending on JSON key order — and gave
+// no sign the other printings existed (Mewtwo #11 has a holo AND a reverse holo, per
+// PriceCharting). These surface every printing with its own price, deterministically.
+const TCG_TIER_LABEL = {
+  normal:'Normal', holofoil:'Holo', reverseHolofoil:'Reverse',
+  '1stEditionNormal':'1st Ed', '1stEditionHolofoil':'1st Ed Holo',
+  unlimitedHolofoil:'Unlimited Holo', unlimited:'Unlimited'
+};
+const TCG_TIER_ORDER = ['holofoil','normal','1stEditionHolofoil','1stEditionNormal','unlimitedHolofoil','reverseHolofoil','unlimited'];
+function tcgTiers(card){
+  const p = card && card.tcgplayer && card.tcgplayer.prices;
+  if (!p) return [];
+  const out = [];
+  for (const k of TCG_TIER_ORDER) if (p[k] && (p[k].market || p[k].mid)) out.push({key:k,label:TCG_TIER_LABEL[k]||k,price:p[k].market||p[k].mid});
+  for (const k of Object.keys(p)) if (TCG_TIER_ORDER.indexOf(k)===-1 && p[k] && (p[k].market||p[k].mid)) out.push({key:k,label:TCG_TIER_LABEL[k]||k,price:p[k].market||p[k].mid});
+  return out;
+}
+function tcgPrimaryPrice(card){ const t = tcgTiers(card); return t.length ? t[0].price : null; }
+function tcgVariantChips(card){
+  const t = tcgTiers(card);
+  if (t.length < 2) return '';
+  return '<div class="cs-vars">' + t.map(v => '<span class="cs-var"><span class="cs-var-l">'+v.label+'</span>$'+v.price.toFixed(2)+'</span>').join('') + '</div>';
+}
+
 function buildDexNameQuery(input, dexNum){
   const n = String(input||'').replace(/[^A-Za-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
   if (!dexNum) return n ? `name:*${n.replace(/ /g,'*')}*` : '';
@@ -10488,6 +10547,37 @@ function jpPickCard(key){
   window._pendingLang = 'JP';   // saveCard persists lang:'JP' → pricing adds "Japanese" to eBay queries
   window._pendingSetEn = (window._jpSetMap && Object.values(window._jpSetMap).find(s => s.name === c.set)||{}).en || '';
   quickAdd({ id:'', name:(c.en || c.name), set:c.set, num:c.num, img:(c.imgHigh||c.img), rarity:c.rarity });
+}
+
+// English mode → show how many versions exist in the Japanese catalogue and let the
+// user jump straight to them. Best-effort: stays silent if the lookup fails or finds
+// nothing, so a slow/failed call never disrupts the English results.
+async function jpAlsoAvailable(name){
+  const host = document.getElementById('tab-search-jp-hint');
+  if (!host) return;
+  host.style.display = 'none'; host.innerHTML = '';
+  const q = String(name||'').trim();
+  if (!q || window._searchLang === 'JP') return;
+  try {
+    const r = await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(q)}&limit=60&lang=en`);
+    const j = await r.json();
+    const n = (j && Array.isArray(j.data)) ? j.data.length : 0;
+    if (!n) return;
+    const safe = q.replace(/[^A-Za-z0-9 .'-]/g,'').replace(/'/g,"\\'");
+    host.innerHTML = '<button class="jp-hint-btn" onclick="jpJumpToSearch(\'' + safe + '\')">' +
+      '\u{1F1EF}\u{1F1F5} <b>' + n + '</b> version' + (n===1?'':'s') +
+      ' in the Japanese catalogue <span class="jp-hint-arrow">\u2192</span></button>';
+    host.style.display = '';
+  } catch(_){}
+}
+
+// Switch to Japanese mode and re-run the same search there.
+function jpJumpToSearch(q){
+  const jpBtn = document.querySelector('#lang-toggle .era-pill[data-lang="JP"]');
+  if (jpBtn) setSearchLang('JP', jpBtn);
+  const inp = document.getElementById('tab-search-input');
+  if (inp) inp.value = q;
+  jpOnSearch(q);
 }
 
 function jpOnSearch(val){
