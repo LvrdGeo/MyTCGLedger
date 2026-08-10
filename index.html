@@ -853,6 +853,8 @@ body.sheet-open .main{overflow:hidden!important}
 /* Japanese cross-catalogue hint (tap to switch) */
 .jp-hint-btn{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--text);background:rgba(245,200,66,.08);border:1px solid rgba(245,200,66,.28);border-radius:20px;padding:7px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s,border-color .15s,transform .1s}
 .jp-hint-btn b{color:var(--gold)}
+/* Flash the watchlist search bar when opened, so the tap has visible feedback */
+.cs-bar-flash{border-color:var(--gold)!important;box-shadow:0 0 0 3px rgba(245,200,66,.16);transition:box-shadow .2s,border-color .2s}
 .jp-hint-btn:active{transform:scale(.97);background:rgba(245,200,66,.14)}
 .jp-hint-arrow{color:var(--gold)}
 /* ═══ END · SEARCH PAGINATION CLEARANCE ═══ */
@@ -8983,8 +8985,23 @@ function removeWish(id){retire('wishlist',id);wishlist=wishlist.filter(w=>w.id!=
 let _wishTimer = null;
 function openWishSearch(){
   const bar=document.getElementById('wish-search-bar');
+  if(!bar) return;
   bar.style.display='';
-  setTimeout(()=>document.getElementById('wish-search-input')?.focus(),100);
+  const inp=document.getElementById('wish-search-input');
+  // iOS Safari only raises the keyboard when focus() runs SYNCHRONOUSLY inside the
+  // tap gesture — the old setTimeout(…,100) broke that chain, so tapping "Add First
+  // Card" appeared to do nothing (the bar was often already visible).
+  if(inp){
+    try{ inp.focus({preventScroll:true}); }catch(_){ try{ inp.focus(); }catch(__){} }
+    try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(_){}
+  }
+  // Bring it into view and flash the border so the target is unmistakable.
+  try{ bar.scrollIntoView({block:'nearest', behavior:'smooth'}); }catch(_){}
+  const box=bar.querySelector('.card-search-bar');
+  if(box){
+    box.classList.add('cs-bar-flash');
+    setTimeout(()=>box.classList.remove('cs-bar-flash'),900);
+  }
 }
 function closeWishSearch(){
   document.getElementById('wish-search-bar').style.display='none';
