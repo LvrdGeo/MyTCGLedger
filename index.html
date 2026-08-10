@@ -855,6 +855,12 @@ body.sheet-open .main{overflow:hidden!important}
 .jp-hint-btn b{color:var(--gold)}
 /* Flash the watchlist search bar when opened, so the tap has visible feedback */
 .cs-bar-flash{border-color:var(--gold)!important;box-shadow:0 0 0 3px rgba(245,200,66,.16);transition:box-shadow .2s,border-color .2s}
+/* Watchlist search: results use the real screen height instead of a 280px box,
+   and the empty state collapses so it can't eat the bottom half of the screen. */
+#wish-search-results{max-height:none}
+body.wish-searching #wish-grid{display:none}
+body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background:var(--bg)}
+#wish-search-grid{padding-bottom:calc(90px + env(safe-area-inset-bottom,20px))!important}
 .jp-hint-btn:active{transform:scale(.97);background:rgba(245,200,66,.14)}
 .jp-hint-arrow{color:var(--gold)}
 /* ═══ END · SEARCH PAGINATION CLEARANCE ═══ */
@@ -1619,7 +1625,7 @@ body.sheet-open .main{overflow:hidden!important}
       <button class="card-search-clear" onclick="document.getElementById('wish-search-input').value='';closeWishSearch();">✕</button>
     </div>
     <div id="wish-search-results" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);margin-top:8px;overflow:hidden;">
-      <div id="wish-search-grid" class="cs-grid" style="max-height:280px;overflow-y:auto;padding:10px;"></div>
+      <div id="wish-search-grid" class="cs-grid" style="max-height:none;padding:10px;"></div>
     </div>
   </div>
 
@@ -1651,7 +1657,7 @@ body.sheet-open .main{overflow:hidden!important}
   </div>
 
   <!-- Sort + filter -->
-  <div style="padding:10px 20px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);">
+  <div id="wish-sort-row" style="padding:10px 20px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);">
     <select class="select" id="wish-sort" style="width:auto;font-size:11px;padding:5px 24px 5px 8px;" onchange="renderWishlist()">
       <option value="added">Recently Added</option>
       <option value="price_desc">Highest Price</option>
@@ -9007,12 +9013,28 @@ function closeWishSearch(){
   document.getElementById('wish-search-bar').style.display='none';
   document.getElementById('wish-search-results').style.display='none';
   document.getElementById('wish-search-input').value='';
+  _wishSearchMode(false);
 }
+// While a watchlist search is active, collapse the "Nothing on your watchlist"
+// empty state and the sort row — they were eating the bottom half of the screen and
+// squeezing results into a tiny scroll box.
+function _wishSearchMode(on){
+  const empty = document.getElementById('wish-empty');
+  const sortRow = document.getElementById('wish-sort-row');
+  if (empty) {
+    if (on) { if (empty.style.display !== 'none') { empty.dataset.wasShown='1'; empty.style.display='none'; } }
+    else if (empty.dataset.wasShown === '1') { empty.style.display=''; delete empty.dataset.wasShown; }
+  }
+  if (sortRow) sortRow.style.display = on ? 'none' : '';
+  document.body.classList.toggle('wish-searching', !!on);
+}
+
 function onWishSearch(val){
   clearTimeout(_wishTimer);
   const res=document.getElementById('wish-search-results');
-  if(!val.trim()||val.length<3){res.style.display='none';return;}
+  if(!val.trim()||val.length<3){res.style.display='none';_wishSearchMode(false);return;}
   res.style.display='';
+  _wishSearchMode(true);
   document.getElementById('wish-search-grid').innerHTML='<div class="cs-loading"><div class="spinner"></div>Searching…</div>';
   _wishTimer=setTimeout(async()=>{
     try{
