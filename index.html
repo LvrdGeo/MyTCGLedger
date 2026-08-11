@@ -1625,6 +1625,7 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
       <button class="card-search-clear" onclick="document.getElementById('wish-search-input').value='';closeWishSearch();">✕</button>
     </div>
     <div id="wish-search-results" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);margin-top:8px;overflow:hidden;">
+      <div id="wish-search-count" style="display:none;padding:10px 14px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--muted);"></div>
       <div id="wish-search-grid" class="cs-grid" style="max-height:none;padding:10px;"></div>
     </div>
   </div>
@@ -6734,11 +6735,12 @@ async function runDealSearch(q) {
   // ── Section 2: Live search from pokemontcg.io ──
   try {
     const hdrs = keys.ptcg ? { 'X-Api-Key': keys.ptcg } : {};
-    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=8`, { headers: hdrs });
+    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=60`, { headers: hdrs });
     if (r.ok) {
       const j = await r.json();
       if (j.data?.length) {
         rows.push(`<div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;padding:8px 12px 4px;background:var(--bg4);">All Cards</div>`);
+        rows.push(searchCountLine(j, q, {compact:true}));
         rows.push(...j.data.map(card => {
           const tier = card.tcgplayer?.prices ? Object.values(card.tcgplayer.prices)[0] : null;
           const price = tier?.market || null;
@@ -7168,10 +7170,10 @@ function onDLPickerSearch(val) {
       } else {
         qStr = buildNameQuery(val);
       }
-      const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=20`,{headers:hdrs});
+      const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=60`,{headers:hdrs});
       const j = await r.json();
       if (!j.data?.length){res.innerHTML=collectionHtml||'<div style="padding:8px;font-size:11px;color:var(--muted);">No results.</div>';return;}
-      res.innerHTML = collectionHtml + j.data.map(card=>{
+      res.innerHTML = collectionHtml + searchCountLine(j, q, {compact:true}) + j.data.map(card=>{
         const tier=card.tcgplayer?.prices?Object.values(card.tcgplayer.prices)[0]:null;
         const mkt=tier?.market||null;
         const key='dlp_'+card.id.replace(/[^a-z0-9]/gi,'_');
@@ -7617,7 +7619,7 @@ async function doDealSearch(q) {
       const _ln = (_work || q).replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
       qStr = _ln ? `name:*${_ln.replace(/ /g,'*')}*` : `name:*${_work || q}*`;
     }
-    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=24`, {headers: hdrs});
+    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=120`, {headers: hdrs});
     const j = await r.json();
     if (!j.data?.length) { grid.innerHTML = '<div class="cs-empty">No results.</div>'; return; }
     grid.innerHTML = j.data.map(card => {
@@ -8816,11 +8818,11 @@ async function doModalSearch(q){
     // Use dex number for known pokemon, name search for everything else
     const dexNum = getPokemonDexNumber(q);
     const qStr   = dexNum ? buildDexNameQuery(q, dexNum) : buildNameQuery(q);
-    const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=20`,{headers:hdrs});
+    const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=60`,{headers:hdrs});
     if(!r.ok)throw new Error('API '+r.status);
     const j=await r.json();
     if(!j.data?.length){dd.innerHTML='<div style="padding:12px 14px;font-size:12px;color:var(--muted);">No cards found for "'+q+'"</div>';return;}
-    dd.innerHTML=j.data.map(c=>{
+    dd.innerHTML=searchCountLine(j,q,{compact:true})+j.data.map(c=>{
       const tier=c.tcgplayer?.prices?Object.values(c.tcgplayer.prices)[0]:null;
       const price=tier?.market||null;
       const key='md_'+c.id.replace(/[^a-z0-9]/gi,'_');
@@ -8864,9 +8866,9 @@ document.addEventListener('click',e=>{
 function onNameSearch(val){clearTimeout(searchTimer);const dd=document.getElementById('name-dd');if(!val.trim()){dd.classList.remove('open');return;}dd.classList.add('open');dd.innerHTML='<div class="sd-loading"><div class="spinner"></div>Searching…</div>';searchTimer=setTimeout(()=>doNameSearch(val),350);}
 async function doNameSearch(q){
   const dd=document.getElementById('name-dd');
-  try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=12`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();
+  try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=60`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();
     if(!j.data?.length){dd.innerHTML='<div style="padding:14px;font-size:12px;color:var(--muted);">No cards found.</div>';return;}
-    dd.innerHTML=j.data.map(c=>{const tier=c.tcgplayer?.prices?Object.values(c.tcgplayer.prices)[0]:null;const price=tier?.market||null;const key='sd_'+c.id.replace(/[^a-z0-9]/gi,'_');window._sdCards=window._sdCards||{};window._sdCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.large||c.images?.small||'',rarity:c.rarity||''};
+    dd.innerHTML=searchCountLine(j,q,{compact:true})+j.data.map(c=>{const tier=c.tcgplayer?.prices?Object.values(c.tcgplayer.prices)[0]:null;const price=tier?.market||null;const key='sd_'+c.id.replace(/[^a-z0-9]/gi,'_');window._sdCards=window._sdCards||{};window._sdCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.large||c.images?.small||'',rarity:c.rarity||''};
       return `<div class="sd-item" onclick="quickAdd(window._sdCards['${key}'])">${c.images?.small?`<img class="sd-thumb" src="${c.images.small}" alt="${c.name}" loading="lazy">`:'<div class="sd-ph">⟡</div>'}<div style="min-width:0;"><div class="sd-name">${c.name}</div><div class="sd-meta">${c.set?.name||''} · #${c.number||'?'} · ${c.rarity||''}</div></div><div class="sd-price">${price!=null?`<div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div>`:'<div class="sd-plbl">Click to add</div>'}</div></div>`;}).join('');
   }catch(e){dd.innerHTML='<div style="padding:14px;font-size:12px;color:var(--muted);">Search failed. Check pokemontcg.io key.</div>';}
 }
@@ -9032,7 +9034,7 @@ function _wishSearchMode(on){
 function onWishSearch(val){
   clearTimeout(_wishTimer);
   const res=document.getElementById('wish-search-results');
-  if(!val.trim()||val.length<3){res.style.display='none';_wishSearchMode(false);return;}
+  if(!val.trim()||val.length<3){res.style.display='none';_wishSearchMode(false);const c=document.getElementById('wish-search-count');if(c)c.style.display='none';return;}
   res.style.display='';
   _wishSearchMode(true);
   document.getElementById('wish-search-grid').innerHTML='<div class="cs-loading"><div class="spinner"></div>Searching…</div>';
@@ -9041,9 +9043,16 @@ function onWishSearch(val){
       const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};
       const dexNum=getPokemonDexNumber(val);
       const qStr=dexNum?buildDexNameQuery(val, dexNum):buildNameQuery(val);
-      const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=24`,{headers:hdrs});
+      const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(qStr)}&orderBy=-set.releaseDate&pageSize=250`,{headers:hdrs});
       const j=await r.json();
-      if(!j.data?.length){document.getElementById('wish-search-grid').innerHTML='<div class="cs-empty">No results.</div>';return;}
+      const _cnt=document.getElementById('wish-search-count');
+      if(!j.data?.length){
+        if(_cnt){_cnt.style.display='none';}
+        document.getElementById('wish-search-grid').innerHTML='<div class="cs-empty">No results.</div>';return;}
+      if(_cnt){
+        _cnt.innerHTML = searchCountLine(j, val).replace(/^<div[^>]*>/,'').replace(/<\/div>$/,'');
+        _cnt.style.display='';
+      }
       document.getElementById('wish-search-grid').innerHTML=j.data.map(card=>{
         const tier=card.tcgplayer?.prices?Object.values(card.tcgplayer.prices)[0]:null;
         const price=tier?.market||null;
@@ -9969,6 +9978,27 @@ function tcgVariantChips(card){
   return '<div class="cs-vars">' + t.map(v => '<span class="cs-var"><span class="cs-var-l">'+v.label+'</span>$'+v.price.toFixed(2)+'</span>').join('') + '</div>';
 }
 
+// Shared "N cards exist across all sets" line for EVERY card-search surface in the
+// app (card search tab, watchlist, deal centre, add-card modal, name dropdown).
+// Uses the API's totalCount — the true number across all sets — not the page size,
+// so a capped result list can never masquerade as the complete picture.
+function searchCountLine(j, query, opts){
+  opts = opts || {};
+  const shown = (j && Array.isArray(j.data)) ? j.data.length : 0;
+  const total = (j && typeof j.totalCount === 'number') ? j.totalCount : shown;
+  if (!total) return '';
+  let dex = null;
+  try { dex = (typeof getPokemonDexNumber === 'function') ? getPokemonDexNumber(query) : null; } catch(_){}
+  const pad = opts.compact ? '7px 12px' : '10px 14px';
+  const fs  = opts.compact ? '10px' : '11px';
+  return '<div style="padding:'+pad+';border-bottom:1px solid var(--border);font-family:var(--mono);font-size:'+fs+';color:var(--muted);background:var(--bg3);">'
+    + '<b style="color:var(--text);">' + total.toLocaleString() + '</b> card' + (total===1?'':'s')
+    + ' exist across all sets'
+    + (dex ? ' <span style="color:var(--muted2);">(Pok\u00e9dex #' + dex + ')</span>' : '')
+    + (shown < total ? ' <span style="color:var(--muted2);">\u00b7 showing ' + shown + '</span>' : '')
+    + '</div>';
+}
+
 function buildDexNameQuery(input, dexNum){
   const n = String(input||'').replace(/[^A-Za-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
   if (!dexNum) return n ? `name:*${n.replace(/ /g,'*')}*` : '';
@@ -10352,20 +10382,25 @@ const JP_CARDS_PREFIX = 'pkjp_' + JP_SRC + '_cards_';
 window._searchLang = 'EN';
 let _jpSets = null, _jpSetCards = {}, _jpTimer = null;
 
-function setSearchLang(lang, btn){
+function setSearchLang(lang, btn, opts){
+  opts = opts || {};
   window._searchLang = lang;
   document.querySelectorAll('#lang-toggle .era-pill').forEach(b=>b.classList.toggle('active', b===btn));
-  // reset any active search
+  // reset any active search — SKIPPED when we're switching in order to run a search
+  // immediately (jpJumpToSearch), because clearTabSearch()'s empty state and the
+  // set-browser fetch below would otherwise race and overwrite the results.
   const inp = document.getElementById('tab-search-input');
-  if (inp) { inp.value=''; }
-  try { clearTabSearch(); } catch(_){}
+  if (!opts.keepQuery) {
+    if (inp) { inp.value=''; }
+    try { clearTabSearch(); } catch(_){}
+  }
   const filters = document.getElementById('tab-search-filters');
   const eras    = document.getElementById('set-era-filters');
   if (lang === 'JP') {
     if (filters) filters.style.display = 'none';          // EN set/rarity selects
     if (eras)    eras.style.display    = 'none';          // EN era pills
     if (inp) inp.placeholder = 'Search any Japanese card…';
-    jpShowSets();
+    if (!opts.keepQuery) jpShowSets();
   } else {
     if (filters) filters.style.display = 'flex';
     if (eras)    eras.style.display    = 'flex';
@@ -10671,9 +10706,17 @@ async function jpAlsoAvailable(name){
 // Switch to Japanese mode and re-run the same search there.
 function jpJumpToSearch(q){
   const jpBtn = document.querySelector('#lang-toggle .era-pill[data-lang="JP"]');
-  if (jpBtn) setSearchLang('JP', jpBtn);
+  if (jpBtn) setSearchLang('JP', jpBtn, {keepQuery:true});   // no reset, no set-browser race
   const inp = document.getElementById('tab-search-input');
   if (inp) inp.value = q;
+  // Clear leftover English UI so it can't sit on top of the Japanese results.
+  try {
+    const e = document.getElementById('tab-search-empty'); if (e) e.style.display = 'none';
+    const g = document.getElementById('tab-search-grid');  if (g) g.innerHTML = '';
+    const p = document.getElementById('tab-search-pagination'); if (p) p.style.display = 'none';
+    const h = document.getElementById('tab-search-jp-hint'); if (h) h.style.display = 'none';
+    const c = document.getElementById('tab-search-count'); if (c) c.textContent = '';
+  } catch(_){}
   jpOnSearch(q);
 }
 
