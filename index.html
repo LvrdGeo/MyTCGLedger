@@ -874,6 +874,18 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
 @media(min-width:769px){
   #wish-grid, #singles-grid, #psa-grid, #sealed-grid{padding-bottom:24px}
 }
+/* ═══ PAGE BOTTOM CLEARANCE (2026-08, additive) ═══
+   No page had bottom padding, so the last section of EVERY page (dashboard, deals,
+   intelligence, analyzer, settings…) ran underneath the fixed tab bar and felt
+   "stuck" — you could not scroll it into view. One rule at the page level covers
+   all of them; the per-grid rule above then adds nothing extra on mobile.
+   Rollback: delete this block. */
+@media(max-width:768px){
+  .page.active{padding-bottom:calc(88px + env(safe-area-inset-bottom,20px))}
+  /* grids already carry their own clearance — don't double it up */
+  #wish-grid, #singles-grid, #psa-grid, #sealed-grid{padding-bottom:8px}
+}
+/* ═══ END · PAGE BOTTOM CLEARANCE ═══ */
 /* ═══ END · COLLECTION GRID CLEARANCE ═══ */
 /* ═══ END · SEARCH PAGINATION CLEARANCE ═══ */
 /* ═══ END · TIMELINE CHART REVAMP ═══ *//* ═══════════════════════ END · SCROLL BEHAVIOUR ═══════════════════════ */
