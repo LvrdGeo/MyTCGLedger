@@ -10691,9 +10691,17 @@ async function jpAlsoAvailable(name){
   const q = String(name||'').trim();
   if (!q || window._searchLang === 'JP') return;
   try {
-    const r = await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(q)}&limit=60&lang=en`);
-    const j = await r.json();
-    const n = (j && Array.isArray(j.data)) ? j.data.length : 0;
+    // Translate first so the count reflects the NATIVE Japanese catalogue, and read
+    // j.total (true count) instead of the capped array length.
+    const ja = await jpTranslateName(q);
+    let r = await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(ja || q)}&limit=300${ja ? '' : '&lang=en'}`);
+    let j = await r.json();
+    let n = (j && typeof j.total === 'number') ? j.total : ((j && Array.isArray(j.data)) ? j.data.length : 0);
+    if (!n && ja) {
+      r = await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(q)}&limit=300&lang=en`);
+      j = await r.json();
+      n = (j && typeof j.total === 'number') ? j.total : ((j && Array.isArray(j.data)) ? j.data.length : 0);
+    }
     if (!n) return;
     const safe = q.replace(/[^A-Za-z0-9 .'-]/g,'').replace(/'/g,"\\'");
     host.innerHTML = '<button class="jp-hint-btn" onclick="jpJumpToSearch(\'' + safe + '\')">' +
@@ -10709,15 +10717,39 @@ function jpJumpToSearch(q){
   if (jpBtn) setSearchLang('JP', jpBtn, {keepQuery:true});   // no reset, no set-browser race
   const inp = document.getElementById('tab-search-input');
   if (inp) inp.value = q;
-  // Clear leftover English UI so it can't sit on top of the Japanese results.
+  // Clear the English RESULTS, but keep #tab-search-empty VISIBLE — the Japanese
+  // browser (and the grid jpOnSearch renders into) lives inside it, so hiding it
+  // meant the search ran and painted into a hidden container: nothing appeared.
   try {
-    const e = document.getElementById('tab-search-empty'); if (e) e.style.display = 'none';
+    const e = document.getElementById('tab-search-empty'); if (e) e.style.display = '';
     const g = document.getElementById('tab-search-grid');  if (g) g.innerHTML = '';
     const p = document.getElementById('tab-search-pagination'); if (p) p.style.display = 'none';
     const h = document.getElementById('tab-search-jp-hint'); if (h) h.style.display = 'none';
     const c = document.getElementById('tab-search-count'); if (c) c.textContent = '';
+    const l = document.getElementById('tab-search-loading'); if (l) l.style.display = 'none';
+    // English-only chrome that would otherwise sit above the Japanese results
+    const f = document.getElementById('tab-search-filters'); if (f) f.style.display = 'none';
+    const era = document.getElementById('set-era-filters');  if (era) era.style.display = 'none';
   } catch(_){}
   jpOnSearch(q);
+}
+
+// English Pokémon name → Japanese, via the Worker's /jp-name route (PokeAPI,
+// edge-cached 30d). Cached in localStorage permanently — names never change — so
+// each Pokémon costs one request once, ever, on this device. Returns null when the
+// term isn't a Pokémon (trainer cards etc.), and callers fall back to their existing
+// search, so nothing regresses.
+async function jpTranslateName(en){
+  const q = String(en||'').trim();
+  if (!q) return null;
+  const key = 'pkjp_name_' + q.toLowerCase();
+  try { const c = localStorage.getItem(key); if (c !== null) return c || null; } catch(_){}
+  try {
+    const j = await (await fetch(`${EBAY_WORKER}/jp-name?q=${encodeURIComponent(q)}`)).json();
+    const ja = (j && j.ja) ? String(j.ja) : '';
+    try { localStorage.setItem(key, ja); } catch(_){}
+    return ja || null;
+  } catch(_){ return null; }
 }
 
 function jpOnSearch(val){
@@ -10730,16 +10762,46 @@ function jpOnSearch(val){
   _jpTimer = setTimeout(async () => {
     grid.style.display='none'; cGrid.style.display='none'; if (load) load.style.display='';
     document.getElementById('set-browser-set-label').textContent = 'Search: ' + q;
+    jpTranslateName(q).then(ja => { if(ja){ const el=document.getElementById('set-browser-set-label'); if(el) el.textContent = 'Search: ' + q + ' \u00b7 ' + ja; } });
     document.getElementById('set-browser-set-name').style.display='inline-flex';
     const backBtn = document.getElementById('set-back-btn');
     if (backBtn) backBtn.style.display='inline-flex';
     try {
-      const j = await (await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(q)}&limit=40`)).json();
-      if (j && j.error && !(Array.isArray(j.data) && j.data.length)) throw new Error(String(j.error));
-      const cards = (Array.isArray(j.data)?j.data:[]).map(c => jpNormCard(c, ''));
+      // 1) Translate to the NATIVE Japanese name and search the ja catalogue
+      //    ("Eevee" → イーブイ) — the most complete match, and the only way to reach
+      //    Japan-exclusive cards that have no English record.
+      // 2) Raw term against ja (handles already-Japanese input).
+      // 3) TCGdex's en index as a last resort.
+      let j = null, arr = [];
+      const _ja = await jpTranslateName(q);
+      if (_ja) {
+        j = await (await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(_ja)}&limit=300`)).json();
+        arr = (j && Array.isArray(j.data)) ? j.data : [];
+      }
+      if (!arr.length) {
+        j = await (await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(q)}&limit=300`)).json();
+        arr = (j && Array.isArray(j.data)) ? j.data : [];
+      }
+      if (!arr.length) {
+        const je = await (await fetch(`${EBAY_WORKER}/jp-cards?search=${encodeURIComponent(q)}&limit=300&lang=en`)).json();
+        if (je && Array.isArray(je.data) && je.data.length) { j = je; arr = je.data; }
+      }
+      if (j && j.error && !arr.length) throw new Error(String(j.error));
+      const cards = arr.map(c => jpNormCard(c, ''));
       if (load) load.style.display='none';
-      document.getElementById('set-browser-count').textContent = cards.length + ' results';
-      cGrid.innerHTML = `<div class="cs-grid" id="jp-search-inner" style="max-height:none;padding:0;"></div>`;
+      // TRUE total across every Japanese set. The Worker reports it separately from
+      // the page slice — the old code printed the CAPPED array length, which is why
+      // the hint always read exactly "60".
+      const _total = (j && typeof j.total === 'number') ? j.total : cards.length;
+      document.getElementById('set-browser-count').textContent = _total + ' cards';
+      const _jaLbl = _ja ? ' \u00b7 ' + _ja : '';
+      cGrid.innerHTML =
+        '<div style="padding:10px 14px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--bg3);">'
+        + '<b style="color:var(--text);">' + _total.toLocaleString() + '</b> Japanese card' + (_total===1?'':'s')
+        + ' exist across all sets <span style="color:var(--muted2);">' + q + _jaLbl + '</span>'
+        + (cards.length < _total ? ' <span style="color:var(--muted2);">\u00b7 showing ' + cards.length + '</span>' : '')
+        + '</div>'
+        + `<div class="cs-grid" id="jp-search-inner" style="max-height:none;padding:0;"></div>`;
       cGrid.style.display='';
       jpRenderCardsInto('jp-search-inner', cards);
     } catch(e) {
