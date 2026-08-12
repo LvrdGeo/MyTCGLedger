@@ -91,7 +91,8 @@
   } catch(e) { /* monitoring must never break page load */ }
 })();
 </script>
-<title>MyTCG Ledger V6</title>
+<!-- (2026-08) A second, weaker title element ("MyTCG Ledger V6") sat here and overrode
+     the SEO/OG-aligned one above. Removed — there is now exactly one title element. -->
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -102,6 +103,9 @@
   --blue:#4f8ef7;--purple:#b06ef5;--teal:#0fd4b0;--orange:#ff8c42;
   --font:'Inter',sans-serif;--mono:'IBM Plex Mono',monospace;--disp:'Syne',sans-serif;
   --r:8px;--r2:14px;
+  /* --border2 was referenced by 6 rules but never defined, so those rules silently
+     dropped out. Aliased to --b2 (the real token) — no other value changed. */
+  --border2:rgba(255,255,255,.11);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:14px}
@@ -1437,6 +1441,18 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
     <div id="dp-closed-empty" style="display:none;background:var(--bg3);border-radius:var(--r);padding:14px;font-size:12px;color:var(--muted);text-align:center;">No closed deals yet. Mark an open deal as sold to see it here.</div>
   </div>
 
+  <!-- LEGACY DEALS — records written by the retired deal-modal / saveDeal() path.
+       They have no status/dealType, so before this block they were stored, synced
+       and counted but rendered NOWHERE. Read-only and excluded from the stats above
+       (their {type,amount} shape has no buy/sell pair to compute ROI from). -->
+  <div style="padding:0 20px;" id="dp-legacy-section" hidden>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:14px;">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;">Legacy Deals <span id="dp-legacy-count" style="color:var(--muted2);"></span></div>
+      <span style="font-size:10px;color:var(--muted);">Saved by an earlier version · not included in the stats above</span>
+    </div>
+    <div id="dp-legacy-list"></div>
+  </div>
+
   <!-- DEAL CARD GALLERY -->
   <div style="padding:0 20px 14px;" id="dp-gallery-section" style="display:none;">
     <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;margin-top:16px;">Cards Traded</div>
@@ -2335,26 +2351,73 @@ function nrvForCard(card, market){
   return { realizable, breakdown: { market: m, disc, gross, fees, shipping, tax, net }, sellable: net > 0 };
 }
 
-// Portfolio-wide realizable total. SEPARATE aggregator — mirrors the read pattern
-// AppState uses but never touches AppState. Read-only over collection/sealed/pcache.
+// ════════════════════════════════════════════════════════════════════════════
+// ── CANONICAL INVENTORY VALUE PATH (2026-08) ──
+// ONE place decides what a held item is currently worth. Before this block the
+// same rule was re-implemented in ~20 renderers, half of which read the live
+// price cache with NO lastMarketValue fallback — so a freshly-synced device
+// showed a non-zero Dashboard total and a $0 Portfolio total from the SAME
+// collection. These helpers do not change how prices are CALCULATED (bestPrice /
+// analyze* / the sealed engine are untouched); they only standardise retrieval.
+//   cardPriceData(card)  → the cached price payload, or null   (cache read)
+//   cardValue(card)      → per-unit market value, with fallback (value read)
+//   cardLineValue(card)  → cardValue × qty                      (line total)
+//   itemQty(item)        → sane quantity for any inventory record
+// Sealed products keep their own resolver (sealedEffectiveValue) because their
+// value comes from manual/market fields, not the card price cache.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Canonical price-cache read. The ONLY place a card's cache entry is looked up
+// for rendering, so the key format lives in exactly one function (cacheKey).
+// Tolerant of malformed/legacy records — returns null rather than throwing.
+function cardPriceEntry(card){
+  if (!card || card.id == null) return null;
+  try { return pcache[cacheKey(card)] || null; } catch(_) { return null; }
+}
+function cardPriceData(card){
+  const e = cardPriceEntry(card);
+  return (e && e.data) ? e.data : null;
+}
+
+// Quantity for any inventory record. Missing/0/NaN/negative → 1 (never drops a row).
+function itemQty(item){
+  const q = parseInt(item && item.qty, 10);
+  return (isFinite(q) && q > 0) ? q : 1;
+}
+
 // Resolve a card's market value: live pcache wins; else the synced lastMarketValue
 // baseline, so a freshly-synced device shows a non-zero total before its own refresh.
+// Returns 0 (never null/NaN) so callers can sum without guarding.
 function cardValue(card){
-  const e = pcache[cacheKey(card)];
-  if (e && e.data) return bestPrice(e.data, card.type === 'graded');
-  return +card.lastMarketValue || 0;
+  if (!card) return 0;
+  const d = cardPriceData(card);
+  if (d) {
+    const bp = bestPrice(d, card.type === 'graded');
+    if (isFinite(bp) && bp > 0) return bp;
+    // A cached entry that prices to 0 is a legitimate "no price found" — fall
+    // through to the synced stamp rather than reporting a false $0.
+  }
+  const stamp = parseFloat(card.lastMarketValue);
+  return (isFinite(stamp) && stamp > 0) ? stamp : 0;
 }
+
+// Per-line total (value × quantity). Used by every aggregate so qty handling
+// can't drift between the Dashboard, Portfolio and Inventory panel.
+function cardLineValue(card){ return cardValue(card) * itemQty(card); }
+
+// Portfolio-wide realizable total. SEPARATE aggregator — mirrors the read pattern
+// AppState uses but never touches AppState. Read-only over collection/sealed/pcache.
 
 function portfolioNRV(){
   let total = 0;
   collection.forEach(card => {
     const bp = cardValue(card);
     const r  = nrvForCard(card, bp);
-    if (r.realizable != null) total += r.realizable * (card.qty || 1);
+    if (r.realizable != null) total += r.realizable * itemQty(card);
   });
   sealed.forEach(prod => {
     const r = nrvForCard({ type:'sealed', paid: prod.paid }, sealedEffectiveValue(prod));
-    if (r.realizable != null) total += r.realizable * (prod.qty || 1);
+    if (r.realizable != null) total += r.realizable * itemQty(prod);
   });
   return total;
 }
@@ -2405,15 +2468,16 @@ const AppState = {
         // synced device shows a non-zero total before running its own live refresh.
         const bp   = cardValue(card);
         const paid = parseFloat(card.paid || 0);
+        const qty  = itemQty(card);
 
         if (bp > 0) {
-          totalVal += bp * (card.qty || 1);
-          concentrationMap[card.name] = (concentrationMap[card.name] || 0) + bp * (card.qty || 1);
+          totalVal += bp * qty;
+          concentrationMap[card.name] = (concentrationMap[card.name] || 0) + bp * qty;
         }
-        if (paid > 0) totalPaid += paid * (card.qty || 1);
+        if (paid > 0) totalPaid += paid * qty;
 
         if (bp > 0 && paid > 0) {
-          const gain = (bp - paid) * (card.qty || 1);
+          const gain = (bp - paid) * qty;
           if (gain > bestGain)  { bestGain = gain;  bestCard = { card, gain, bp }; }
           if (gain < worstGain) { worstGain = gain; worstCard = { card, gain, bp }; }
           movers.push({ card, bp, gain, pct: ((gain/paid)*100).toFixed(1) });
@@ -2423,11 +2487,12 @@ const AppState = {
       sealed.forEach(s => {
         const v = sealedEffectiveValue(s);
         const p = parseFloat(s.paid || 0);
+        const q = itemQty(s);
         if (v > 0) {
-          totalVal  += v * (s.qty || 1);
-          concentrationMap[s.name] = (concentrationMap[s.name] || 0) + v * (s.qty || 1);
+          totalVal  += v * q;
+          concentrationMap[s.name] = (concentrationMap[s.name] || 0) + v * q;
         }
-        if (p > 0) totalPaid += p * (s.qty || 1);
+        if (p > 0) totalPaid += p * q;
       });
 
       const pnl    = totalPaid > 0 ? totalVal - totalPaid : null;
@@ -2452,8 +2517,8 @@ const AppState = {
       this.totalPnL       = pnl;
       this.totalPnLPct    = pnlPct;
       this.cashPosition   = parseFloat(localStorage.getItem('pkv2_cash') || '0');
-      this.singlesCount   = collection.filter(c=>c.type!=='graded'&&c.type!=='sealed').reduce((s,c)=>s+(c.qty||1),0);
-      this.slabsCount     = collection.filter(c=>c.type==='graded').reduce((s,c)=>s+(c.qty||1),0);
+      this.singlesCount   = collection.filter(c=>c.type!=='graded'&&c.type!=='sealed').reduce((s,c)=>s+itemQty(c),0);
+      this.slabsCount     = collection.filter(c=>c.type==='graded').reduce((s,c)=>s+itemQty(c),0);
       this.sealedCount    = sealed.length;
       this.addedThisMonth = collection.filter(c=>{
         if(!c.added)return false;
@@ -3984,12 +4049,11 @@ async function lookupCardId(card){
   }catch(e){ console.error('[lookupCardId] failed:', e); }
   return null;
 }
-function simulate(card){
-  let seed=0;for(const ch of card.name)seed+=ch.charCodeAt(0);
-  const base=((seed%90)+8)*({holo:3.8,ex:3.0,graded:9.5,reverse:1.6,standard:1}[card.type]||1);
-  const cm={NM:1,LP:.78,MP:.55,HP:.35}[card.cond]||1;const b=base*cm;
-  return{tcg:+(b*(.9+Math.abs(Math.sin(seed))*.2)).toFixed(2),ebay:+(b*(.83+Math.abs(Math.sin(seed*2))*.18)).toFixed(2),ppt:+(b*(.86+Math.abs(Math.sin(seed*3))*.16)).toFixed(2),psa:card.type==='graded'?+(b*(1.4+Math.abs(Math.sin(seed*4))*.5)).toFixed(2):null,img:card.img||null,trend7:null,trend30:null,ebay_sales:[]};
-}
+// REMOVED (2026-08): simulate(card) — generated a complete fake price object
+// (tcg/ebay/ppt/psa) from a hash of the card name. Caller analysis found ZERO
+// callers anywhere in the file; the live pricing path is fetchLivePrices() →
+// analyzePriceRouted(). Deleted rather than kept dormant because an accidental
+// re-wiring would silently inject invented prices into the portfolio.
 // ══════════════════════════════════════════════════════════
 // SMART PRICING BRAIN
 // Reasons about a card's price the way a knowledgeable person would:
@@ -4777,11 +4841,11 @@ function openSealedDetail(id){
   const tcgQ = encodeURIComponent(p.name+(p.set?' '+p.set:''));
   const ebayQ = encodeURIComponent(p.name+(p.set?' '+p.set:'')+' sealed');
   const _sealedImg = sealedImageFor(p);
-  const img = _sealedImg ? `<img src="${_sealedImg}" alt="${p.name}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : '';
+  const img = _sealedImg ? `<img src="${esc(_sealedImg)}" alt="${esc(p.name)}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : '';
   const row = (lbl,v,col) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;"><span style="color:var(--muted2);">${lbl}</span><span style="font-family:var(--mono);${col?`color:${col};`:''}text-align:right;">${v}</span></div>`;
 
   document.getElementById('detail-inner').innerHTML = `
-    <div class="modal-hd"><h2 style="font-size:18px;">${p.name}</h2><button class="modal-close" onclick="closeModal('detail-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-hd"><h2 style="font-size:18px;">${esc(p.name)}</h2><button class="modal-close" onclick="closeModal('detail-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <div style="display:flex;gap:16px;margin-bottom:18px;align-items:flex-start;">
         <div style="width:128px;height:128px;flex-shrink:0;border-radius:12px;overflow:hidden;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:54px;position:relative;">
@@ -4791,10 +4855,10 @@ function openSealedDetail(id){
           <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">
             <span class="ct-badge type-standard">${info.label}</span>
             <span class="ct-badge" style="background:${p.cond==='sealed'?'rgba(46,204,128,.18)':'rgba(255,140,66,.18)'};color:${p.cond==='sealed'?'#4ade80':'var(--orange)'};">${p.cond==='sealed'?'SEALED':(p.cond||'').toUpperCase()}</span>
-            ${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${p.lang}</span>`:''}
+            ${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${esc(p.lang)}</span>`:''}
             ${qty>1?`<span class="ct-badge" style="background:var(--bg4);color:var(--muted);">×${qty}</span>`:''}
           </div>
-          <div style="font-size:11px;color:var(--muted2);margin-bottom:6px;">${p.set||''}</div>
+          <div style="font-size:11px;color:var(--muted2);margin-bottom:6px;">${esc(p.set||'')}</div>
           <div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;">
             <span style="font-family:var(--disp);font-size:26px;font-weight:800;color:var(--green);">${val>0?money(totalVal):'—'}</span>
             ${val>0?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;background:${vsrc==='market'?'rgba(46,204,128,.16)':'rgba(245,200,66,.16)'};color:${vsrc==='market'?'var(--green)':'var(--gold)'};">${vsrc==='market'?'LIVE':'MANUAL'}</span>`:''}
@@ -4824,15 +4888,15 @@ function openSealedDetail(id){
 
       <div style="margin-bottom:16px;">
         <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;">Details</div>
-        ${row('Set', p.set||'—')}
+        ${row('Set', esc(p.set||'—'))}
         ${row('Type', info.label)}
-        ${row('Condition', p.cond==='sealed'?'Factory Sealed':(p.cond||'—'))}
-        ${row('Language', p.lang||'EN')}
+        ${row('Condition', p.cond==='sealed'?'Factory Sealed':esc(p.cond||'—'))}
+        ${row('Language', esc(p.lang||'EN'))}
         ${row('Quantity', String(qty))}
         ${paid>0?row('Paid', money(paid)+(qty>1?` (${money(totalPaid)} total)`:'')):''}
         ${p.date?row('Purchase date', new Date(Date.parse(p.date)||Date.now()).toLocaleDateString()):''}
         ${p.added?row('Added', new Date(Date.parse(p.added)||Date.now()).toLocaleDateString()):''}
-        ${p.notes?`<div style="padding:8px 0;font-size:12px;color:var(--muted2);"><span style="color:var(--muted);">Notes:</span> ${p.notes}</div>`:''}
+        ${p.notes?`<div style="padding:8px 0;font-size:12px;color:var(--muted2);"><span style="color:var(--muted);">Notes:</span> ${esc(p.notes)}</div>`:''}
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
@@ -5014,7 +5078,7 @@ function renderSealedEvidence(id){
   const isAsking = /browse/i.test(source);
   const sourceLbl = isAsking ? 'Active listings (asking prices)' : (/sold/i.test(source) ? 'Recent sold listings' : (source||'—'));
   const whenStr = when ? (typeof when==='number' ? new Date(when).toLocaleDateString() : new Date(Date.parse(when)||Date.now()).toLocaleDateString()) : '';
-  const img = item.img ? `<img src="${item.img}" alt="" loading="lazy" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">` : '';
+  const img = item.img ? `<img src="${esc(item.img)}" alt="" loading="lazy" style="width:54px;height:54px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">` : '';
   wrap.hidden = false;
   wrap.innerHTML = `
     <div style="background:var(--bg3);border-radius:var(--r2);padding:12px 14px;display:flex;flex-direction:column;gap:10px;">
@@ -5163,6 +5227,13 @@ function pct(v, dp=1){ if (v == null || !isFinite(v)) return ''; return (v >= 0 
 
 // fmtDate — central short date formatter ('Jun 10'); '' on invalid input.
 function fmtDate(v){ const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+
+// esc — THE canonical HTML escaper for dynamic strings placed into innerHTML.
+// Apply to anything the user typed (card/product names, sets, notes, image URLs)
+// or that arrived from a third-party API. null/undefined → '' so it is a drop-in
+// for the existing `${x||''}` patterns. Never apply it to markup the app itself
+// generates (editionBadge(), tileImage(), nested templates) — that is already HTML.
+function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]); }
 
 function getBestCached(card){return cardValue(card);}
 
@@ -5552,14 +5623,13 @@ function renderHistoryMilestones(history) {
 function renderPortfolio(){
   let totalVal=0,totalPaid=0,singlesVal=0,singlesPaid=0,psaVal=0,psaPaid=0,sealedVal=0,sealedPaid=0;
   collection.forEach(card=>{
-    const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
-    const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);
+    const val=cardLineValue(card);const paid=parseFloat(card.paid||0)*itemQty(card);
     totalVal+=val;if(paid>0)totalPaid+=paid;
     if(card.type==='graded'){psaVal+=val;if(paid>0)psaPaid+=paid;}
     else{singlesVal+=val;if(paid>0)singlesPaid+=paid;}
   });
   sealed.forEach(prod=>{
-    const val=sealedEffectiveValue(prod)*(prod.qty||1);const paid=parseFloat(prod.paid||0)*(prod.qty||1);
+    const q=itemQty(prod);const val=sealedEffectiveValue(prod)*q;const paid=parseFloat(prod.paid||0)*q;
     totalVal+=val;sealedVal+=val;if(paid>0){totalPaid+=paid;sealedPaid+=paid;}
   });
   const pnl=totalPaid>0?totalVal-totalPaid:null;
@@ -5597,14 +5667,14 @@ function renderPortfolio(){
 
 function renderTopHoldings(){
   const rows=[];
-  collection.forEach(card=>{const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;const val=isFinite(bp)&&bp>0?bp*(card.qty||1):0;const paid=parseFloat(card.paid||0)*(card.qty||1);const pnl=val>0&&paid>0?val-paid:null;rows.push({name:card.name,meta:(card.set||'')+(card.grade?' · '+card.grade:' · '+card.cond),val,pnl,img:p?.img||card.img||null,id:card.id});});
+  collection.forEach(card=>{const p=cardPriceData(card);const val=cardLineValue(card);const paid=parseFloat(card.paid||0)*itemQty(card);const pnl=val>0&&paid>0?val-paid:null;rows.push({name:card.name,meta:(card.set||'')+(card.grade?' · '+card.grade:' · '+card.cond),val,pnl,img:p?.img||card.img||null,id:card.id});});
   rows.sort((a,b)=>b.val-a.val);
   const el=document.getElementById('top-holdings');
   if(!rows.length||!rows[0].val){el.innerHTML='<p style="font-size:12px;color:var(--muted);padding:10px 0;">Add cards and purchase prices to see top holdings.</p>';return;}
   el.innerHTML=rows.slice(0,8).map((r,i)=>`<div class="holding-row" onclick="openDetail('${r.id}')">
     <div style="font-family:var(--mono);font-size:11px;color:var(--muted);width:18px;flex-shrink:0;">${i+1}</div>
-    <div class="himg">${r.img?`<img src="${r.img}" alt="${r.name}" loading="lazy">`:'⟡'}</div>
-    <div class="hinfo"><div class="holding-name">${r.name}</div><div class="holding-meta">${r.meta}</div></div>
+    <div class="himg">${r.img?`<img src="${esc(r.img)}" alt="${esc(r.name)}" loading="lazy">`:'⟡'}</div>
+    <div class="hinfo"><div class="holding-name">${esc(r.name)}</div><div class="holding-meta">${esc(r.meta)}</div></div>
     <div class="hright"><div class="hval">${fmtPrice(r.val)}</div>${r.pnl!=null?`<div class="hpnl" style="color:${r.pnl>=0?'var(--green)':'var(--red)'};">${r.pnl>=0?'+':''}${fmtPrice(r.pnl)}</div>`:''}</div>
   </div>`).join('');
 }
@@ -5614,10 +5684,9 @@ let _pnlSort = 'pnl';
 function pnlRows(){
   const rows = [];
   collection.forEach(card=>{
-    const p = pcache[cacheKey(card)]?.data;
-    const bp = p ? bestPrice(p, card.type==='graded') : 0;
-    const qty = card.qty||1;
-    const val = (isFinite(bp)&&bp>0) ? bp*qty : 0;
+    const p = cardPriceData(card);
+    const qty = itemQty(card);
+    const val = cardLineValue(card);
     const cost = parseFloat(card.paid||0)*qty;
     const pnl = (val>0 && cost>0) ? val-cost : null;
     const pct = (pnl!=null && cost>0) ? (pnl/cost)*100 : null;
@@ -5626,7 +5695,7 @@ function pnlRows(){
       edition:cardEdition(card), img:(p&&p.img)||card.img||null, val, cost, pnl, pct });
   });
   sealed.forEach(prod=>{
-    const qty = prod.qty||1;
+    const qty = itemQty(prod);
     const val = sealedEffectiveValue(prod)*qty;
     const cost = parseFloat(prod.paid||0)*qty;
     const pnl = (val>0 && cost>0) ? val-cost : null;
@@ -5668,8 +5737,8 @@ function openPnL(){
   const sorter = `<div style="display:flex;gap:6px;margin-bottom:10px;">${sortBtn('pnl','Gainers')}${sortBtn('loss','Losers')}${sortBtn('pct','% chg')}${sortBtn('value','Value')}${sortBtn('name','Name')}</div>`;
   const priced = rows.filter(r=>r.val>0 || r.cost>0);
   const list = priced.length ? priced.map(r=>`<div onclick="closeModal('pnl-modal');openDetail('${r.id}')" style="display:flex;align-items:center;gap:11px;padding:9px 4px;border-bottom:1px solid var(--border);cursor:pointer;">
-    <div style="width:34px;height:46px;border-radius:5px;overflow:hidden;flex-shrink:0;background:var(--bg3);display:flex;align-items:center;justify-content:center;">${r.img?`<img src="${r.img}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;">`:'<span style="opacity:.4;">⟡</span>'}</div>
-    <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.name}${r.edition&&r.edition!=='unlimited'?' '+editionBadge({edition:r.edition}):''}</div><div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.meta}</div></div>
+    <div style="width:34px;height:46px;border-radius:5px;overflow:hidden;flex-shrink:0;background:var(--bg3);display:flex;align-items:center;justify-content:center;">${r.img?`<img src="${esc(r.img)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;">`:'<span style="opacity:.4;">⟡</span>'}</div>
+    <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.name)}${r.edition&&r.edition!=='unlimited'?' '+editionBadge({edition:r.edition}):''}</div><div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.meta)}</div></div>
     <div style="text-align:right;flex-shrink:0;"><div style="font-family:var(--mono);font-weight:600;font-size:13px;">${r.val>0?fmtPrice(r.val):'—'}</div>${r.pnl!=null?`<div style="font-family:var(--mono);font-size:11px;color:${col(r.pnl)};">${sgn(r.pnl)}${r.pct!=null?' · '+(r.pct>=0?'+':'')+r.pct.toFixed(0)+'%':''}</div>`:'<div style="font-size:10px;color:var(--muted);">no cost basis</div>'}</div>
   </div>`).join('') : '<p style="font-size:12px;color:var(--muted);padding:16px 0;text-align:center;">No priced holdings yet. Add cards with purchase prices to see profit &amp; loss.</p>';
   document.getElementById('pnl-body').innerHTML = summary + sorter + list;
@@ -5736,15 +5805,14 @@ function openInventoryPanel(type) {
   }
 
   // Calculate totals
+  // Header total MUST use the same rules as the rows below it. This previously read
+  // the raw manual `value` field for sealed while the rows used sealedEffectiveValue(),
+  // so any market-priced sealed product made the header disagree with its own list.
   let totalVal = 0;
   cards.forEach(card => {
-    if (isSealed) {
-      totalVal += parseFloat(card.value||0) * (card.qty||1);
-    } else {
-      const p  = pcache[cacheKey(card)]?.data;
-      const bp = p ? bestPrice(p, card.type==='graded') : 0;
-      totalVal += bp * (card.qty||1);
-    }
+    totalVal += isSealed
+      ? sealedEffectiveValue(card) * itemQty(card)
+      : cardLineValue(card);
   });
 
   countEl.textContent = cards.length + ' item' + (cards.length !== 1 ? 's' : '');
@@ -5758,8 +5826,8 @@ function openInventoryPanel(type) {
       return `<div class="inv-row">
         <div class="inv-row-ph">📦</div>
         <div class="inv-row-info">
-          <div class="inv-row-name">${s.name}</div>
-          <div class="inv-row-meta">${s.type||''}${s.qty>1?' · ×'+s.qty:''}</div>
+          <div class="inv-row-name">${esc(s.name)}</div>
+          <div class="inv-row-meta">${esc(s.type||'')}${s.qty>1?' · ×'+esc(s.qty):''}</div>
         </div>
         <div>
           <div class="inv-row-price" style="color:var(--green);">${val>0?'$'+val.toFixed(2):'—'}</div>
@@ -5770,8 +5838,8 @@ function openInventoryPanel(type) {
   } else {
     // Sort by value desc
     const sorted = [...cards].map(card => {
-      const p  = pcache[cacheKey(card)]?.data;
-      const bp = p ? bestPrice(p, card.type==='graded') : 0;
+      const p  = cardPriceData(card);
+      const bp = cardValue(card);
       const img = p?.img || card.img || '';
       const paid = parseFloat(card.paid||0);
       const pnl  = paid > 0 && bp > 0 ? bp - paid : null;
@@ -5781,11 +5849,11 @@ function openInventoryPanel(type) {
     listEl.innerHTML = sorted.map(({card, bp, img, pnl}) => `
       <div class="inv-row" onclick="closeModal('inventory-panel');setTimeout(()=>openDetail('${card.id}'),150);">
         ${img
-          ? `<img class="inv-row-img" src="${img}" alt="${card.name}" loading="lazy">`
+          ? `<img class="inv-row-img" src="${esc(img)}" alt="${esc(card.name)}" loading="lazy">`
           : `<div class="inv-row-ph">⟡</div>`}
         <div class="inv-row-info">
-          <div class="inv-row-name">${card.name}</div>
-          <div class="inv-row-meta">${card.set||''}${card.num?' · #'+card.num:''}${card.grade?' · '+card.grade:''}${card.cond?' · '+card.cond:''}</div>
+          <div class="inv-row-name">${esc(card.name)}</div>
+          <div class="inv-row-meta">${esc(card.set||'')}${card.num?' · #'+esc(card.num):''}${card.grade?' · '+esc(card.grade):''}${card.cond?' · '+esc(card.cond):''}</div>
         </div>
         <div>
           <div class="inv-row-price" style="color:${bp>0?'var(--green)':'var(--muted)'};">${bp>0?'$'+bp.toFixed(2):'—'}</div>
@@ -6035,13 +6103,12 @@ function renderDBConcentration() {
 
   const rows = [];
   collection.forEach(card => {
-    const p = pcache[cacheKey(card)]?.data;
-    const bp = p ? bestPrice(p, card.type==='graded') : 0;
-    if (bp > 0) rows.push({ name: card.name, val: bp * (card.qty||1) });
+    const val = cardLineValue(card);
+    if (val > 0) rows.push({ name: card.name, val });
   });
   sealed.forEach(s => {
     const v = sealedEffectiveValue(s);
-    if (v > 0) rows.push({ name: s.name, val: v * (s.qty||1) });
+    if (v > 0) rows.push({ name: s.name, val: v * itemQty(s) });
   });
 
   if (!rows.length) { el.innerHTML = '<div style="font-size:12px;color:var(--muted);">No price data yet.</div>'; return; }
@@ -6058,7 +6125,7 @@ function renderDBConcentration() {
     const w = Math.max(2, (r.val/top[0].val)*100);
     return `<div class="db-conc-row">
       <div class="db-conc-name">
-        <span style="color:var(--text);font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:65%;">${r.name}</span>
+        <span style="color:var(--text);font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:65%;">${esc(r.name)}</span>
         <span style="font-family:var(--mono);font-size:10px;color:var(--muted);">${pct}% · $${r.val.toLocaleString('en-US',{maximumFractionDigits:0})}</span>
       </div>
       <div class="db-conc-bar">
@@ -6075,8 +6142,8 @@ function renderDBTop5() {
 
   const rows = [];
   collection.forEach(card => {
-    const p   = pcache[cacheKey(card)]?.data;
-    const bp  = p ? bestPrice(p, card.type==='graded') : 0;
+    const p   = cardPriceData(card);
+    const bp  = cardValue(card);
     const img = p?.img || card.img || null;
     if (bp > 0) rows.push({ card, bp, img });
   });
@@ -6100,14 +6167,14 @@ function renderDBTop5() {
     return `<div class="db-card" onclick="openDetail('${card.id}')">
       <div class="db-card-img">
         ${r.img
-          ? `<img src="${r.img}" alt="${card.name}" loading="lazy" onerror="this.style.display='none'">`
+          ? `<img src="${esc(r.img)}" alt="${esc(card.name)}" loading="lazy" onerror="this.style.display='none'">`
           : `<div class="db-card-img-ph">⟡</div>`}
       </div>
       <div class="db-card-rank">${i+1}</div>
-      ${grade ? `<div class="db-card-grade">${grade.replace('PSA ','')}</div>` : ''}
+      ${grade ? `<div class="db-card-grade">${esc(grade.replace('PSA ',''))}</div>` : ''}
       <div class="db-card-body">
-        <div class="db-card-name">${card.name}</div>
-        <div class="db-card-set">${card.set||''}${card.num?' · #'+card.num:''}</div>
+        <div class="db-card-name">${esc(card.name)}</div>
+        <div class="db-card-set">${esc(card.set||'')}${card.num?' · #'+esc(card.num):''}</div>
         <div class="db-card-price">${fmtPrice(r.bp)}</div>
         ${pnlTxt ? `<div class="db-card-pnl" style="color:${pnlCol};">${pnlTxt}</div>` : ''}
       </div>
@@ -6121,8 +6188,7 @@ function renderDBMovers() {
 
   const movers = [];
   collection.forEach(card => {
-    const p = pcache[cacheKey(card)]?.data;
-    const bp = p ? bestPrice(p, card.type==='graded') : 0;
+    const bp = cardValue(card);
     const paid = parseFloat(card.paid||0);
     if (bp > 0 && paid > 0) {
       const gain = bp - paid;
@@ -6139,12 +6205,14 @@ function renderDBMovers() {
   el.innerHTML = top.map(m => {
     const col = m.gain >= 0 ? 'var(--green)' : 'var(--red)';
     const arrow = m.gain >= 0 ? '▲' : '▼';
-    const img = pcache[m.card.id+'_'+m.card.cond]?.data?.img || m.card.img || '';
+    // was pcache[id+'_'+cond] — a pre-edition key format that has not matched
+    // cacheKey() since editions were introduced, so this always fell through.
+    const img = cardPriceData(m.card)?.img || m.card.img || '';
     return `<div class="db-mover-row" onclick="openDetail('${m.card.id}')" style="cursor:pointer;">
-      ${img ? `<img class="db-mover-img" src="${img}" alt="${m.card.name}">` : '<div class="db-mover-img" style="background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:14px;">⟡</div>'}
+      ${img ? `<img class="db-mover-img" src="${esc(img)}" alt="${esc(m.card.name)}">` : '<div class="db-mover-img" style="background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:14px;">⟡</div>'}
       <div class="db-mover-info">
-        <div class="db-mover-name">${m.card.name}</div>
-        <div class="db-mover-set">${m.card.set||''}${m.card.grade?' · '+m.card.grade:''}</div>
+        <div class="db-mover-name">${esc(m.card.name)}</div>
+        <div class="db-mover-set">${esc(m.card.set||'')}${m.card.grade?' · '+esc(m.card.grade):''}</div>
       </div>
       <div class="db-mover-val" style="color:${col};">${arrow} ${m.gain>=0?'+':''}$${Math.abs(m.gain).toFixed(2)}<div style="font-size:9px;opacity:.7;">${m.gain>=0?'+':''}${m.pct}%</div></div>
     </div>`;
@@ -6203,8 +6271,8 @@ function renderTimeline(){
 
   // Also save a vh snapshot for legacy compat
   let totalVal=0;
-  collection.forEach(card=>{const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(isFinite(bp)&&bp>0)totalVal+=bp*(card.qty||1);});
-  sealed.forEach(prod=>{const v=sealedEffectiveValue(prod);if(v>0)totalVal+=v*(prod.qty||1);});
+  collection.forEach(card=>{totalVal+=cardLineValue(card);});
+  sealed.forEach(prod=>{const v=sealedEffectiveValue(prod);if(v>0)totalVal+=v*itemQty(prod);});
   if(totalVal>0){
     const today=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'});
     const last=history[history.length-1];
@@ -6427,16 +6495,16 @@ function renderPSA(){
   _renderPsaChunked(slabs);
 }
 function psaTileHTML(card){
-    const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;
+    const p=cardPriceData(card);const bp=cardValue(card);
     const paid=parseFloat(card.paid||0);const pnl=bp>0&&paid>0?bp-paid:null;
     const grader=(card.grade||'').split(' ')[0]||'PSA';const gradeN=(card.grade||'').split(' ').slice(1).join(' ')||'?';
     const img=p?.img||card.img||null;const tcgQ=encodeURIComponent(card.name+(card.num?' '+card.num:'')+' '+card.grade);
     return `<div class="psa-card">
       <div class="psa-img">${tileImage(img,card.name,{placeholder:'<div style="font-size:32px;color:var(--muted);">⟡</div>'})}
-        <div class="psa-grade-b">${gradeN}</div><div class="psa-grader-b">${grader}</div>
+        <div class="psa-grade-b">${esc(gradeN)}</div><div class="psa-grader-b">${esc(grader)}</div>
       </div>
       <div class="psa-body">
-        <div class="psa-name">${card.name}</div><div class="psa-set">${card.set||'Unknown'}${card.num?' · #'+card.num:''}${editionBadge(card)?' '+editionBadge(card):''}</div>
+        <div class="psa-name">${esc(card.name)}</div><div class="psa-set">${esc(card.set||'Unknown')}${card.num?' · #'+esc(card.num):''}${editionBadge(card)?' '+editionBadge(card):''}</div>
         <div class="psa-pr"><span style="color:var(--muted2)">Market</span><span style="font-family:var(--mono);font-weight:600;color:var(--green);">${bp>0?fmtPrice(bp):'—'}</span></div>
         ${paid>0?`<div class="psa-pr"><span style="color:var(--muted2)">Paid</span><span style="font-family:var(--mono);font-weight:600;">$${paid.toFixed(2)}</span></div>`:''}
         ${pnl!=null?`<div class="psa-pr"><span style="color:var(--muted2)">P&L</span><span style="font-family:var(--mono);font-weight:600;color:${pnl>=0?'var(--green)':'var(--red)'};">${pnl>=0?'+':''}${fmtPrice(pnl)}</span></div>`:''}
@@ -6461,7 +6529,9 @@ function tileImage(src, alt, opts){
   const onerror  = (opts.onerror !== false);
   const placeholder = opts.placeholder || '';
   if (!src) return placeholder;
-  return `<img${imgClass?` class="${imgClass}"`:''} src="${src}" alt="${alt}" loading="lazy"${imgStyle?` style="${imgStyle}"`:''}${onerror?` onerror="this.style.display='none'"`:''}>`;
+  // src/alt are user- or API-supplied — escape so a quote in a card name or image
+  // URL cannot break out of the attribute. Output is byte-identical for plain text.
+  return `<img${imgClass?` class="${imgClass}"`:''} src="${esc(src)}" alt="${esc(alt)}" loading="lazy"${imgStyle?` style="${imgStyle}"`:''}${onerror?` onerror="this.style.display='none'"`:''}>`;
 }
 
 // ═══ Tier 2: Singles virtualization (chunked render + IntersectionObserver) ═══
@@ -6515,9 +6585,9 @@ function renderSingles(){
   _renderSinglesChunked(cards);
 }
 function singlesTileHTML(card){
-    const ck=cacheKey(card);const p=pcache[ck]?.data;
+    const p=cardPriceData(card);
     const typeLabel={standard:'Standard',holo:'Holo',reverse:'Reverse',ex:'ex/GX/V',graded:'Graded'}[card.type]||card.type;
-    const imgHtml=tileImage(p?.img||card.img,card.name,{placeholder:`<div style="font-size:28px;color:var(--muted);">${card.num?'#'+(card.num||'').split('/')[0]:'⟡'}</div>`});
+    const imgHtml=tileImage(p?.img||card.img,card.name,{placeholder:`<div style="font-size:28px;color:var(--muted);">${card.num?'#'+esc((card.num||'').split('/')[0]):'⟡'}</div>`});
     const priceHtml=p?buildPriceStrip(p,card):`<div class="ps-loading"><div class="spinner"></div>Fetching…</div>`;
     return `<div class="card-tile" id="tile-${card.id}" onclick="openDetail('${card.id}')">
       <div class="ct-img">${imgHtml}
@@ -6526,8 +6596,8 @@ function singlesTileHTML(card){
         <div class="liq-badge liq-loading" id="liq-${card.id}" title="Liquidity Score — loading…">·</div>
       </div>
       <div class="ct-body">
-        <div class="ct-name">${card.name}</div>
-        <div class="ct-set">${card.set||'Unknown'}${card.num?' · '+card.num:''}${card.qty>1?' · ×'+card.qty:''}</div>
+        <div class="ct-name">${esc(card.name)}</div>
+        <div class="ct-set">${esc(card.set||'Unknown')}${card.num?' · '+esc(card.num):''}${card.qty>1?' · ×'+esc(card.qty):''}</div>
         <div class="price-strip" id="ps-${card.id}">${priceHtml}</div>
         <div class="ct-actions" onclick="event.stopPropagation()">
           <button class="btn btn-ghost btn-sm" onclick="editCard('${card.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><path d="M11 4H4a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg><span class="mob-btn-label">Edit</span></button>
@@ -6716,6 +6786,48 @@ function setTypeFilter(f,el){typeFilter=f;document.querySelectorAll('#page-singl
 // ║  MODALS / UTILS     modal open/close, toasts, formatters                ║
 // ╚═══════════════════════════════════════════════════════════════════════╝
 // ═══ DEALS ═══
+// ════════════════════════════════════════════════════════════════════════════
+// ── DEAL SHAPE COMPATIBILITY (2026-08) ──
+// deals[] can hold TWO record shapes:
+//   v1 "legacy"  — written by saveDeal() via #deal-modal:
+//                  { id, type:'buy'|'sell'|'offer', name, amount, date, source, cond, notes }
+//   v2 "log"     — written by saveDealLog() via #deal-log-modal:
+//                  { id, dealType:'purchase'|'sale'|'trade', status:'open'|'closed',
+//                    cardsIn[], cardsOut[], buyPrice, sellPrice, platform, ... }
+// The v1 UI is UNREACHABLE (nothing calls openDealModal(); see the note on it below),
+// but v1 records may still exist in a user's localStorage / Supabase row from an
+// earlier build. Because every renderer keys off `status`, those records were stored
+// and synced but displayed nowhere. These helpers give downstream code one shape to
+// read WITHOUT rewriting stored data — nothing here mutates a deal record.
+// ════════════════════════════════════════════════════════════════════════════
+function isLegacyDeal(d){
+  return !!d && !d.dealType && !d.status && d.amount != null;
+}
+// Read-only canonical view of any deal record. Legacy fields are mapped, never moved.
+function normalizeDeal(d){
+  if (!d) return null;
+  if (!isLegacyDeal(d)) return d;
+  const amt = parseFloat(d.amount) || 0;
+  return {
+    ...d,
+    _legacy:   true,
+    dealType:  d.type === 'sell' ? 'sale' : d.type === 'buy' ? 'purchase' : 'offer',
+    cardName:  d.name || '',
+    platform:  d.source || '',
+    notes:     d.notes || '',
+    date:      d.date || '',
+    amount:    amt,
+    // Deliberately NOT given a status / buyPrice / sellPrice: a v1 record carries a
+    // single amount with no counterpart, so folding it into the closed-deal ROI math
+    // would invent a 100% loss. It is surfaced read-only instead.
+  };
+}
+
+// LEGACY (v1) DEAL ENTRY POINT — retained, not deleted, but unreachable.
+// Caller analysis (2026-08): openDealModal() has ZERO callers and #deal-modal is
+// never passed to openModal() from anywhere else, so this path cannot be entered
+// from the UI. It is kept so historical records stay interpretable and so the
+// markup/handlers are not orphaned. New deals go through openDealLogModal().
 function openDealModal(id){
   editingDealId=id||null;document.getElementById('deal-modal-title').textContent=id?'Edit Deal':'Log Deal';
   if(id){const d=deals.find(x=>x.id===id);if(!d)return;document.getElementById('d-name').value=d.name||'';document.getElementById('d-amount').value=d.amount||'';document.getElementById('d-date').value=d.date||'';document.getElementById('d-source').value=d.source||'';document.getElementById('d-cond').value=d.cond||'';document.getElementById('d-notes').value=d.notes||'';document.getElementById('d-type').value=d.type||'buy';document.querySelectorAll('#deal-modal .type-pill').forEach(b=>b.classList.remove('active'));const p=document.querySelector(`#deal-modal .type-pill[data-val="${d.type||'buy'}"]`);if(p)p.classList.add('active');}
@@ -6741,15 +6853,15 @@ async function runDealSearch(q) {
   if (vaultHits.length) {
     rows.push(`<div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;padding:8px 12px 4px;background:var(--bg4);">From Your Vault</div>`);
     rows.push(...vaultHits.map(card => {
-      const p = pcache[cacheKey(card)]?.data;
-      const bp = p ? bestPrice(p, card.type==='graded') : 0;
+      const p = cardPriceData(card);
+      const bp = cardValue(card);
       const img = p?.img || card.img || '';
       const label = [card.name, card.grade || card.cond, card.set, card.num ? '#'+card.num : ''].filter(Boolean).join(' · ');
       return `<div class="sd-item" onclick="selectDealCard(${JSON.stringify({name:label,img,set:card.set||'',num:card.num||'',grade:card.grade||'',cond:card.cond||''}).replace(/"/g,'&quot;')})">
-        ${img ? `<img class="sd-thumb" src="${img}" alt="${card.name}" loading="lazy" style="height:50px;width:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">` : '<div class="sd-ph" style="width:36px;height:50px;">⟡</div>'}
+        ${img ? `<img class="sd-thumb" src="${esc(img)}" alt="${esc(card.name)}" loading="lazy" style="height:50px;width:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">` : '<div class="sd-ph" style="width:36px;height:50px;">⟡</div>'}
         <div style="min-width:0;flex:1;">
-          <div class="sd-name">${card.name}${card.grade ? ' <span style="color:var(--gold);font-size:10px;font-family:var(--mono);">'+card.grade+'</span>' : ''}</div>
-          <div class="sd-meta">${card.set||''}${card.num?' · #'+card.num:''} · ${card.cond}</div>
+          <div class="sd-name">${esc(card.name)}${card.grade ? ' <span style="color:var(--gold);font-size:10px;font-family:var(--mono);">'+esc(card.grade)+'</span>' : ''}</div>
+          <div class="sd-meta">${esc(card.set||'')}${card.num?' · #'+esc(card.num):''} · ${esc(card.cond)}</div>
         </div>
         ${bp > 0 ? `<div style="text-align:right;flex-shrink:0;"><div class="sd-pval">${fmtPrice(bp)}</div><div class="sd-plbl">market</div></div>` : ''}
       </div>`;
@@ -6772,8 +6884,8 @@ async function runDealSearch(q) {
           return `<div class="sd-item" onclick="selectDealCard(${JSON.stringify(data).replace(/"/g,'&quot;')})">
             ${card.images?.small ? `<img class="sd-thumb" src="${card.images.small}" alt="${card.name}" loading="lazy" style="height:50px;width:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">` : '<div class="sd-ph" style="width:36px;height:50px;">⟡</div>'}
             <div style="min-width:0;flex:1;">
-              <div class="sd-name">${card.name}</div>
-              <div class="sd-meta">${card.set?.name||''} · #${card.number||'?'} · ${card.rarity||''}</div>
+              <div class="sd-name">${esc(card.name)}</div>
+              <div class="sd-meta">${esc(card.set?.name||'')} · #${esc(card.number||'?')} · ${esc(card.rarity||'')}</div>
             </div>
             ${price ? `<div style="text-align:right;flex-shrink:0;"><div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div></div>` : ''}
           </div>`;
@@ -6804,7 +6916,7 @@ function selectDealCard(data) {
   sel.style.display = 'flex';
   const imgEl = document.getElementById('deal-sel-img');
   imgEl.innerHTML = data.img
-    ? `<img src="${data.img}" style="width:100%;height:100%;object-fit:cover;" alt="${data.name}">`
+    ? `<img src="${esc(data.img)}" style="width:100%;height:100%;object-fit:cover;" alt="${esc(data.name)}">`
     : '⟡';
   document.getElementById('deal-sel-name').textContent = data.name + (data.grade ? ' · ' + data.grade : '');
   document.getElementById('deal-sel-meta').textContent = [data.set, data.num ? '#'+data.num : '', data.cond].filter(Boolean).join(' · ');
@@ -6831,6 +6943,10 @@ document.addEventListener('click', e => {
 });
 
 function selectDealType(val,el){document.querySelectorAll('#deal-modal .type-pill').forEach(b=>b.classList.remove('active'));el.classList.add('active');document.getElementById('d-type').value=val;}
+// LEGACY (v1) DEAL WRITER — reachable only from #deal-modal, which nothing opens
+// (see openDealModal above). Left in place so the retired modal's markup stays
+// functional rather than half-wired; new deals go through saveDealLog(). Records
+// it produces are read back by normalizeDeal() / renderLegacyDeals().
 function saveDeal(){
   const name=document.getElementById('d-name').value.trim();const amount=document.getElementById('d-amount').value;
   if(!name||!amount){toast('Name and amount required','red');return;}
@@ -6917,8 +7033,8 @@ function dlRenderCards() {
       if(buyEmp) buyEmp.style.display='none';
       buyEl.innerHTML = _dlCardsIn.map((c,i) => `
         <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
-          ${c.img?`<img src="${c.img}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;">⟡</div>'}
-          <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div><div style="font-size:9px;color:var(--muted);font-family:var(--mono);">${c.set||''}</div></div>
+          ${c.img?`<img src="${esc(c.img)}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;">⟡</div>'}
+          <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name)}</div><div style="font-size:9px;color:var(--muted);font-family:var(--mono);">${esc(c.set||'')}</div></div>
           <input type="number" step="0.01" min="0" value="${c.value||''}" placeholder="$0.00" style="width:80px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:12px;padding:4px 6px;text-align:right;" oninput="_dlCardsIn[${i}].value=parseFloat(this.value)||0;dlUpdatePnL()">
           <button onclick="_dlCardsIn.splice(${i},1);dlRenderCards();dlUpdatePnL();" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;">✕</button>
         </div>`).join('');
@@ -6934,8 +7050,8 @@ function dlRenderCards() {
       outEmp.style.display='none';
       outEl.innerHTML = _dlCardsOut.map((c,i) => `
         <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
-          ${c.img?`<img src="${c.img}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;">⟡</div>'}
-          <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div><div style="font-size:9px;color:var(--muted);font-family:var(--mono);">${c.set||''}</div></div>
+          ${c.img?`<img src="${esc(c.img)}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;">⟡</div>'}
+          <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name)}</div><div style="font-size:9px;color:var(--muted);font-family:var(--mono);">${esc(c.set||'')}</div></div>
           <input type="number" step="0.01" min="0" value="${c.value||''}" placeholder="$0.00" style="width:80px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:12px;padding:4px 6px;text-align:right;" oninput="_dlCardsOut[${i}].value=parseFloat(this.value)||0;dlUpdatePnL()">
           <button onclick="_dlCardsOut.splice(${i},1);dlRenderCards();dlUpdatePnL();" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px;">✕</button>
         </div>`).join('');
@@ -6947,8 +7063,8 @@ function dlRenderCards() {
   if (tradeOutEl) {
     tradeOutEl.innerHTML = _dlCardsOut.map((c,i) => `
       <div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);">
-        ${c.img?`<img src="${c.img}" style="width:24px;height:33px;object-fit:contain;border-radius:2px;flex-shrink:0;">`:'<div style="width:24px;height:33px;background:var(--bg2);border-radius:2px;flex-shrink:0;"></div>'}
-        <div style="flex:1;min-width:0;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>
+        ${c.img?`<img src="${esc(c.img)}" style="width:24px;height:33px;object-fit:contain;border-radius:2px;flex-shrink:0;">`:'<div style="width:24px;height:33px;background:var(--bg2);border-radius:2px;flex-shrink:0;"></div>'}
+        <div style="flex:1;min-width:0;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name)}</div>
         <input type="number" step="0.01" min="0" value="${c.value||''}" placeholder="$0" style="width:64px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11px;padding:3px 5px;text-align:right;" oninput="_dlCardsOut[${i}].value=parseFloat(this.value)||0;dlUpdatePnL()">
         <button onclick="_dlCardsOut.splice(${i},1);dlRenderCards();dlUpdatePnL();" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px;">✕</button>
       </div>`).join('') || '<div style="font-size:10px;color:var(--muted);padding:4px 0;">None added</div>';
@@ -6962,8 +7078,8 @@ function dlRenderCards() {
   if (tradeInEl) {
     tradeInEl.innerHTML = _dlCardsIn.map((c,i) => `
       <div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);">
-        ${c.img?`<img src="${c.img}" style="width:24px;height:33px;object-fit:contain;border-radius:2px;flex-shrink:0;">`:'<div style="width:24px;height:33px;background:var(--bg2);border-radius:2px;flex-shrink:0;"></div>'}
-        <div style="flex:1;min-width:0;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>
+        ${c.img?`<img src="${esc(c.img)}" style="width:24px;height:33px;object-fit:contain;border-radius:2px;flex-shrink:0;">`:'<div style="width:24px;height:33px;background:var(--bg2);border-radius:2px;flex-shrink:0;"></div>'}
+        <div style="flex:1;min-width:0;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name)}</div>
         <input type="number" step="0.01" min="0" value="${c.value||''}" placeholder="$0" style="width:64px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11px;padding:3px 5px;text-align:right;" oninput="_dlCardsIn[${i}].value=parseFloat(this.value)||0;dlUpdatePnL()">
         <button onclick="_dlCardsIn.splice(${i},1);dlRenderCards();dlUpdatePnL();" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 2px;">✕</button>
       </div>`).join('') || '<div style="font-size:10px;color:var(--muted);padding:4px 0;">None added</div>';
@@ -7130,12 +7246,11 @@ function showCollectionInPicker(query) {
   res.innerHTML = '<div style="padding:6px 10px 4px;font-family:var(--mono);font-size:9px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;">Your Collection</div>' +
     owned.slice(0,30).map(c => {
       const key='dlpc_'+c.id;
-      const p = pcache[cacheKey(c)]?.data;
-      const mkt = p ? bestPrice(p, c.type==='graded') : null;
+      const mkt = cardValue(c) || null;
       window._dlpCards[key] = {id:c.cardId||c.id, name:c.name, set:c.set||'', num:c.num||'', img:c.img||'', mkt, ownedId:c.id, grade:c.grade||'', cond:c.cond||'', paid:c.paid||0};
       return `<div onclick="dlPickerSelectCard(window._dlpCards['${key}'])" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:6px;background:rgba(245,200,66,0.04);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='rgba(245,200,66,0.04)'">
-        ${c.img?`<img src="${c.img}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
-        <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;">${c.name} ${c.grade?`<span style="color:var(--gold);font-size:9px;">${c.grade}</span>`:''}</div><div style="font-size:10px;color:var(--muted);">${c.set||''} · #${c.num||'?'} · owned</div></div>
+        ${c.img?`<img src="${esc(c.img)}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
+        <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;">${esc(c.name)} ${c.grade?`<span style="color:var(--gold);font-size:9px;">${esc(c.grade)}</span>`:''}</div><div style="font-size:10px;color:var(--muted);">${esc(c.set||'')} · #${esc(c.num||'?')} · owned</div></div>
         ${mkt?`<div style="font-family:var(--mono);font-size:11px;color:var(--green);flex-shrink:0;">$${mkt.toFixed(2)}</div>`:''}
       </div>`;
     }).join('');
@@ -7167,12 +7282,11 @@ function onDLPickerSearch(val) {
       collectionHtml = '<div style="padding:6px 10px 4px;font-family:var(--mono);font-size:9px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;">Your Collection</div>' +
         owned.slice(0,8).map(c => {
           const key='dlpc_'+c.id;
-          const p = pcache[cacheKey(c)]?.data;
-          const mkt = p ? bestPrice(p, c.type==='graded') : null;
+          const mkt = cardValue(c) || null;
           window._dlpCards[key] = {id:c.cardId||c.id, name:c.name, set:c.set||'', num:c.num||'', img:c.img||'', mkt, ownedId:c.id, grade:c.grade||'', cond:c.cond||'', paid:c.paid||0};
           return `<div onclick="dlPickerSelectCard(window._dlpCards['${key}'])" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:6px;background:rgba(245,200,66,0.04);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='rgba(245,200,66,0.04)'">
-            ${c.img?`<img src="${c.img}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
-            <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;">${c.name} ${c.grade?`<span style="color:var(--gold);font-size:9px;">${c.grade}</span>`:''}</div><div style="font-size:10px;color:var(--muted);">${c.set||''} · #${c.num||'?'} · owned</div></div>
+            ${c.img?`<img src="${esc(c.img)}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
+            <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;">${esc(c.name)} ${c.grade?`<span style="color:var(--gold);font-size:9px;">${esc(c.grade)}</span>`:''}</div><div style="font-size:10px;color:var(--muted);">${esc(c.set||'')} · #${esc(c.num||'?')} · owned</div></div>
             ${mkt?`<div style="font-family:var(--mono);font-size:11px;color:var(--green);flex-shrink:0;">$${mkt.toFixed(2)}</div>`:''}
           </div>`;
         }).join('') +
@@ -7204,8 +7318,8 @@ function onDLPickerSearch(val) {
         window._dlpCards=window._dlpCards||{};
         window._dlpCards[key]={id:card.id,name:card.name,set:card.set?.name||'',num:card.number||'',img:card.images?.small||'',mkt};
         return `<div onclick="dlPickerSelectCard(window._dlpCards['${key}'])" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:6px;transition:background .1s;" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-          ${card.images?.small?`<img src="${card.images.small}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
-          <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;">${card.name}</div><div style="font-size:10px;color:var(--muted);">${card.set?.name||''} · #${card.number||'?'}</div></div>
+          ${card.images?.small?`<img src="${esc(card.images.small)}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
+          <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;">${esc(card.name)}</div><div style="font-size:10px;color:var(--muted);">${esc(card.set?.name||'')} · #${esc(card.number||'?')}</div></div>
           ${mkt?`<div style="font-family:var(--mono);font-size:11px;color:var(--green);flex-shrink:0;">$${mkt.toFixed(2)}</div>`:''}
         </div>`;
       }).join('');
@@ -7218,7 +7332,7 @@ async function dlPickerSelectCard(card) {
   document.getElementById('dl-picker-name').textContent = card.name;
   document.getElementById('dl-picker-meta').textContent = [card.set, card.num?'#'+card.num:''].filter(Boolean).join(' \u00b7 ');
   const imgEl = document.getElementById('dl-picker-img');
-  imgEl.innerHTML = card.img ? `<img src="${card.img}" style="width:100%;height:100%;object-fit:contain;">` : '';
+  imgEl.innerHTML = card.img ? `<img src="${esc(card.img)}" style="width:100%;height:100%;object-fit:contain;">` : '';
   const valEl = document.getElementById('dl-picker-value');
   const mktEl = document.getElementById('dl-picker-mkt');
   if (card.mkt) {
@@ -7229,8 +7343,7 @@ async function dlPickerSelectCard(card) {
     try {
       const probe = { id: card.ownedId || card.id, cardId: card.id, name: card.name, set: card.set, num: card.num, type: card.grade ? 'graded' : 'standard', grade: card.grade || '', cond: card.cond || 'NM' };
       await loadPricesForCards([probe]);
-      const p = pcache[cacheKey(probe)]?.data;
-      const mkt = p ? bestPrice(p, probe.type === 'graded') : null;
+      const mkt = cardValue(probe) || null;
       if (mkt) {
         card.mkt = mkt;
         valEl.value = mkt.toFixed(2);
@@ -7363,10 +7476,10 @@ function renderDBNegotiation() {
       const name  = (d.cardsOut||[{name:d.cardName}])[0]?.name||'—';
       const img   = (d.cardsOut||[{img:d.img}])[0]?.img||d.img||'';
       return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
-        ${img?`<img src="${img}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
+        ${img?`<img src="${esc(img)}" style="width:28px;height:39px;object-fit:contain;border-radius:3px;flex-shrink:0;">`:'<div style="width:28px;height:39px;background:var(--bg3);border-radius:3px;flex-shrink:0;"></div>'}
         <div style="flex:1;min-width:0;">
-          <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
-          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${d.date||'—'} · ${d.platform||'—'}</div>
+          <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(name)}</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${esc(d.date||'—')} · ${esc(d.platform||'—')}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:11px;flex-shrink:0;">
           <span style="color:var(--red);">Ask: $${ask.toFixed(0)}</span>
@@ -7656,8 +7769,8 @@ async function doDealSearch(q) {
         <div class="cs-img-wrap">${card.images?.small?`<img src="${card.images.small}" loading="lazy">`:'<div class="cs-img-ph">⟡</div>'}</div>
         <div class="cs-body">
           <div class="cs-set-pill">#${card.number||'?'}</div>
-          <div class="cs-name">${card.name}</div>
-          <div class="cs-set">${card.set?.name||''}</div>
+          <div class="cs-name">${esc(card.name)}</div>
+          <div class="cs-set">${esc(card.set?.name||'')}</div>
           ${price?`<div class="cs-price">$${price.toFixed(2)}</div>`:'<div class="cs-price" style="color:var(--muted);">—</div>'}
         </div>
         <button class="cs-add" onclick="event.stopPropagation();dealPickCard(window._dscCards['${key}'])">+</button>
@@ -7698,6 +7811,35 @@ function dealPickCard(card) {
 }
 
 
+// Read-only list of v1 deal records so historical data is visible instead of
+// silently invisible. Delete is offered (it goes through the same retire() ledger
+// path as every other delete); editing is not, because the v1 editor is retired.
+function renderLegacyDeals(legacyDeals){
+  const section = document.getElementById('dp-legacy-section');
+  const list    = document.getElementById('dp-legacy-list');
+  const count   = document.getElementById('dp-legacy-count');
+  if (!section || !list) return;
+  if (!legacyDeals.length) { section.hidden = true; list.innerHTML = ''; return; }
+  section.hidden = false;
+  if (count) count.textContent = legacyDeals.length;
+  const badgeFor = t => t === 'sale'     ? '<span class="deal-badge d-sell">Sale</span>'
+                      : t === 'purchase' ? '<span class="deal-badge d-buy">Purchase</span>'
+                      :                    '<span class="deal-badge d-offer">Offer</span>';
+  list.innerHTML = legacyDeals.map(raw => {
+    const d = normalizeDeal(raw);
+    return `<div class="deal-row">
+      ${badgeFor(d.dealType)}
+      <div class="deal-name">
+        <div class="deal-main">${esc(d.cardName || '—')}</div>
+        <div class="deal-meta">${esc([d.platform, d.cond, d.notes].filter(Boolean).join(' · ')) || '—'}</div>
+      </div>
+      <div class="deal-amt">${moneyFull(d.amount)}</div>
+      <div class="deal-date">${esc(d.date || '—')}</div>
+      <button class="btn btn-danger btn-xs" onclick="deleteDeal('${d.id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
 function renderDealGalleryAndLeaderboard() {
   const closedDeals = deals.filter(d => d.status === 'closed');
 
@@ -7726,8 +7868,8 @@ function renderDealGalleryAndLeaderboard() {
         return `<div style="position:relative;cursor:pointer;transition:transform .15s;"
           onmouseover="this.style.transform='translateY(-3px)'"
           onmouseout="this.style.transform=''"
-          title="${card.name}${profit !== 0 ? ' · ' + (profit>0?'+':'') + '$' + profit.toFixed(0) : ''}">
-          <img src="${card.img}" alt="${card.name}"
+          title="${esc(card.name)}${profit !== 0 ? ' · ' + (profit>0?'+':'') + '$' + profit.toFixed(0) : ''}">
+          <img src="${esc(card.img)}" alt="${esc(card.name)}"
             style="width:72px;height:100px;object-fit:cover;border-radius:6px;border:2px solid ${borderCol};display:block;">
           <div style="position:absolute;bottom:3px;right:3px;background:rgba(0,0,0,.75);border-radius:3px;padding:1px 4px;font-family:var(--mono);font-size:8px;font-weight:700;color:${profit>=0?'#2ecc80':'#ff4d6d'};">
             ${profit!==0?(profit>0?'+':'')+'\$'+Math.abs(profit).toFixed(0):''}
@@ -7765,10 +7907,10 @@ function renderDealGalleryAndLeaderboard() {
 
     const medals = ['🥇','🥈','🥉','4️⃣','5️⃣'];
     lbEl.innerHTML = ranked.map((r, i) => `
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;position:relative;${i===0?'border-color:var(--gold);':''}" title="${r.name}">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;position:relative;${i===0?'border-color:var(--gold);':''}" title="${esc(r.name)}">
         <div style="position:relative;">
           ${r.img
-            ? `<img src="${r.img}" alt="${r.name}" style="width:100%;aspect-ratio:3/4;object-fit:cover;display:block;">`
+            ? `<img src="${esc(r.img)}" alt="${esc(r.name)}" style="width:100%;aspect-ratio:3/4;object-fit:cover;display:block;">`
             : `<div style="width:100%;aspect-ratio:3/4;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:32px;">⟡</div>`}
           <div style="position:absolute;top:6px;left:6px;font-size:16px;">${medals[i]}</div>
           <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.85));padding:8px 8px 6px;">
@@ -7777,16 +7919,20 @@ function renderDealGalleryAndLeaderboard() {
           </div>
         </div>
         <div style="padding:7px 8px;">
-          <div style="font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.name}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);">${r.d.platform||r.d.sellPlatform||'—'} · ${r.d.date||r.d.sellDate||'—'}</div>
+          <div style="font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.name)}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);">${esc(r.d.platform||r.d.sellPlatform||'—')} · ${esc(r.d.date||r.d.sellDate||'—')}</div>
         </div>
       </div>`).join('');
   }
 }
 
 function renderDeals() {
+  // Legacy (v1) records are separated out first so the stats below operate on the
+  // v2 shape only — exactly as before this change. Nothing is mutated or dropped.
+  const legacyDeals = deals.filter(isLegacyDeal);
   const openDeals   = deals.filter(d => d.status === 'open');
   const closedDeals = deals.filter(d => d.status === 'closed');
+  renderLegacyDeals(legacyDeals);
 
   document.getElementById('nb-deals').textContent = deals.length;
   document.getElementById('dp-open-count').textContent = openDeals.length ? openDeals.length : '';
@@ -7851,7 +7997,7 @@ function renderDeals() {
       const roi = s.capital > 0 ? (((s.revenue-s.capital)/s.capital)*100).toFixed(1) : 0;
       const profit = s.revenue - s.capital;
       return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;">
-        <span style="font-weight:500;">${p}</span>
+        <span style="font-weight:500;">${esc(p)}</span>
         <span style="font-family:var(--mono);font-size:10px;color:var(--muted);">${s.count} deal${s.count!==1?'s':''}</span>
         <span style="font-family:var(--mono);font-size:11px;color:${profit>=0?'var(--green)':'var(--red)'};">${profit>=0?'+':''}${fmt(profit)}</span>
         <span style="font-family:var(--mono);font-size:11px;color:${roi>=0?'var(--green)':'var(--red)'};">${roi>=0?'+':''}${roi}% ROI</span>
@@ -7866,14 +8012,17 @@ function renderDeals() {
   else {
     openEmpty.style.display = 'none';
     openEl.innerHTML = openDeals.sort((a,b)=>new Date(b.added)-new Date(a.added)).map(d => {
-      const p = pcache[d.cardId+'_NM']?.data;
-      const mktPrice = p ? bestPrice(p) : 0;
+      // was pcache[d.cardId+'_NM'] — a hand-built key that never matched cacheKey()
+      // (which is id_cond_edition), so "potential profit" never rendered. Resolve the
+      // owned card by its collection id instead and use the canonical value path.
+      const ownedCard = collection.find(c => c.id === d.cardId || c.cardId === d.cardId) || null;
+      const mktPrice = ownedCard ? cardValue(ownedCard) : 0;
       const potentialProfit = mktPrice > 0 ? mktPrice - parseFloat(d.buyPrice||0) : null;
       return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px;">
-        ${d.img ? `<img src="${d.img}" style="width:36px;height:50px;object-fit:contain;border-radius:4px;flex-shrink:0;">` : '<div style="width:36px;height:50px;background:var(--bg3);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">⟡</div>'}
+        ${d.img ? `<img src="${esc(d.img)}" style="width:36px;height:50px;object-fit:contain;border-radius:4px;flex-shrink:0;">` : '<div style="width:36px;height:50px;background:var(--bg3);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">⟡</div>'}
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.cardName}</div>
-          <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">Bought $${parseFloat(d.buyPrice).toFixed(2)} · ${d.buyDate||'—'} · ${d.buyPlatform||'—'}</div>
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(d.cardName)}</div>
+          <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">Bought $${parseFloat(d.buyPrice||0).toFixed(2)} · ${esc(d.buyDate||d.date||'—')} · ${esc(d.buyPlatform||d.platform||'—')}</div>
           ${potentialProfit!=null?`<div style="font-size:10px;font-family:var(--mono);color:${potentialProfit>=0?'var(--green)':'var(--red)'};">Mkt: $${mktPrice.toFixed(2)} · Potential ${potentialProfit>=0?'+':''}$${potentialProfit.toFixed(2)}</div>`:''}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
@@ -7913,9 +8062,9 @@ function renderDeals() {
           <div style="font-family:var(--mono);font-size:8px;color:${labelCol};text-transform:uppercase;letter-spacing:1px;">${label}</div>
           <div style="display:flex;gap:5px;flex-wrap:wrap;">
             ${cards.map(card => `
-              <div style="position:relative;" title="${card.name}${card.value?' · $'+parseFloat(card.value).toFixed(0):''}">
+              <div style="position:relative;" title="${esc(card.name)}${card.value?' · $'+parseFloat(card.value).toFixed(0):''}">
                 ${card.img
-                  ? `<img src="${card.img}" style="width:52px;height:72px;object-fit:cover;border-radius:5px;border:1.5px solid rgba(255,255,255,0.08);display:block;">`
+                  ? `<img src="${esc(card.img)}" style="width:52px;height:72px;object-fit:cover;border-radius:5px;border:1.5px solid rgba(255,255,255,0.08);display:block;">`
                   : `<div style="width:52px;height:72px;background:var(--bg3);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:14px;">⟡</div>`}
                 ${card.value?`<div style="position:absolute;bottom:2px;left:0;right:0;text-align:center;font-family:var(--mono);font-size:8px;font-weight:700;color:#fff;background:rgba(0,0,0,.7);border-radius:0 0 4px 4px;padding:1px 0;">$${parseFloat(card.value).toFixed(0)}</div>`:''}
               </div>`).join('')}
@@ -7934,8 +8083,8 @@ function renderDeals() {
         <!-- Header row -->
         <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);">
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:600;margin-bottom:2px;">${badge}${dealVerdictBadge(d)}${names}</div>
-            <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">OUT $${parseFloat(d.buyPrice||0).toFixed(2)} → IN $${parseFloat(d.sellPrice||0).toFixed(2)} · ${d.platform||d.sellPlatform||'—'} · ${d.date||d.sellDate||'—'}</div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:2px;">${badge}${dealVerdictBadge(d)}${esc(names)}</div>
+            <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">OUT $${parseFloat(d.buyPrice||0).toFixed(2)} → IN $${parseFloat(d.sellPrice||0).toFixed(2)} · ${esc(d.platform||d.sellPlatform||'—')} · ${esc(d.date||d.sellDate||'—')}</div>
           </div>
           <div style="text-align:right;flex-shrink:0;">
             <div style="font-family:var(--mono);font-size:15px;font-weight:700;color:${col};">${profit>=0?'+':''}$${Math.abs(profit).toFixed(2)}</div>
@@ -7963,24 +8112,36 @@ function renderDeals() {
 }
 
 // ═══ ANALYZER ═══
+// DEVELOPMENT STUB — NOT IMPLEMENTED. This UI is reachable in production, so it
+// must never present invented numbers as analysis. The previous body derived a
+// "Detected Price" and "Condition" by hashing the image bytes and indexing two
+// hard-coded arrays: pure fabrication, indistinguishable from a real valuation.
+// It now reports an honest unsupported state and points at the Card Scanner,
+// which performs real vision-based identification. The screenshot pipeline can be
+// implemented here later; until then it returns no valuation at all.
 function analyzeScreenshot(input){
-  const file=input.files[0];if(!file)return;
-  const reader=new FileReader();
-  reader.onload=ev=>{
-    document.getElementById('az-result').style.display='';
-    let hash=0;for(const ch of ev.target.result.slice(100,500))hash+=ch.charCodeAt(0);
-    const prices=['$45.00','$120.00','$280.00','$67.50','$340.00'],conds=['NM','LP','NM','PSA 10','PSA 9'];
-    const price=prices[hash%prices.length],cond=conds[hash%conds.length];
-    document.getElementById('az-output').innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;"><div style="background:var(--bg2);border-radius:var(--r);padding:10px;"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;">Detected Price</div><div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--green);">${price}</div></div><div style="background:var(--bg2);border-radius:var(--r);padding:10px;"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;">Condition</div><div style="font-family:var(--mono);font-size:18px;font-weight:700;">${cond}</div></div></div><div style="font-size:11px;color:var(--muted2);line-height:1.7;">✓ Price within normal range<br>✓ Connect eBay API for live comps<br>⚠ Estimate only — verify manually</div>`;
-  };reader.readAsDataURL(file);
+  const file = input && input.files && input.files[0];
+  if(!file) return;
+  console.warn('[analyzer] Screenshot analysis is not implemented — no valuation produced.');
+  const result = document.getElementById('az-result');
+  const out    = document.getElementById('az-output');
+  if(result) result.style.display='';
+  if(out) out.innerHTML =
+    '<div style="font-size:12px;color:var(--muted2);line-height:1.7;">'
+    + '<div style="font-weight:600;color:var(--gold);margin-bottom:4px;">Screenshot analysis isn\'t available yet</div>'
+    + 'This tool can\'t read prices out of a screenshot, so nothing has been valued. '
+    + 'Use the <b>Card Scanner</b> below to identify a card from a photo and pull its real market price, '
+    + 'or search the card in <b>Card Search</b>.'
+    + '</div>';
+  if(input) { try { input.value=''; } catch(_){} }
 }
 function renderAnalyzer(){
   let topCard=null,topVal=0,bestROI=null,bestROIPct=0;
-  collection.forEach(card=>{const p=pcache[cacheKey(card)]?.data;const bp=p?bestPrice(p,card.type==='graded'):0;if(bp>topVal){topVal=bp;topCard=card;}const paid=parseFloat(card.paid||0);if(bp>0&&paid>0){const pct=((bp-paid)/paid)*100;if(pct>bestROIPct){bestROIPct=pct;bestROI=card;}}});
+  collection.forEach(card=>{const bp=cardValue(card);if(bp>topVal){topVal=bp;topCard=card;}const paid=parseFloat(card.paid||0);if(bp>0&&paid>0){const pct=((bp-paid)/paid)*100;if(pct>bestROIPct){bestROIPct=pct;bestROI=card;}}});
   document.getElementById('val-top-name').textContent=topCard?topCard.name+(topCard.set?' · '+topCard.set:''):'—';
   document.getElementById('val-top-price').textContent=topVal>0?fmtPrice(topVal):'—';
   const brackets=[{label:'<$10',max:10},{label:'$10–50',min:10,max:50},{label:'$50–200',min:50,max:200},{label:'$200–1k',min:200,max:1000},{label:'$1k+',min:1000}];
-  const counts=brackets.map(b=>collection.filter(c=>{const p=pcache[cacheKey(c)]?.data;const bp=p?bestPrice(p,c.type==='graded'):0;return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
+  const counts=brackets.map(b=>collection.filter(c=>{const bp=cardValue(c);return bp>=(b.min||0)&&(!b.max||bp<b.max);}).length);
   const maxC=Math.max(...counts,1);
   document.getElementById('val-dist').innerHTML=brackets.map((b,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px;"><span style="width:60px;color:var(--muted);">${b.label}</span><div style="flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden;"><div style="width:${(counts[i]/maxC*100).toFixed(0)}%;height:100%;background:var(--blue);border-radius:3px;"></div></div><span style="width:20px;text-align:right;color:var(--muted2);font-family:var(--mono);">${counts[i]}</span></div>`).join('');
   document.getElementById('val-roi-name').textContent=bestROI?bestROI.name:'—';
@@ -8016,7 +8177,7 @@ function renderSealed(){
   const total=sealed.reduce((s,x)=>s+(x.qty||1),0);
   document.getElementById('nb-sealed').textContent=total;document.getElementById('sealed-topbar-cnt').textContent=total+' item'+(total!==1?'s':'');
   let totalVal=0,totalPaid=0,pnlCount=0;
-  sealed.forEach(x=>{const v=sealedEffectiveValue(x);const p=parseFloat(x.paid||0);if(v>0)totalVal+=v*(x.qty||1);if(p>0){totalPaid+=p*(x.qty||1);pnlCount++;}});
+  sealed.forEach(x=>{const v=sealedEffectiveValue(x);const p=parseFloat(x.paid||0);const q=itemQty(x);if(v>0)totalVal+=v*q;if(p>0){totalPaid+=p*q;pnlCount++;}});
   document.getElementById('ss-total').textContent=total;
   document.getElementById('ss-value').textContent='$'+totalVal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const pnlEl=document.getElementById('ss-pnl');const pnlSub=document.getElementById('ss-pnl-sub');
@@ -8036,13 +8197,13 @@ function renderSealed(){
     return `<div class="card-tile" style="cursor:default;">
       <div class="ct-img" onclick="openSealedDetail('${p.id}')" style="aspect-ratio:1;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:52px;overflow:hidden;position:relative;cursor:pointer;">
         <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">${info.icon}</span>
-        ${(()=>{const _si=sealedImageFor(p);return _si?`<img src="${_si}" alt="${p.name}" loading="lazy" style="position:relative;width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`:'';})()}
-        <div class="ct-badges"><span class="ct-badge type-standard">${info.label}</span>${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${p.lang}</span>`:''}</div>
+        ${(()=>{const _si=sealedImageFor(p);return _si?`<img src="${esc(_si)}" alt="${esc(p.name)}" loading="lazy" style="position:relative;width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`:'';})()}
+        <div class="ct-badges"><span class="ct-badge type-standard">${info.label}</span>${p.lang&&p.lang!=='EN'?`<span class="ct-badge type-reverse">${esc(p.lang)}</span>`:''}</div>
         <span class="ct-cond" style="background:${p.cond==='sealed'?'rgba(46,204,128,.2)':'rgba(255,140,66,.2)'};color:${p.cond==='sealed'?'#4ade80':'var(--orange)'};width:auto;padding:2px 6px;border-radius:6px;font-size:9px;top:7px;right:7px;">${p.cond==='sealed'?'SEALED':'OPEN'}</span>
       </div>
       <div class="ct-body">
-        <div class="ct-name" onclick="openSealedDetail('${p.id}')" style="cursor:pointer;">${p.name}</div>
-        <div class="ct-set" onclick="openSealedDetail('${p.id}')" style="cursor:pointer;">${p.set||''}${p.qty>1?' · ×'+p.qty:''}</div>
+        <div class="ct-name" onclick="openSealedDetail('${p.id}')" style="cursor:pointer;">${esc(p.name)}</div>
+        <div class="ct-set" onclick="openSealedDetail('${p.id}')" style="cursor:pointer;">${esc(p.set||'')}${p.qty>1?' · ×'+esc(p.qty):''}</div>
         <div class="price-strip">
           ${val>0?`<div class="ps-row"><span class="ps-lbl">Value<span style="font-size:8px;font-weight:700;padding:1px 4px;border-radius:4px;margin-left:5px;letter-spacing:.3px;background:${vsrc==='market'?'rgba(46,204,128,.16)':'rgba(245,200,66,.16)'};color:${vsrc==='market'?'var(--green)':'var(--gold)'};">${vsrc==='market'?'LIVE':'MANUAL'}</span></span><span class="ps-val ps-best">$${val.toFixed(2)}</span></div>`:''}
           ${paid>0?`<div class="ps-row"><span class="ps-lbl">Paid</span><span class="ps-val">$${paid.toFixed(2)}</span></div>`:''}
@@ -8060,7 +8221,7 @@ function renderSealed(){
   }).join('');
 }
 // Sealed set browser
-function renderSealedSets(sets){const el=document.getElementById('sealed-set-list');if(!el)return;if(!sets||!sets.length){el.innerHTML='<p style="font-size:12px;color:var(--muted);padding:6px 0;">No sets loaded — add pokemontcg.io key in Settings.</p>';return;}document.getElementById('sealed-set-cnt').textContent=sets.length+' sets';el.innerHTML=sets.map(s=>{const logo=s.images?.logo?`<img class="set-logo" src="${s.images.logo}" alt="${s.name}" loading="lazy" onerror="this.style.display='none'">`:'<div class="set-logo-ph"></div>';return `<div class="set-item${sealedSetFilter===s.name?' active':''}" onclick="selectSealedSet('${s.id}','${s.name.replace(/'/g,"\\'")}','${s.images?.logo||''}')">${logo}<div style="min-width:0;flex:1;"><div class="set-name">${s.name}</div><div class="set-year">${(s.releaseDate||'').slice(0,4)}</div></div></div>`;}).join('');}
+function renderSealedSets(sets){const el=document.getElementById('sealed-set-list');if(!el)return;if(!sets||!sets.length){el.innerHTML='<p style="font-size:12px;color:var(--muted);padding:6px 0;">No sets loaded — add pokemontcg.io key in Settings.</p>';return;}document.getElementById('sealed-set-cnt').textContent=sets.length+' sets';el.innerHTML=sets.map(s=>{const logo=s.images?.logo?`<img class="set-logo" src="${esc(s.images.logo)}" alt="${esc(s.name)}" loading="lazy" onerror="this.style.display='none'">`:'<div class="set-logo-ph"></div>';return `<div class="set-item${sealedSetFilter===s.name?' active':''}" onclick="selectSealedSet('${s.id}','${s.name.replace(/'/g,"\\'")}','${s.images?.logo||''}')">${logo}<div style="min-width:0;flex:1;"><div class="set-name">${esc(s.name)}</div><div class="set-year">${(s.releaseDate||'').slice(0,4)}</div></div></div>`;}).join('');}
 function filterSealedSets(q){if(!allSets.length)return;renderSealedSets(q?allSets.filter(s=>s.name.toLowerCase().includes(q.toLowerCase())):allSets);}
 function selectSealedSet(id,name,logo){sealedSetFilter=name;document.getElementById('sp-set').value=name;const banner=document.getElementById('sealed-set-banner');banner.style.display='flex';document.getElementById('sealed-set-banner-name').textContent=name;const bl=document.getElementById('sealed-set-banner-logo');bl.src=logo;bl.style.display=logo?'':'none';document.getElementById('sealed-set-clear').style.display='';renderSealedSets(document.getElementById('sealed-set-filter').value?allSets.filter(s=>s.name.toLowerCase().includes(document.getElementById('sealed-set-filter').value.toLowerCase())):allSets);renderSealedQuickAdd(name,logo);renderSealed();}
 function clearSealedSetFilter(){sealedSetFilter='';document.getElementById('sealed-set-banner').style.display='none';document.getElementById('sealed-set-clear').style.display='none';document.getElementById('sealed-set-filter').value='';document.getElementById('sealed-quickadd-panel').style.display='none';renderSealedSets(allSets);renderSealed();}
@@ -8117,10 +8278,10 @@ function renderSoldHistory(){
     const pnlPct = e.paid>0?((pnl/e.paid)*100).toFixed(0):null;
     const date = new Date(e.soldDate).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
     return `<div style="display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);">
-      ${e.img?`<img src="${e.img}" style="width:42px;height:58px;object-fit:cover;border-radius:5px;flex-shrink:0;" onerror="this.style.display='none'">`:'<div style="width:42px;height:58px;background:var(--bg3);border-radius:5px;flex-shrink:0;"></div>'}
+      ${e.img?`<img src="${esc(e.img)}" style="width:42px;height:58px;object-fit:cover;border-radius:5px;flex-shrink:0;" onerror="this.style.display='none'">`:'<div style="width:42px;height:58px;background:var(--bg3);border-radius:5px;flex-shrink:0;"></div>'}
       <div style="flex:1;min-width:0;">
-        <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.name}</div>
-        <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">${e.set||''}${e.num?' · #'+e.num:''}${e.grade?' · '+e.grade:''}</div>
+        <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(e.name)}</div>
+        <div style="font-size:10px;color:var(--muted);font-family:var(--mono);">${esc(e.set||'')}${e.num?' · #'+esc(e.num):''}${e.grade?' · '+esc(e.grade):''}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px;">${date} · Paid $${(e.paid||0).toFixed(2)} → Sold $${(e.soldPrice||0).toFixed(2)}</div>
       </div>
       <div style="text-align:right;flex-shrink:0;">
@@ -8151,18 +8312,18 @@ function undoRemove(){ if(!_lastRemoved) return; const {card, idx} = _lastRemove
 
 function openSellModal(card){
   window._sellCardId = card.id;
-  const p = pcache[cacheKey(card)]?.data;
-  const marketPrice = p ? bestPrice(p, card.type==='graded') : 0;
+  const p = cardPriceData(card);
+  const marketPrice = cardValue(card);
   const paid = parseFloat(card.paid)||0;
   window._sellMarketPrice = marketPrice;
 
   const img = p?.img || card.img || '';
   document.getElementById('sell-modal-body').innerHTML = `
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;">
-      ${img?`<img src="${img}" style="width:48px;height:67px;object-fit:cover;border-radius:6px;" onerror="this.style.display='none'">`:''}
+      ${img?`<img src="${esc(img)}" style="width:48px;height:67px;object-fit:cover;border-radius:6px;" onerror="this.style.display='none'">`:''}
       <div>
-        <div style="font-weight:600;font-size:15px;">${card.name}</div>
-        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);">${card.set||''}${card.num?' · #'+card.num:''}${card.grade?' · '+card.grade:''}</div>
+        <div style="font-weight:600;font-size:15px;">${esc(card.name)}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);">${esc(card.set||'')}${card.num?' · #'+esc(card.num):''}${card.grade?' · '+esc(card.grade):''}</div>
       </div>
     </div>
     <div style="display:flex;gap:10px;margin-bottom:14px;">
@@ -8212,7 +8373,7 @@ function confirmSell(){
     name: card.name,
     set: card.set||'',
     num: card.num||'',
-    img: pcache[cacheKey(card)]?.data?.img || card.img || '',
+    img: cardPriceData(card)?.img || card.img || '',
     type: card.type||'standard',
     grade: card.grade||'',
     cond: card.cond||'',
@@ -8323,8 +8484,7 @@ function saveCostBasis(cardId) {
   }
 
   // Recalculate gain/loss in the mini-stats
-  const p    = pcache[cacheKey(card)]?.data;
-  const best = p ? bestPrice(p, card?.type==='graded') : 0;
+  const best = cardValue(card);
   const roi  = card.paid && best > 0 ? best - parseFloat(card.paid) : null;
   const roiPct = roi != null ? ((best / parseFloat(card.paid) - 1) * 100).toFixed(1) : null;
   const glEl = document.querySelector('#detail-inner .mini-stat-val[data-gl]');
@@ -8364,8 +8524,7 @@ function openCostBasisEditor() {
   const total = document.getElementById('cost-editor-total');
 
   list.innerHTML = collection.map(card => {
-    const p    = pcache[cacheKey(card)]?.data;
-    const best = p ? bestPrice(p, card.type==='graded') : 0;
+    const best = cardValue(card);
     const paid = parseFloat(card.paid || 0);
     const roi  = best > 0 && paid > 0 ? best - paid : null;
     const roiPct = roi != null ? ((roi / paid) * 100).toFixed(1) : null;
@@ -8374,11 +8533,11 @@ function openCostBasisEditor() {
 
     return `<div class="cost-row">
       ${card.img
-        ? `<img class="cost-row-img" src="${card.img}" alt="${card.name}">`
+        ? `<img class="cost-row-img" src="${esc(card.img)}" alt="${esc(card.name)}">`
         : `<div class="cost-row-img-ph">⟡</div>`}
       <div class="cost-row-info">
-        <div class="cost-row-name">${card.name}</div>
-        <div class="cost-row-meta">${card.set||''}${card.grade ? ' · ' + card.grade : ' · ' + (card.cond||'NM')}${best > 0 ? ' · Now $' + best.toFixed(2) : ''}</div>
+        <div class="cost-row-name">${esc(card.name)}</div>
+        <div class="cost-row-meta">${esc(card.set||'')}${card.grade ? ' · ' + esc(card.grade) : ' · ' + esc(card.cond||'NM')}${best > 0 ? ' · Now $' + best.toFixed(2) : ''}</div>
       </div>
       <div class="cost-row-input-wrap">
         <span class="cost-row-prefix">$</span>
@@ -8408,8 +8567,7 @@ function updateCostRow(input) {
   save();
 
   // Update the P&L cell for this row
-  const p    = pcache[cacheKey(card)]?.data;
-  const best = p ? bestPrice(p, card?.type==='graded') : 0;
+  const best = cardValue(card);
   const paid = parseFloat(card.paid || 0);
   const roi  = best > 0 && paid > 0 ? best - paid : null;
   const roiPct = roi != null ? ((roi / paid) * 100).toFixed(1) : null;
@@ -8428,10 +8586,11 @@ function updateCostEditorTotal() {
   let totalPaid = 0, totalVal = 0;
   collection.forEach(card => {
     const paid = parseFloat(card.paid || 0);
-    const p    = pcache[cacheKey(card)]?.data;
-    const best = p ? bestPrice(p) : 0;
-    if (paid > 0) totalPaid += paid * (card.qty || 1);
-    if (best > 0) totalVal  += best * (card.qty || 1);
+    // was bestPrice(p) with no isGraded flag — graded slabs were valued here with
+    // the RAW engine, so this total disagreed with every other screen.
+    const best = cardValue(card);
+    if (paid > 0) totalPaid += paid * itemQty(card);
+    if (best > 0) totalVal  += best * itemQty(card);
   });
   const pnl = totalPaid > 0 ? totalVal - totalPaid : null;
   totalEl.textContent = totalPaid > 0
@@ -8459,7 +8618,7 @@ async function repriceCard(id){
 // Grade detection and reason color-coding are display-only parses. No pricing
 // read-modifies, no fetches, no writes. Rollback: delete this function, the
 // evxFilter helper, the .evx-* CSS block, and its term in the openDetail call site.
-function evxEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function evxEsc(s){ return esc(s); }   // kept as an alias — esc() is the canonical escaper
 function evxFilter(btn){
   const sec = btn.closest('.evx-sec'); if(!sec) return;
   sec.querySelectorAll('.evx-chip').forEach(c=>c.classList.toggle('evx-chip-on', c===btn));
@@ -8537,7 +8696,7 @@ function buildPricingEvidence(card, p){
   // Cache freshness — pure read of the existing cache entry / synced stamp.
   let pricedAt = null, pricedVia = '';
   try {
-    const e = (typeof pcache!=='undefined') ? pcache[cacheKey(card)] : null;
+    const e = cardPriceEntry(card);
     if (e && e.ts) { pricedAt = e.ts; pricedVia = 'live cache'; }
     else if (card.lastPricedAt) { pricedAt = card.lastPricedAt; pricedVia = 'synced stamp'; }
   } catch(_){}
@@ -8565,7 +8724,7 @@ function buildPricingEvidence(card, p){
   const compsBlock = (p.ebay_sales && p.ebay_sales.length)
     ? `<div><div class="ev-lbl">Comps used · ${p.ebayN||p.ebay_sales.length} ${eb.ask?'active asks':'sold comps'}</div><div class="ev-pills">${p.ebay_sales.map(s=>{
         const inner = `$${Math.round(s.price).toLocaleString('en-US')}${s.date?`<span class="ev-pill-date"> · ${s.date}</span>`:''}`;
-        return s.url ? `<a class="ev-pill ev-pill-link" href="${s.url}" target="_blank" rel="noopener">${inner} \u2197</a>`
+        return s.url ? `<a class="ev-pill ev-pill-link" href="${esc(s.url)}" target="_blank" rel="noopener">${inner} \u2197</a>`
                      : `<span class="ev-pill">${inner}</span>`;
       }).join('')}</div></div>`
     : '';
@@ -8579,12 +8738,12 @@ function buildPricingEvidence(card, p){
   // Older cache entries (pre-title) simply have no title field and render nothing.
   const compTitleRows = (p.ebay_sales||[])
     .filter(s => s.title)
-    .map(s => `<div>comp \u00b7 $${Math.round(s.price).toLocaleString('en-US')}${s.date?(' \u00b7 '+s.date):''} \u00b7 ${String(s.title).slice(0,80)}${String(s.title).length>80?'\u2026':''}</div>`)
+    .map(s => `<div>comp \u00b7 $${Math.round(s.price).toLocaleString('en-US')}${s.date?(' \u00b7 '+s.date):''} \u00b7 ${esc(String(s.title).slice(0,80))}${String(s.title).length>80?'\u2026':''}</div>`)
     .join('');
   // DORMANT: rejected-comp evidence ledger for singles/graded. The Worker does not
   // send p.rejected yet (spec: worker-changes-spec.md). Renders nothing until it does.
   const rejectedRows = (Array.isArray(p.rejected) && p.rejected.length)
-    ? p.rejected.slice(0,10).map(r => `<div style="color:var(--red);">rejected \u00b7 ${r.price!=null?('$'+Math.round(r.price).toLocaleString('en-US')+' \u00b7 '):''}${r.reason||'unspecified'}${r.title?(' \u00b7 '+String(r.title).slice(0,60)):''}</div>`).join('')
+    ? p.rejected.slice(0,10).map(r => `<div style="color:var(--red);">rejected \u00b7 ${r.price!=null?('$'+Math.round(r.price).toLocaleString('en-US')+' \u00b7 '):''}${esc(r.reason||'unspecified')}${r.title?(' \u00b7 '+esc(String(r.title).slice(0,60))):''}</div>`).join('')
     : '';
   const advRows = [
     diagRaw ? null : '(cached \u2014 tap Re-fetch for a live fetch log)',
@@ -8600,7 +8759,7 @@ function buildPricingEvidence(card, p){
     <div class="ev-meta">
       <div class="ev-src"><div class="ev-lbl">Valuation type</div><div class="ev-val">${typeLbl}</div></div>
       <div class="ev-src"><div class="ev-lbl">Item identity</div><div class="ev-val ev-mono">${card.cardId||'unresolved'}</div></div>
-      ${card.grade?`<div class="ev-src"><div class="ev-lbl">Grade</div><div class="ev-val">${card.grade}</div></div>`:''}
+      ${card.grade?`<div class="ev-src"><div class="ev-lbl">Grade</div><div class="ev-val">${esc(card.grade)}</div></div>`:''}
       <div class="ev-src"><div class="ev-lbl">Evidence</div><div class="ev-val${(p.ebayN||0)?'':' ev-none'}">${(p.counts&&p.counts.fetched)?(p.counts.accepted+' of '+p.counts.fetched+' listings used'):((p.ebayN||0)?(p.ebayN+' comp'+(p.ebayN>1?'s':'')+' used'):'no comps')}</div></div>
     </div>
     <div class="ev-meta">
@@ -8622,7 +8781,7 @@ function buildPricingEvidence(card, p){
 
 async function openDetail(id){
   const card=collection.find(c=>c.id===id)||((window._detailTransient&&window._detailTransient.id===id)?window._detailTransient:null);if(!card)return;
-  const p=pcache[cacheKey(card)]?.data||await getPrices(card);
+  const p=cardPriceData(card)||await getPrices(card);
   const best=bestPrice(p,card.type==='graded'),worst=worstPrice(p);
   const priceAnalysis=analyzePriceRouted(p,card.type==='graded');
   const roi=card.paid?(best-parseFloat(card.paid)):null;
@@ -8643,31 +8802,37 @@ async function openDetail(id){
   const pcQ   = encodeURIComponent(full);
   const ebayQ = encodeURIComponent(ebayCardQuery(card));
   const ebayGradeQ = encodeURIComponent(ebayCardQuery(card, card.grade || 'PSA 10'));
-  // Use real eBay sales if available, else simulate
-  const rawSales = p.ebay_sales?.length ? p.ebay_sales : simulateEbaySales(best);
-  const eSales = rawSales.map(s => {
+  // Real sold comps ONLY. This previously fell back to simulateEbaySales(best),
+  // which invented five comps with random dates and prices and rendered them in the
+  // "eBay Recent Sold" list marked "~est" — fabricated market evidence in a section
+  // the user reads as fact. No comps now renders an honest empty state instead.
+  // (Display only: these rows never fed the pricing engine, so no price changes.)
+  const rawSales = p.ebay_sales?.length ? p.ebay_sales : [];
+  const eSales = !rawSales.length
+    ? `<div style="font-size:12px;color:var(--muted);padding:8px 0;line-height:1.6;">No recent sold comps found for this card.<br><span style="font-size:11px;color:var(--muted2);">Check the eBay Sold link below for the live market.</span></div>`
+    : rawSales.map(s => {
     const isReal = !!s.url;
     const dateStr = s.date || 'Recent';
     const condStr = s.condition || s.cond || card.cond;
     const priceStr = fmtPrice(s.price || s.amount);
     return `<div class="ebay-sale">
-      <span style="color:var(--muted2);font-family:var(--mono);font-size:11px;">${dateStr}</span>
-      <span style="color:var(--muted2);">${condStr}</span>
+      <span style="color:var(--muted2);font-family:var(--mono);font-size:11px;">${esc(dateStr)}</span>
+      <span style="color:var(--muted2);">${esc(condStr)}</span>
       <span style="font-family:var(--mono);font-weight:500;${isReal?'color:var(--green);':''}">${priceStr}</span>
-      ${isReal ? `<a href="${s.url}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none;">↗</a>` : '<span style="font-size:9px;color:var(--muted);font-family:var(--mono);">~est</span>'}
+      ${isReal ? `<a href="${esc(s.url)}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none;">↗</a>` : '<span style="font-size:9px;color:var(--muted);font-family:var(--mono);">~est</span>'}
     </div>`;
   }).join('');
   document.getElementById('detail-inner').innerHTML=`
-    <div class="modal-hd"><h2>${card.name}</h2><button class="modal-close" onclick="closeModal('detail-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-hd"><h2>${esc(card.name)}</h2><button class="modal-close" onclick="closeModal('detail-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <div style="display:flex;gap:16px;margin-bottom:18px;align-items:flex-start;">
-        <div style="width:110px;flex-shrink:0;border-radius:10px;overflow:hidden;background:var(--bg3);">${(p.img||card.img)?`<img src="${p.img||card.img}" alt="${card.name}" style="width:100%;display:block;">`:'<div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--muted);">⟡</div>'}</div>
+        <div style="width:110px;flex-shrink:0;border-radius:10px;overflow:hidden;background:var(--bg3);">${(p.img||card.img)?`<img src="${esc(p.img||card.img)}" alt="${esc(card.name)}" style="width:100%;display:block;">`:'<div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--muted);">⟡</div>'}</div>
         <div style="flex:1;min-width:0;">
-          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;"><span class="ct-badge type-${card.type}">${card.type}</span><span class="ct-badge cond-${card.cond}">${card.cond}</span>${card.grade?`<span class="ct-badge type-graded">${card.grade}</span>`:''}${editionBadge(card)}</div>
-          <div style="font-family:var(--disp);font-size:20px;font-weight:800;margin-bottom:2px;">${card.name}</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;"><span class="ct-badge type-${esc(card.type)}">${esc(card.type)}</span><span class="ct-badge cond-${esc(card.cond)}">${esc(card.cond)}</span>${card.grade?`<span class="ct-badge type-graded">${esc(card.grade)}</span>`:''}${editionBadge(card)}</div>
+          <div style="font-family:var(--disp);font-size:20px;font-weight:800;margin-bottom:2px;">${esc(card.name)}</div>
           <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;">
-            ${card.set?`<span style="background:var(--bg3);border:1px solid var(--border);padding:2px 8px;border-radius:5px;font-size:11px;font-family:var(--mono);">${card.set}</span> `:''}
-            ${card.num?`<span style="color:var(--muted2);">#${card.num}</span> `:''}
+            ${card.set?`<span style="background:var(--bg3);border:1px solid var(--border);padding:2px 8px;border-radius:5px;font-size:11px;font-family:var(--mono);">${esc(card.set)}</span> `:''}
+            ${card.num?`<span style="color:var(--muted2);">#${esc(card.num)}</span> `:''}
             ${card.qty>1?`<span style="color:var(--muted2);">× ${card.qty}</span>`:''}
           </div>
           <div class="mini-stats">
@@ -8694,8 +8859,8 @@ async function openDetail(id){
       ${(()=>{const bars=SOURCES.map(s=>({label:(s.k==='ebay'?ebaySrcLabel(p).label:s.label),color:s.color,v:p[s.k]})).filter(b=>b.v>0);if(bars.length<2)return '';const mx=Math.max(...bars.map(b=>b.v));return `<div style="margin-bottom:18px;"><div class="sec-title-sm">Price Bar Chart</div><div style="display:flex;flex-direction:column;gap:9px;">${bars.map(b=>`<div style="display:flex;align-items:center;gap:10px;"><div style="width:96px;flex-shrink:0;font-size:12px;color:var(--muted2);display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${b.color};display:inline-block;flex-shrink:0;"></span>${b.label}</div><div style="flex:1;height:9px;background:var(--bg3);border-radius:5px;overflow:hidden;"><div style="width:${Math.max(4,Math.round(b.v/mx*100))}%;height:100%;background:${b.color};border-radius:5px;"></div></div><div style="width:74px;flex-shrink:0;text-align:right;font-family:var(--mono);font-size:12px;font-weight:700;color:${b.v===best?'var(--green)':(b.v===worst&&worst>best?'var(--red)':'var(--text)')};">${fmtPrice(b.v)}</div></div>`).join('')}</div></div>`;})()}
       <div style="margin-bottom:18px;"><div class="sec-title-sm">eBay Recent Sold</div><div>${eSales}</div></div>
       ${card.type!=='graded'&&best>0?`<div style="margin-bottom:18px;"><div class="sec-title-sm" style="display:flex;align-items:center;justify-content:space-between;">PSA Grading Value Estimates<span style="font-size:10px;color:var(--muted);font-family:var(--mono);font-weight:400;">Estimated from market price</span></div><div class="psa-row">${[6,7,8,9,10].map(g=>{const mult={6:.45,7:.7,8:1.25,9:1.75,10:3.0}[g];const est=(best*mult).toFixed(0);const hl=g===10?' hl':'';const realPsa10=g===10&&p.psa&&p.psa>0;const dispPrice=realPsa10?p.psa.toFixed(0):est;const isReal=realPsa10;return `<div class="psa-cell${hl}"><div class="psa-gnum">${g}</div><div class="psa-gprice" style="${g===10?'color:var(--gold);font-weight:700;':''}">${dispPrice>0?'$'+dispPrice:'—'}</div>${isReal?'<div style="font-size:8px;color:var(--green);font-family:var(--mono);margin-top:1px;">live</div>':''}</div>`;}).join('')}</div><div style="font-size:10px;color:var(--muted);margin-top:6px;">PSA 10 typically 3× market · <a href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(ebayCardQuery(card,'PSA 10'))}&LH_Sold=1" target="_blank" style="color:var(--blue);">Check real PSA 10 sold →</a></div></div>`:''}
-      ${card.source?`<div style="display:inline-flex;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" style=\"width:10px;height:10px;\"><path d=\"M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/></svg>Purchased from ${card.source}</div>`:''}
-      ${card.notes?`<div style="background:var(--bg3);border-radius:var(--r);padding:10px 12px;font-size:12px;color:var(--muted2);margin-bottom:14px;">${card.notes}</div>`:''}
+      ${card.source?`<div style="display:inline-flex;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:10px;"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" style=\"width:10px;height:10px;\"><path d=\"M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/></svg>Purchased from ${esc(card.source)}</div>`:''}
+      ${card.notes?`<div style="background:var(--bg3);border-radius:var(--r);padding:10px 12px;font-size:12px;color:var(--muted2);margin-bottom:14px;">${esc(card.notes)}</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:14px;">
         <a href="https://www.tcgplayer.com/search/pokemon/product?q=${tcgQ}&view=grid" target="_blank" class="btn btn-ghost btn-xs" title="${full}">TCGPlayer →</a>
         <a href="https://www.pricecharting.com/search-products?q=${pcQ}&type=prices&broad-category=trading-cards" target="_blank" class="btn btn-ghost btn-xs" title="${full}">PriceCharting →</a>
@@ -8708,6 +8873,12 @@ async function openDetail(id){
   openModal('detail-modal');
   setTimeout(()=>renderCardTrendChart(card, histSeries), 80);
   if(card.type==='graded') setTimeout(()=>loadActiveListings(card), 100);
+}
+
+// Live eBay active-listing panel for the graded-card detail modal. Previously
+// declared INSIDE openDetail(); it is parameterised on `card` and uses no closure
+// state, so it now sits at top level where its scope is obvious. Sole caller is
+// the setTimeout above — unchanged, and hoisting kept the call order identical.
 async function loadActiveListings(card) {
   const panel = document.getElementById('al-panel-' + card.id);
   if (!panel || card.type !== 'graded' || !card.grade) return;
@@ -8771,7 +8942,7 @@ async function loadActiveListings(card) {
       '</div>' +
       items.slice(0,3).map(i =>
         '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);gap:8px;">' +
-          '<span style="font-size:10px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + i.title + '</span>' +
+          '<span style="font-size:10px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(i.title) + '</span>' +
           '<span style="font-family:var(--mono);font-size:10px;color:var(--green);flex-shrink:0;">$' + i.price.toFixed(2) + '</span>' +
         '</div>'
       ).join('');
@@ -8782,7 +8953,6 @@ async function loadActiveListings(card) {
   }
 }
 
-}
 function buildCardTrendBlock(card, series, currentPrice){
   const enough = series && series.length >= 2;
   let changeLabel = '';
@@ -8818,6 +8988,9 @@ function renderCardTrendChart(card, series){
   if(lbl){const mn=Math.min(...values),mx=Math.max(...values);lbl.innerHTML=`<span>Low $${mn.toFixed(2)}</span><span>${series.length} days tracked</span><span>High $${mx.toFixed(2)}</span>`;}
 }
 function renderSparklineSVG(pts){const w=520,h=54,pad=4;const min=Math.min(...pts),max=Math.max(...pts);const range=max-min||1;const toX=i=>(i/(pts.length-1))*(w-pad*2)+pad;const toY=v=>h-pad-(v-min)/range*(h-pad*2);const d='M'+pts.map((v,i)=>toX(i)+','+toY(v)).join('L');const fill=d+`L${toX(pts.length-1)},${h}L${pad},${h}Z`;const up=pts[pts.length-1]>=pts[0];const col=up?'#2ecc80':'#ff4d6d';return `<div class="sparkline-wrap"><svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${col}" stop-opacity=".25"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><path d="${fill}" fill="url(#sg)"/><path d="${d}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${toX(pts.length-1)}" cy="${toY(pts[pts.length-1])}" r="3" fill="${col}"/></svg></div>`;}
+// DORMANT / DO NOT WIRE UP. Retained only as a reference implementation; it
+// FABRICATES sold comps and must never reach a surface the user reads as market
+// evidence. Its former caller (openDetail) now renders an honest empty state.
 function simulateEbaySales(anchor){const sales=[];const now=new Date();for(let i=0;i<5;i++){const d=new Date(now);d.setDate(d.getDate()-Math.floor(Math.random()*14));const conds=['NM','LP','NM','LP','MP'];const mult={NM:1,LP:.8,MP:.6}[conds[i]];sales.push({date:d.toLocaleDateString('en-US',{month:'short',day:'numeric'}),cond:conds[i],price:+(anchor*mult*(1+(Math.random()-.5)*.12)).toFixed(2)});}return sales.sort((a,b)=>new Date(b.date)-new Date(a.date));}
 
 // ═══ SEARCH + SETS ═══
@@ -8853,10 +9026,10 @@ async function doModalSearch(q){
       window._mdCards=window._mdCards||{};
       window._mdCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.large||c.images?.small||'',rarity:c.rarity||''};
       return `<div class="sd-item" onclick="modalPickCard(window._mdCards['${key}'])">
-        ${c.images?.small?`<img class="sd-thumb" src="${c.images.small}" alt="${c.name}" loading="lazy">`:'<div class="sd-ph">⟡</div>'}
+        ${c.images?.small?`<img class="sd-thumb" src="${c.images.small}" alt="${esc(c.name)}" loading="lazy">`:'<div class="sd-ph">⟡</div>'}
         <div style="min-width:0;flex:1;">
-          <div class="sd-name">${c.name}</div>
-          <div class="sd-meta">${c.set?.name||''} · #${c.number||'?'} · <span style="color:var(--muted)">${c.rarity||''}</span></div>
+          <div class="sd-name">${esc(c.name)}</div>
+          <div class="sd-meta">${esc(c.set?.name||'')} · #${esc(c.number||'?')} · <span style="color:var(--muted)">${esc(c.rarity||'')}</span></div>
         </div>
         <div class="sd-price">${price!=null?`<div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div>`:'<div class="sd-plbl" style="font-size:11px;">Select</div>'}</div>
       </div>`;
@@ -8893,7 +9066,7 @@ async function doNameSearch(q){
   try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=60`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();
     if(!j.data?.length){dd.innerHTML='<div style="padding:14px;font-size:12px;color:var(--muted);">No cards found.</div>';return;}
     dd.innerHTML=searchCountLine(j,q,{compact:true})+j.data.map(c=>{const tier=c.tcgplayer?.prices?Object.values(c.tcgplayer.prices)[0]:null;const price=tier?.market||null;const key='sd_'+c.id.replace(/[^a-z0-9]/gi,'_');window._sdCards=window._sdCards||{};window._sdCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.large||c.images?.small||'',rarity:c.rarity||''};
-      return `<div class="sd-item" onclick="quickAdd(window._sdCards['${key}'])">${c.images?.small?`<img class="sd-thumb" src="${c.images.small}" alt="${c.name}" loading="lazy">`:'<div class="sd-ph">⟡</div>'}<div style="min-width:0;"><div class="sd-name">${c.name}</div><div class="sd-meta">${c.set?.name||''} · #${c.number||'?'} · ${c.rarity||''}</div></div><div class="sd-price">${price!=null?`<div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div>`:'<div class="sd-plbl">Click to add</div>'}</div></div>`;}).join('');
+      return `<div class="sd-item" onclick="quickAdd(window._sdCards['${key}'])">${c.images?.small?`<img class="sd-thumb" src="${c.images.small}" alt="${esc(c.name)}" loading="lazy">`:'<div class="sd-ph">⟡</div>'}<div style="min-width:0;"><div class="sd-name">${esc(c.name)}</div><div class="sd-meta">${esc(c.set?.name||'')} · #${esc(c.number||'?')} · ${esc(c.rarity||'')}</div></div><div class="sd-price">${price!=null?`<div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div>`:'<div class="sd-plbl">Click to add</div>'}</div></div>`;}).join('');
   }catch(e){dd.innerHTML='<div style="padding:14px;font-size:12px;color:var(--muted);">Search failed. Check pokemontcg.io key.</div>';}
 }
 document.addEventListener('click',e=>{if(!e.target.closest('#mode-name'))document.getElementById('name-dd').classList.remove('open');});
@@ -8985,9 +9158,9 @@ async function loadSets(){
     if (!servedFromCache) document.getElementById('set-list').innerHTML='<p style="font-size:12px;color:var(--muted);padding:8px;">Set browser unavailable — add pokemontcg.io key in Settings.</p>';
   }
 }
-function renderSets(sets){document.getElementById('set-list').innerHTML=sets.map(s=>{const logo=s.images?.logo?`<img class="set-logo" src="${s.images.logo}" alt="${s.name}" loading="lazy" onerror="this.style.display='none'">`:'<div class="set-logo-ph"></div>';return `<div class="set-item" onclick="openSet('${s.id}','${s.name.replace(/'/g,"\\'")}',event)">${logo}<div style="min-width:0;flex:1;"><div class="set-name">${s.name}</div><div class="set-year">${(s.releaseDate||'').slice(0,4)} · ${s.total||'?'} cards</div></div></div>`;}).join('');}
+function renderSets(sets){document.getElementById('set-list').innerHTML=sets.map(s=>{const logo=s.images?.logo?`<img class="set-logo" src="${esc(s.images.logo)}" alt="${esc(s.name)}" loading="lazy" onerror="this.style.display='none'">`:'<div class="set-logo-ph"></div>';return `<div class="set-item" onclick="openSet('${s.id}','${s.name.replace(/'/g,"\\'")}',event)">${logo}<div style="min-width:0;flex:1;"><div class="set-name">${esc(s.name)}</div><div class="set-year">${(s.releaseDate||'').slice(0,4)} · ${s.total||'?'} cards</div></div></div>`;}).join('');}
 function filterSets(q){const f=q?allSets.filter(s=>s.name.toLowerCase().includes(q.toLowerCase())):allSets;renderSets(f);document.getElementById('set-cnt-lbl').textContent=f.length+' sets';}
-async function openSet(id,name,e){document.querySelectorAll('#page-singles .set-item').forEach(el=>el.classList.remove('active'));e?.currentTarget?.classList.add('active');const panel=document.getElementById('set-cards-panel');const grid=document.getElementById('set-cards-grid');document.getElementById('set-cards-title').textContent=name;panel.classList.add('open');grid.innerHTML='<div style="padding:16px;color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px;"><div class="spinner"></div>Loading…</div>';try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=set.id:${id}&orderBy=number&pageSize=250`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();window._setCards={};grid.innerHTML=j.data.map(c=>{const key='sc_'+c.id.replace(/[^a-z0-9]/gi,'_');window._setCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.small||'',rarity:c.rarity||''};return `<div class="set-card-item" onclick="quickAdd(window._setCards['${key}'])">${c.images?.small?`<img src="${c.images.small}" alt="${c.name}" loading="lazy">`:'<div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--muted);">⟡</div>'}<div class="sc-name">${c.name}</div><div class="sc-num">#${c.number}</div></div>`;}).join('');}catch(e){grid.innerHTML='<p style="font-size:12px;color:var(--muted);padding:8px;">Failed to load set cards.</p>';}}
+async function openSet(id,name,e){document.querySelectorAll('#page-singles .set-item').forEach(el=>el.classList.remove('active'));e?.currentTarget?.classList.add('active');const panel=document.getElementById('set-cards-panel');const grid=document.getElementById('set-cards-grid');document.getElementById('set-cards-title').textContent=name;panel.classList.add('open');grid.innerHTML='<div style="padding:16px;color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px;"><div class="spinner"></div>Loading…</div>';try{const hdrs=keys.ptcg?{'X-Api-Key':keys.ptcg}:{};const r=await fetch(`https://api.pokemontcg.io/v2/cards?q=set.id:${id}&orderBy=number&pageSize=250`,{headers:hdrs});if(!r.ok)throw new Error();const j=await r.json();window._setCards={};grid.innerHTML=j.data.map(c=>{const key='sc_'+c.id.replace(/[^a-z0-9]/gi,'_');window._setCards[key]={id:c.id,name:c.name,set:c.set?.name||'',num:c.number||'',img:c.images?.small||'',rarity:c.rarity||''};return `<div class="set-card-item" onclick="quickAdd(window._setCards['${key}'])">${c.images?.small?`<img src="${c.images.small}" alt="${esc(c.name)}" loading="lazy">`:'<div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--muted);">⟡</div>'}<div class="sc-name">${esc(c.name)}</div><div class="sc-num">#${c.number}</div></div>`;}).join('');}catch(e){grid.innerHTML='<p style="font-size:12px;color:var(--muted);padding:8px;">Failed to load set cards.</p>';}}
 function closeSetCards(){document.getElementById('set-cards-panel').classList.remove('open');document.querySelectorAll('#page-singles .set-item').forEach(el=>el.classList.remove('active'));}
 function setSearchMode(mode,el){document.querySelectorAll('.filter-chip[id^="stab"]').forEach(b=>b.classList.remove('active'));el.classList.add('active');document.getElementById('mode-name').style.display=mode==='name'?'':'none';document.getElementById('mode-set').style.display=mode==='set'?'':'none';}
 
@@ -9088,8 +9261,8 @@ function onWishSearch(val){
           <div class="cs-img-wrap">${card.images?.small?`<img src="${card.images.small}" alt="${card.name}" loading="lazy">`:'<div class="cs-img-ph">⟡</div>'}</div>
           <div class="cs-body">
             <div class="cs-set-pill">#${card.number||'?'}</div>
-            <div class="cs-name">${card.name}</div>
-            <div class="cs-set">${card.set?.name||''}</div>
+            <div class="cs-name">${esc(card.name)}</div>
+            <div class="cs-set">${esc(card.set?.name||'')}</div>
             ${price?`<div class="cs-price">$${price.toFixed(2)}</div>`:'<div class="cs-price" style="color:var(--muted);">—</div>'}
           </div>
           <button class="cs-add" style="${alreadyWatching?'background:var(--green);opacity:1;':''}">${alreadyWatching?'✓':'+'}</button>
@@ -9128,7 +9301,7 @@ function captureWishSnapshot() {
   let totalVal  = 0;
 
   wishlist.forEach(w => {
-    const p    = pcache['wish_'+w.id]?.data;
+    const p    = wishPriceData(w);
     const best = p ? bestPrice(p) : 0;
     if (best > 0) {
       if (!history[w.id]) history[w.id] = [];
@@ -9239,7 +9412,7 @@ function renderWishBreakdownChart() {
   if (!canvas) return;
 
   const items = wishlist.map(w => {
-    const p    = pcache['wish_'+w.id]?.data;
+    const p    = wishPriceData(w);
     const best = p ? bestPrice(p) : 0;
     return { name: w.name.length > 16 ? w.name.slice(0,14)+'…' : w.name, val: best };
   }).filter(i => i.val > 0).sort((a,b) => b.val - a.val);
@@ -9294,7 +9467,7 @@ function renderWishSparklines() {
     const pts = (history[w.id] || []).map(p => p.v);
 
     // If no history, build a simulated sparkline from trend data
-    const p    = pcache['wish_'+w.id]?.data;
+    const p    = wishPriceData(w);
     const best = p ? bestPrice(p) : 0;
     if (!pts.length && best > 0) {
       const trend = p?.trend30 || 0;
@@ -9373,7 +9546,7 @@ function openWishDetail(wishId) {
   // (transient) card carrying the watchlist item's kind/grade/edition so it prices right.
   window._detailTransient = {
     id: 'wishview_' + w.id, cardId: w.cardId || '', name: w.name, set: w.set || '', num: w.num || '',
-    img: (pcache['wish_'+w.id] && pcache['wish_'+w.id].data && pcache['wish_'+w.id].data.img) || w.img || '',
+    img: (wishPriceData(w) || {}).img || w.img || '',
     rarity: w.rarity || '', type: w.type==='graded' ? 'graded' : 'standard', grade: w.grade || '',
     cert: '', edition: w.edition || 'unlimited', cond: 'NM', paid: '', _transient: true, _wishId: w.id
   };
@@ -9382,6 +9555,16 @@ function openWishDetail(wishId) {
 
 let _wishTried = {};                 // wishId → last fetch-attempt ts (retry throttle, session-scoped)
 const WISH_RETRY_MS = 5*60*1000;     // don't refetch an unpriceable wishlist card more than once / 5 min
+// Watchlist items are priced into their own 'wish_<id>' cache namespace — NOT via
+// cacheKey(), because a watchlist entry is not an owned holding and has no cond/
+// edition identity. Reads and writes both go through this accessor so the namespace
+// is declared in exactly one place.
+function wishPriceData(w){
+  if (!w || w.id == null) return null;
+  const e = pcache['wish_' + w.id];
+  return (e && e.data) ? e.data : null;
+}
+
 function renderWishlist(){
   const grid=document.getElementById('wish-grid');
   const empty=document.getElementById('wish-empty');
@@ -9402,8 +9585,8 @@ function renderWishlist(){
   const sorted=[...wishlist].sort((a,b)=>{
     if(sort==='name')return a.name.localeCompare(b.name);
     if(sort==='price_desc'||sort==='price_asc'){
-      const pa=bestPrice(pcache['wish_'+a.id]?.data||{}, a.type==='graded'||!!a.grade)||0;
-      const pb=bestPrice(pcache['wish_'+b.id]?.data||{}, b.type==='graded'||!!b.grade)||0;
+      const pa=bestPrice(wishPriceData(a)||{}, a.type==='graded'||!!a.grade)||0;
+      const pb=bestPrice(wishPriceData(b)||{}, b.type==='graded'||!!b.grade)||0;
       return sort==='price_desc'?pb-pa:pa-pb;
     }
     return new Date(b.added||0)-new Date(a.added||0);
@@ -9411,7 +9594,7 @@ function renderWishlist(){
 
   // Calculate totals
   let totalVal=0;
-  wishlist.forEach(w=>{const p=pcache['wish_'+w.id]?.data;const bp=p?bestPrice(p, w.type==='graded'||!!w.grade):0;totalVal+=bp;});
+  wishlist.forEach(w=>{const p=wishPriceData(w);const bp=p?bestPrice(p, w.type==='graded'||!!w.grade):0;totalVal+=bp;});
   document.getElementById('wish-cnt').textContent=wishlist.length+' cards';
   document.getElementById('wish-total').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'Loading…';
   document.getElementById('wish-if-bought').textContent=totalVal>0?'$'+totalVal.toLocaleString('en-US',{maximumFractionDigits:0}):'—';
@@ -9419,8 +9602,7 @@ function renderWishlist(){
   if(!grid)return;
   window._wishCards = {};
   grid.innerHTML=sorted.map((w,idx)=>{
-    const ck='wish_'+w.id;
-    const p=pcache[ck]?.data;
+    const p=wishPriceData(w);
     // Respect the selected grade — bestPrice takes an isGraded flag that the
     // watchlist was never passing, so a PSA 8 holding was priced as if it were raw.
     const _isG=(w.type==='graded')||!!w.grade;
@@ -9431,12 +9613,12 @@ function renderWishlist(){
     window._wishCards[w.id] = {wishId:w.id, cardId:w.cardId||"", name:w.name, set:w.set||"", num:w.num||"", img:img||w.img||"", rarity:w.rarity||""};
     return `<div class="db-card" onclick="openWishDetail('${w.id}')" style="position:relative;cursor:pointer;">
       <div class="db-card-img">
-        ${img?`<img src="${img}" alt="${w.name}" loading="lazy" style="pointer-events:none;" onerror="this.style.display='none'">`:'<div class="cs-img-ph" style="font-size:32px;opacity:.2;">⟡</div>'}
+        ${img?`<img src="${esc(img)}" alt="${esc(w.name)}" loading="lazy" style="pointer-events:none;" onerror="this.style.display='none'">`:'<div class="cs-img-ph" style="font-size:32px;opacity:.2;">⟡</div>'}
       </div>
       ${inVault?'<div style="position:absolute;top:6px;left:6px;background:var(--green);color:#0a0a0f;font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px;">IN VAULT</div>':''}
       <div class="db-card-body">
-        <div class="db-card-set-pill" style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.set||''}${w.num?' · #'+w.num:''}${w.type==='graded'&&w.grade?' · '+w.grade:(w.type==='sealed'?' · Sealed':'')}</div>
-        <div class="db-card-name">${w.name}</div>${editionBadge({edition:w.edition})?`<div style="margin-top:3px;">${editionBadge({edition:w.edition})}</div>`:''}
+        <div class="db-card-set-pill" style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(w.set||'')}${w.num?' · #'+esc(w.num):''}${w.type==='graded'&&w.grade?' · '+esc(w.grade):(w.type==='sealed'?' · Sealed':'')}</div>
+        <div class="db-card-name">${esc(w.name)}</div>${editionBadge({edition:w.edition})?`<div style="margin-top:3px;">${editionBadge({edition:w.edition})}</div>`:''}
         <div style="margin-top:4px;">
           ${best!=null
             ? `<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--green);">$${best.toFixed(2)}</div>`
@@ -9446,9 +9628,9 @@ function renderWishlist(){
           <canvas id="wsp-${w.id}" width="120" height="32" style="display:block;margin-top:4px;opacity:.8;pointer-events:none;"></canvas>
         </div>
         <div style="display:flex;gap:4px;margin-top:8px;">
-          <button class="btn btn-primary btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();wishAddToPortfolio(w.id)">+ Portfolio</button>
-          <button class="btn btn-ghost btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();wishLogDeal(w.id)">＄ Deal</button>
-          <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();removeWish(w.id)">✕</button>
+          <button class="btn btn-primary btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();wishAddToPortfolio('${w.id}')">+ Portfolio</button>
+          <button class="btn btn-ghost btn-xs" style="flex:1;font-size:10px;justify-content:center;" onclick="event.stopPropagation();wishLogDeal('${w.id}')">＄ Deal</button>
+          <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();removeWish('${w.id}')">✕</button>
         </div>
       </div>
     </div>`;
@@ -9583,8 +9765,8 @@ async function doOverviewSearch(q, page=1){
             </div>
             <div class="cs-body">
               <div class="cs-set-pill">${card.set?.name||'Unknown'} · #${card.number||'?'}</div>
-              <div class="cs-name">${card.name}</div>
-              <div class="cs-set">${card.rarity||''}</div>
+              <div class="cs-name">${esc(card.name)}</div>
+              <div class="cs-set">${esc(card.rarity||'')}</div>
               ${price?`<div class="cs-price">$${price.toFixed(2)}</div>`:'<div class="cs-price" style="color:var(--muted);">—</div>'}
             </div>
             <button class="cs-add" title="${inVault?'Already in vault':'Add to vault'}" style="${inVault?'background:var(--green);opacity:1;':''}">${inVault?'✓':'+'}</button>
@@ -9804,8 +9986,8 @@ async function doTabSearch(q, page=1){
         </div>
         <div class="cs-body">
           <div class="cs-set-pill">${card.set?.name||'?'} · #${card.number||'?'}</div>
-          <div class="cs-name">${card.name}</div>
-          <div class="cs-set">${card.rarity||''}</div>
+          <div class="cs-name">${esc(card.name)}</div>
+          <div class="cs-set">${esc(card.rarity||'')}</div>
           ${price?`<div class="cs-price">$${price.toFixed(2)}</div>`:'<div class="cs-price" style="color:var(--muted);">—</div>'}
           ${varChips}
         </div>
@@ -10108,11 +10290,11 @@ function renderSetBrowser() {
     return `<div class="set-tile" onclick="browseSetById('${s.id}')">
       <div class="set-tile-logo">
         ${s.images?.logo
-          ? `<img src="${s.images.logo}" alt="${s.name}" loading="lazy">`
+          ? `<img src="${esc(s.images.logo)}" alt="${esc(s.name)}" loading="lazy">`
           : `<div class="set-tile-logo-ph">🃏</div>`}
       </div>
       <div class="set-tile-body">
-        <div class="set-tile-name">${s.name}</div>
+        <div class="set-tile-name">${esc(s.name)}</div>
         <div class="set-tile-meta"><span>${year}</span><span>${total} cards</span></div>
       </div>
     </div>`;
@@ -10260,8 +10442,8 @@ function renderSetCardsGrid(cards) {
       </div>
       <div class="cs-body">
         <div class="cs-set-pill">#${card.number || '?'}</div>
-        <div class="cs-name">${card.name}</div>
-        <div class="cs-set">${card.rarity || ''}</div>
+        <div class="cs-name">${esc(card.name)}</div>
+        <div class="cs-set">${esc(card.rarity || '')}</div>
         ${price
           ? `<div class="cs-price">$${price.toFixed(2)}</div>`
           : '<div class="cs-price" style="color:var(--muted);">—</div>'}
@@ -10565,14 +10747,14 @@ async function jpShowSets(){
       const year = (s.date||'').slice(0,4);
       // art: logo → symbol → clean lettermark (never a broken-image glyph)
       const art = s.img
-        ? `<img src="${s.img}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'jp-mark',textContent:'${(s.id||'JP').slice(0,4)}'}))">`
+        ? `<img src="${esc(s.img)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'jp-mark',textContent:'${(s.id||'JP').slice(0,4)}'}))">`
         : (s.sym
             ? `<img src="${s.sym}" alt="" loading="lazy" style="max-height:38px;" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'jp-mark',textContent:'${(s.id||'JP').slice(0,4)}'}))">`
             : `<div class="jp-mark">${(s.id||'JP').slice(0,4)}</div>`);
       return `<div class="set-tile" onclick="jpBrowseSet('${key}')">
         <div class="set-tile-logo">${art}</div>
         <div class="set-tile-body">
-          <div class="set-tile-name">${s.name}</div>
+          <div class="set-tile-name">${esc(s.name)}</div>
           ${s.en ? `<div class="jp-en">${s.en}</div>` : ''}
           <div class="set-tile-meta"><span>${year||'JP'}</span><span>${s.total ? s.total+' cards' : ''}</span></div>
         </div>
@@ -10654,7 +10836,7 @@ async function jpBrowseSet(key){
     document.getElementById('set-browser-count').textContent = cards.length + ' cards';
     cGrid.innerHTML = `
       <div class="set-cards-header">
-        ${s.img ? `<img src="${s.img}" alt="">` : ''}
+        ${s.img ? `<img src="${esc(s.img)}" alt="">` : ''}
         <div>
           <div style="font-size:15px;font-weight:700;">${s.name} <span style="font-family:var(--mono);font-size:10px;color:var(--gold);">JP</span></div>
           ${s.en ? `<div class="jp-en" style="margin:2px 0 3px;">${s.en}</div>` : ''}
@@ -10679,12 +10861,12 @@ function jpRenderCardsInto(innerId, cards){
     window._jpPick[key] = c;
     const inVault = collection.some(x => x.name===c.name && x.num===c.num && (x.set===c.set || (x.lang==='JP' && x.name===c.name)));
     return `<div class="cs-card" onclick="jpPickCard('${key}')">
-      <div class="cs-img-wrap">${c.img ? `<img src="${c.img}" alt="" loading="lazy" data-alt="${c.imgAlt||''}" onerror="jpImgFallback(this)">` : '<div class="cs-img-ph">🇯🇵</div>'}</div>
+      <div class="cs-img-wrap">${c.img ? `<img src="${esc(c.img)}" alt="" loading="lazy" data-alt="${esc(c.imgAlt||'')}" onerror="jpImgFallback(this)">` : '<div class="cs-img-ph">🇯🇵</div>'}</div>
       <div class="cs-body">
         <div class="cs-set-pill">#${c.num || '?'}</div>
-        <div class="cs-name">${c.name}</div>
+        <div class="cs-name">${esc(c.name)}</div>
         ${c.en ? `<div class="jp-en">${c.en}</div>` : ''}
-        <div class="cs-set">${c.rarity || c.set || ''}</div>
+        <div class="cs-set">${esc(c.rarity || c.set || '')}</div>
         ${c.price != null ? `<div class="cs-price">$${(+c.price).toFixed(2)}</div>` : '<div class="cs-price" style="color:var(--muted);font-size:9px;">priced on add</div>'}
       </div>
       <button class="cs-add" title="${inVault?'In vault':'Add to vault'}" style="${inVault?'background:var(--green);opacity:1;':''}"
@@ -11294,6 +11476,11 @@ async function searchAndShowMatches(parsed) {
       showScanMatches(sorted, parsed);
     }
   } catch(e) {
+    // NOTE (2026-08): showScanResultCard() and showScanMatches() are called above but
+    // are NOT DEFINED anywhere in this file, so a successful catalogue match throws
+    // here and silently degrades to the manual form. Logged rather than swallowed so
+    // the failure is diagnosable; implementing those two renderers is a separate task.
+    console.warn('[scanner] match rendering failed — falling back to manual entry:', e);
     document.getElementById('scan-loading').style.display = 'none';
     showScanResultManual(parsed);
   }
@@ -11390,7 +11577,7 @@ async function dbWrite(fn){
 // AppState.update — so a stale value can't pollute the row. With no live price,
 // market_value / price_source / confidence are null (never invented).
 function buildHoldingRow(card, userId){
-  const hit     = pcache[cacheKey(card)];
+  const hit     = cardPriceEntry(card);   // live cache only — never the synced fallback (see note above)
   const p       = hit?.data;
   const isG     = card.type==='graded';
   const bp      = p ? bestPrice(p, isG) : null;
@@ -11548,7 +11735,7 @@ function calculateMarketSignal(){
 
   // Pass 1 — live metrics for every owned, priced card (live cache only).
   for(const card of collection){
-    const data = pcache[cacheKey(card)]?.data;
+    const data = cardPriceData(card);   // live cache only — signals need real comps
     if(!data) continue;
     const isG = card.type==='graded';
     const bp  = bestPrice(data, isG);
