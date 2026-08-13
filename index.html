@@ -2079,49 +2079,14 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
   </div>
 </div>
 
-<!-- DEAL -->
-<div class="modal-bg" id="deal-modal">
-  <div class="modal" style="width:min(480px,100%)">
-    <div class="modal-hd"><h2 id="deal-modal-title">Log Deal</h2><button class="modal-close" onclick="closeModal('deal-modal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="modal-body">
-      <div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Deal Type</div>
-      <div style="display:flex;gap:6px;margin-bottom:16px;">
-        <button class="type-pill active" data-val="buy" onclick="selectDealType('buy',this)" style="flex:1;text-align:center;">💳 Purchase</button>
-        <button class="type-pill" data-val="sell" onclick="selectDealType('sell',this)" style="flex:1;text-align:center;">💰 Sale</button>
-        <button class="type-pill" data-val="offer" onclick="selectDealType('offer',this)" style="flex:1;text-align:center;">🤝 Offer</button>
-      </div>
-      <input type="hidden" id="d-type" value="buy">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="form-group" style="grid-column:1/-1;">
-          <div class="form-label">Card / Product *</div>
-          <div style="position:relative;">
-            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);width:13px;height:13px;color:var(--muted);pointer-events:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input class="input" id="d-name" placeholder="Search by name, number, or set…" autocomplete="off"
-              oninput="onDealSearch(this.value)"
-              style="padding-left:32px;"
-              onkeydown="if(event.key==='Escape')closeDealDD()">
-            <div id="deal-dd" style="position:absolute;top:calc(100% + 5px);left:0;right:0;z-index:300;background:var(--bg3);border:1px solid var(--b2);border-radius:var(--r2);overflow:hidden;box-shadow:0 16px 40px rgba(0,0,0,.6);max-height:320px;overflow-y:auto;display:none;"></div>
-          </div>
-          <!-- Selected card preview -->
-          <div id="deal-selected" style="display:none;margin-top:8px;background:var(--bg3);border-radius:var(--r);padding:9px 12px;display:flex;align-items:center;gap:10px;">
-            <div id="deal-sel-img" style="width:36px;height:50px;border-radius:4px;background:var(--bg4);flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:16px;">⟡</div>
-            <div style="flex:1;min-width:0;">
-              <div id="deal-sel-name" style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
-              <div id="deal-sel-meta" style="font-size:10px;color:var(--muted2);margin-top:1px;"></div>
-            </div>
-            <button onclick="clearDealSelection()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:2px 4px;flex-shrink:0;">×</button>
-          </div>
-        </div>
-        <div class="form-group"><div class="form-label">Amount ($) *</div><input class="input" id="d-amount" type="number" placeholder="0.00" step="0.01"></div>
-        <div class="form-group"><div class="form-label">Date</div><input class="input" id="d-date" type="date"></div>
-        <div class="form-group"><div class="form-label">Platform</div><input class="input" id="d-source" placeholder="eBay, TCGPlayer, local…"></div>
-        <div class="form-group"><div class="form-label">Condition / Grade</div><input class="input" id="d-cond" placeholder="NM, PSA 10…"></div>
-        <div class="form-group" style="grid-column:1/-1;"><div class="form-label">Notes</div><textarea class="input" id="d-notes" placeholder="Deal details…" style="min-height:50px;"></textarea></div>
-      </div>
-    </div>
-    <div class="modal-ft"><button class="btn btn-ghost" onclick="closeModal('deal-modal')">Cancel</button><button class="btn btn-primary" onclick="saveDeal()">Save Deal</button></div>
-  </div>
-</div>
+<!-- (2026-08) REMOVED: the v1 "#deal-modal" Log-Deal modal (~40 lines of markup).
+     Caller analysis proved it unreachable: openDealModal() — the only code that
+     called openModal('deal-modal') — had zero callers, no inline handler, no
+     string invocation and no dynamic lookup. Its ids (d-name/d-amount/d-date/
+     d-source/d-cond/d-notes/d-type/deal-dd/deal-selected/deal-sel-*) were
+     referenced ONLY by the functions removed alongside it.
+     Legacy deal DATA support is unaffected: isLegacyDeal() / normalizeDeal() /
+     renderLegacyDeals() read old {type,amount,name} records and are untouched. -->
 
 <!-- CONFIRM -->
 <div class="confirm-bg" id="confirm-bg">
@@ -2139,6 +2104,12 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
   </div>
 </div>
 <div class="toast" id="toast"><div class="dot" id="toast-dot"></div><span id="toast-msg"></span><button id="toast-undo" style="display:none;pointer-events:auto;background:none;border:none;color:var(--blue);font-weight:600;font-size:12.5px;cursor:pointer;padding:0 0 0 8px;">Undo</button></div>
+<!-- LAYER 1 · core.js — must load BEFORE the main block: the schema guard below
+     reads STORAGE_KEYS at parse time. Classic script, no defer/async, so it is
+     fully evaluated before any consumer runs. Relative path (not "/js/core.js")
+     so the app also works if it is ever served from a sub-path. -->
+<script src="js/core.js"></script>
+
 <script>
 // ╔═══════════════════════════════════════════════════════════════════════╗
 // ║  MyTCGLedger  ·  SCRIPT 1 of 2  ·  SECTION MAP                          ║
@@ -2154,6 +2125,43 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
 // ║  PSA SLABS             graded-card view                                 ║
 // ║  ALL SINGLES           raw-singles view                                 ║
 // ╚═══════════════════════════════════════════════════════════════════════╝
+/* ════════════════════════════════════════════════════════════════════════════
+   MYTCG LEDGER — INTERNAL ARCHITECTURE
+   ────────────────────────────────────────────────────────────────────────────
+   Layers, and the ONLY legal dependency direction (each layer may call the ones
+   above it, never the ones below):
+
+     1  CORE       constants, storage helpers, STORAGE_KEYS, esc/format utils
+     2  VALUATION  cacheKey · cardPriceData · cardValue · cardLineValue ·
+                   itemQty · sealedEffectiveValue · NRV
+     3  STATE      AppState (derived totals) + the page renderer registry
+     4  PERSIST    save · saveSoldHistory · history store · IndexedDB
+     5  SYNC       Supabase auth, collectAppData/applyAppData/mergeAppData,
+                   deletion ledger, identity engine
+     6  PRICING    Worker + TCGPlayer fetch, analyze*, price loaders
+     7  UI         renderers, modals, search, scanner, navigation
+
+   To find a subsystem, search for its banner:
+     "═══ STATE ═══"                  "── CANONICAL INVENTORY VALUE PATH"
+     "── CENTRAL STATE ENGINE"        "── PAGE RENDERER REGISTRY"
+     "── HISTORY STORE"               "── SOLD HISTORY PERSISTENCE"
+     "═══ SUPABASE"                   "── DELETION LEDGER"
+     "── IDENTITY ENGINE"             "═══ PRICING"
+     "═══ DASHBOARD"                  "═══ DEALS"
+     "── DEAL SHAPE COMPATIBILITY"    "═══ CARD SCANNER"
+     "── SCANNER RESULT RENDERERS"    "═══ CARD CRUD"
+     "═══ DETAIL VIEW"                "═══ WISHLIST"
+
+   INVARIANTS (each is restated at its own site):
+     · Renderers must use the canonical valuation helpers, never raw pcache reads.
+     · Pricing must never mutate `collection`; it writes pcache + lastMarketValue.
+     · AppState must not name individual renderers — see PAGE RENDERER REGISTRY.
+     · History keys are touched only inside the HISTORY STORE block.
+     · Removing a synced entity must retire() it before dropping it.
+     · Watchlist pricing uses its own 'wish_<id>' cache namespace, not cacheKey().
+     · Legacy deal records are normalised read-only; stored data is never rewritten.
+   ════════════════════════════════════════════════════════════════════════════ */
+
 // ═══ STATE ═══
 let collection = JSON.parse(localStorage.getItem('pkv2_col')   || '[]');
 // ── Tier 1: durable collection store in IndexedDB (separate DB, single record).
@@ -2232,44 +2240,23 @@ let deals      = JSON.parse(localStorage.getItem('pkv2_deals') || '[]');
 let soldHistory= JSON.parse(localStorage.getItem('pkv2_sold')  || '[]');
 
 // ════════════════════════════════════════════════════════════════════════════
-// ── STORAGE HELPERS · Maintainability Patch 2 · pure addition (2026-06) ──
-// Safe localStorage read/write wrappers. ADDITIVE ONLY — no existing call site
-// is migrated, and no key or fallback behavior is changed. Built-ins only; never
-// throw; no UI side-effects (no toast). Rollback: delete this block.
+// ════════════════════════════════════════════════════════════════════════════
+// ── PERSISTENCE CHANGE NOTIFICATION ──
+// ARCHITECTURAL INVARIANT: the persistence layer must not know that a sync layer
+// exists. save() / saveSoldHistory() / saveCashPosition() used to call
+// syncQueuePush() directly, which made storage depend on sync — the last
+// bidirectional edge in the dependency graph (sync also calls save()).
+// They now announce "local state changed" and the sync layer subscribes.
+// Behaviour is identical: the single subscriber registered below IS
+// syncQueuePush, which is debounced and a no-op when signed out or offline.
 // ════════════════════════════════════════════════════════════════════════════
 
-// readJSON — parse a JSON value from localStorage. Missing key or unparseable
-// value → fallback. Never throws.
-function readJSON(key, fallback){
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw == null) return fallback;
-    return JSON.parse(raw);
-  } catch (e) { return fallback; }
-}
-
-// writeJSON — serialize + persist a value. Returns true on success, false on
-// error (e.g. quota exceeded). No UI side-effects.
-function writeJSON(key, value){
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (e) { return false; }
-}
-
-// readNumber — read a numeric value from localStorage. Missing/invalid → fallback.
-function readNumber(key, fallback=0){
-  const n = parseFloat(localStorage.getItem(key));
-  return isFinite(n) ? n : fallback;
-}
-
-// writeNumber — persist a numeric value. Returns true on success, false on error.
-function writeNumber(key, value){
-  try {
-    localStorage.setItem(key, String(value));
-    return true;
-  } catch (e) { return false; }
-}
+// ── STORAGE HELPERS ──
+// Safe localStorage read/write wrappers: never throw, no UI side-effects.
+// INVARIANT: these are the lowest layer — they must not call anything else in
+// the app. The HISTORY STORE is built on them; adopt them for new persistence
+// rather than hand-rolling another JSON.parse(localStorage.getItem(...)).
+// ════════════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════════════
 // ── STORAGE KEY REGISTRY · Maintainability Patch 4 · pure addition (2026-06) ──
@@ -2280,24 +2267,6 @@ function writeNumber(key, value){
 // (Patch 4A: 'pkv2_lastpage' is now catalogued below — registry lists all 15 current keys.)
 // Rollback: delete this block.
 // ════════════════════════════════════════════════════════════════════════════
-const STORAGE_KEYS = {
-  collection:       'pkv2_col',
-  sealed:           'pkv2_sealed',
-  wishlist:         'pkv2_wish',
-  deals:            'pkv2_deals',
-  soldHistory:      'pkv2_sold',
-  cash:             'pkv2_cash',
-  keys:             'pkv2_keys',
-  prefs:            'pkv2_prefs',
-  priceCache:       'pkv2_pcache',
-  cardHistory:      'pkv2_cardhist',
-  portfolioHistory: 'pkv2_ph2',
-  valueHistory:     'pkv2_vh',
-  wishHistory:      'pkv2_wh',
-  schema:           'pkv2_schema',
-  lastPage:         'pkv2_lastpage',
-  nrv:              'pkv2_nrv',
-};
 
 // ════════════════════════════════════════════════════════════════════════════
 // ── NET REALIZABLE VALUE (NRV) · v1 · separate calc layer (2026-06) ──
@@ -2550,22 +2519,36 @@ const AppState = {
   },
 
   // ── Render only the currently visible page ──
+  // ARCHITECTURAL INVARIANT: AppState must not name individual renderers.
+  // This used to hard-code eight `if (active === 'page-x') renderX()` branches,
+  // which made the state layer depend on every UI subsystem — the one dependency
+  // edge that would block extracting core/state into its own file. Renderers now
+  // register themselves (see PAGE_RENDERERS below); AppState only dispatches.
   renderActive() {
     try {
       const active = document.querySelector('.page.active')?.id;
-      if (active === 'page-dashboard')  { renderDashboard(); }
-      if (active === 'page-portfolio')  { renderPortfolio(); }
-      if (active === 'page-psa')        { renderPSA(); }
-      if (active === 'page-singles')    { renderSingles(); }
-      if (active === 'page-sealed')     { renderSealed(); }
-      if (active === 'page-analyzer')   { renderAnalyzer(); }
-      if (active === 'page-deals')      { renderDeals(); }
-      if (active === 'page-wishlist')   { renderWishlist(); }
+      const fn = active && PAGE_RENDERERS[active];
+      if (typeof fn === 'function') fn();
     } catch(err) {
       console.error('[AppState] renderActive failed:', err);
     }
   }
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// ── PAGE RENDERER REGISTRY ──
+// page id → the function that redraws it. The ONLY coupling point between the
+// state layer and the UI layer, and it points UI → core (registration), not
+// core → UI (hard-coded calls). Registration happens at the bottom of the file,
+// after every renderer is declared, so extraction order is: core first, UI last.
+// Adding a page means adding one line to registerPageRenderers(), not editing
+// AppState. Entries are looked up lazily, so a missing renderer is a no-op
+// rather than a ReferenceError that breaks the whole update cycle.
+// ════════════════════════════════════════════════════════════════════════════
+const PAGE_RENDERERS = {};
+function registerPageRenderer(pageId, fn){
+  if (typeof fn === 'function') PAGE_RENDERERS[pageId] = fn;
+}
 
 // ── Schema version guard ──
 // If the data format changes, bump SCHEMA_VERSION to auto-clear stale data
@@ -2615,20 +2598,6 @@ try {
   }
 } catch(e) { console.error('[Migration] failed:', e); }
 
-// ── Error boundary wrapper for render functions ──
-function safeRender(fn, name) {
-  try { fn(); }
-  catch(err) { console.error('[Render] ' + name + ' failed:', err); try { window.Sentry && Sentry.captureException(err); } catch(_) {} }
-}
-// ── Tier 0: collision-proof record IDs. crypto.randomUUID() for NEW records only;
-// existing Date.now()-based IDs are left untouched (opaque strings, still valid).
-function newId(prefix){
-  try {
-    if (window.crypto && crypto.randomUUID) return (prefix||'') + crypto.randomUUID();
-  } catch(_){}
-  // Fallback for non-secure contexts (e.g. http://localhost dev) — intentionally no Date.now().
-  return (prefix||'') + Math.random().toString(36).slice(2,11) + Math.random().toString(36).slice(2,11);
-}
 let keys       = JSON.parse(localStorage.getItem(STORAGE_KEYS.keys)  || '{"ptcg":"83d3cfd0-e05d-4fc0-9a4d-efef50602756","ppt":"","psa":""}');
 // Backfill the pokemontcg.io key if it was never set or was cleared, so TCGPlayer
 // lookups stay authenticated (unauthenticated requests are rate-limited → missing TCG prices).
@@ -2802,8 +2771,10 @@ function collectAppData() {
     deals,
     soldHistory,
     cardHistory: (typeof cardHistory !== 'undefined' ? cardHistory : JSON.parse(localStorage.getItem('pkv2_cardhist')||'{}')),
-    portfolioHistory: JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'),
-    wishHistory: JSON.parse(localStorage.getItem(WISH_HISTORY_KEY) || '[]'),
+    portfolioHistory: readPortfolioHistory(),
+    // Sends the real object shape. Safe now that mergeAppData() merges wish history
+    // per entry instead of comparing `.length` (see WISH HISTORY MERGE).
+    wishHistory: readWishHistory(),
     cashPosition: parseFloat(localStorage.getItem('pkv2_cash') || '0'),
     deletionLedger: Array.isArray(deletionLedger) ? deletionLedger : [],
     _localChange: _lastLocalChange || Date.now()
@@ -2817,10 +2788,16 @@ function applyAppData(d) {
   if (Array.isArray(d.wishlist))    { wishlist    = d.wishlist;    localStorage.setItem('pkv2_wish',   JSON.stringify(wishlist)); }
   if (Array.isArray(d.sealed))      { sealed      = d.sealed;      localStorage.setItem('pkv2_sealed', JSON.stringify(sealed)); }
   if (Array.isArray(d.deals))       { deals       = d.deals;       localStorage.setItem('pkv2_deals',  JSON.stringify(deals)); }
-  if (Array.isArray(d.soldHistory)) { soldHistory = d.soldHistory; localStorage.setItem('pkv2_sold',   JSON.stringify(soldHistory)); }
+  // Direct setItem on purpose — this is the INBOUND apply path. Routing it through
+  // saveSoldHistory() would queue a cloud push immediately after a pull (ping-pong).
+  if (Array.isArray(d.soldHistory)) { soldHistory = d.soldHistory; localStorage.setItem(STORAGE_KEYS.soldHistory, JSON.stringify(soldHistory)); }
   if (d.cardHistory && typeof d.cardHistory==='object') { localStorage.setItem('pkv2_cardhist', JSON.stringify(d.cardHistory)); if(typeof cardHistory!=='undefined') cardHistory = d.cardHistory; }
-  if (Array.isArray(d.portfolioHistory)) localStorage.setItem(HISTORY_KEY, JSON.stringify(d.portfolioHistory));
-  if (Array.isArray(d.wishHistory))      localStorage.setItem(WISH_HISTORY_KEY, JSON.stringify(d.wishHistory));
+  if (Array.isArray(d.portfolioHistory)) writePortfolioHistory(d.portfolioHistory);
+  // Accepts the real object shape. The old Array.isArray() guard could never pass,
+  // so inbound wish history was silently dropped on every pull.
+  if (d.wishHistory && typeof d.wishHistory === 'object' && !Array.isArray(d.wishHistory)) {
+    writeWishHistory(d.wishHistory);
+  }
   if (typeof d.cashPosition === 'number') { localStorage.setItem('pkv2_cash', d.cashPosition.toFixed(2)); if(typeof _cashPosition!=='undefined') _cashPosition = d.cashPosition; }
   // Deletion ledger: union in (monotonic — never shrinks), then suppress in-memory lists.
   if (Array.isArray(d.deletionLedger)) {
@@ -2829,6 +2806,10 @@ function applyAppData(d) {
     if (Array.isArray(sealed))   { sealed   = applyDeletions(sealed,   deletionLedger, 'sealed'); }
     if (Array.isArray(wishlist)) { wishlist = applyDeletions(wishlist, deletionLedger, 'wishlist'); }
     if (Array.isArray(deals))    { deals    = applyDeletions(deals,    deletionLedger, 'deal'); }
+    // 'sold' was the one entity type mergeAppData() suppressed but applyAppData() did
+    // not, so a retired sale could come back on a pull-only path. Same helper, same
+    // ledger semantics — only the missing call site is added.
+    if (Array.isArray(soldHistory)) { soldHistory = applyDeletions(soldHistory, deletionLedger, 'sold'); localStorage.setItem(STORAGE_KEYS.soldHistory, JSON.stringify(soldHistory)); }
   }
 }
 
@@ -2884,7 +2865,9 @@ function mergeAppData(localD, cloudD) {
     deletionLedger: mergedLedger,
     // histories: take whichever is longer (more data)
     portfolioHistory: (localD.portfolioHistory||[]).length >= (cloudD.portfolioHistory||[]).length ? localD.portfolioHistory : cloudD.portfolioHistory,
-    wishHistory:      (localD.wishHistory||[]).length >= (cloudD.wishHistory||[]).length ? localD.wishHistory : cloudD.wishHistory,
+    // Per-entry union by date. Was: `.length` comparison on an object, i.e. always
+    // undefined >= undefined === false, so cloud replaced local unconditionally.
+    wishHistory:      mergeWishHistory(localD.wishHistory, cloudD.wishHistory),
     cashPosition: (typeof localD.cashPosition==='number' && localD.cashPosition>0) ? localD.cashPosition : (cloudD.cashPosition||0),
     _localChange: Date.now()
   };
@@ -2978,6 +2961,11 @@ async function syncReconcile() {
 }
 
 // Called by save() — debounced background push
+// The sync layer's single subscription to the persistence layer. This is the
+// whole of the storage→sync coupling, and it points sync→storage (registration),
+// which is the direction that lets storage.js be extracted on its own.
+onPersist(() => syncQueuePush());
+
 function syncQueuePush() {
   _lastLocalChange = Date.now();
   if (!supa || !currentUser) return;       // signed out → local only
@@ -3143,7 +3131,7 @@ function getCardHistory(card, days) {
   return s;
 }
 let allSets=[], typeFilter='', sealedFilter='', sealedSetFilter='', sortBy='added';
-let editingId=null, editingSealedId=null, editingDealId=null, tlRange='all';
+let editingId=null, editingSealedId=null, tlRange='all';   // editingDealId removed with the v1 deal modal
 let _pickerCard=null, _pickerEdition='unlimited', _pickerWatchKind='single', searchTimer=null;
 
 const SOURCES=[
@@ -4063,6 +4051,12 @@ async function lookupCardId(card){
 //  4. Trust the consensus, flag the outlier
 //  5. Return a price + a confidence level + reasoning
 // ══════════════════════════════════════════════════════════
+// OWNERSHIP NOTE: smartPrice / bestPrice / worstPrice / analyzePrice / analyzeRaw /
+// analyzeGraded / findConsensus / medianOf / askSoldEstimate are PURE functions over
+// an already-fetched price payload — no network, no DOM, no globals. They belong to
+// the VALUATION layer, not the pricing-I/O layer (fetchLivePrices / fetchEbaySold /
+// the Worker calls). Classifying them as "pricing" is what produced the apparent
+// valuation <-> pricing cycle; the real dependency runs pricing -> valuation only.
 function smartPrice(p, isGraded) {
   const analysis = analyzePrice(p, isGraded);
   return analysis.price;
@@ -5142,6 +5136,8 @@ function cleanupDuplicatesUI(){
     + `Portfolio: ${money(r.before)} → ${money(r.after)} (minus ${money(r.removed)}). Proceed?`;
   showConfirm('Clean up duplicates', msg, () => {
     const res = runDuplicateCleanup();
+    // The UI owns persistence + redraw; identity just reports what it changed.
+    if (res.changed) { save(); renderAll(); }
     toast(`Merged ${res.retired} duplicate${res.retired>1?'s':''}`,'green');
   });
 }
@@ -5160,8 +5156,15 @@ function retire(entityType, id, opts){
 
 /* ─── runDuplicateCleanup(): one-shot, deliberate (NOT auto-run). Recomputes the
    plan live with the deterministic keeper, folds the best/newest price onto each
-   keeper, retires the strays via retire(), saves + renders. Safe to re-run: it
-   no-ops when no identity duplicates remain. Returns a before/after report. ─── */
+   keeper, retires the strays via retire(). Safe to re-run: it no-ops when no
+   identity duplicates remain. Returns a before/after report.
+
+   ARCHITECTURAL INVARIANT: identity/cleanup performs identity work ONLY. It used
+   to call save() + renderAll() itself, which made the identity subsystem depend on
+   persistence AND the UI — the last edge stopping identity.js from being extracted
+   standalone. It now reports `changed` in its result and the CALLER decides whether
+   to persist and redraw. Detection, tiers, cert matching, keeper choice,
+   fold-before-drop and ledger semantics are all unchanged. ─── */
 function runDuplicateCleanup(opts){
   opts = opts || {};
   const dryRun = !!opts.dryRun;
@@ -5186,11 +5189,13 @@ function runDuplicateCleanup(opts){
       strays.forEach(s => retire('card', s.id, { reason:'duplicate-cleanup', mergedInto:keeper.id, identityKey:k }));
     }
   }
-  if(!dryRun && actions.length){ save(); if(typeof renderAll==='function') renderAll(); }
   const after = collection.reduce((s,c)=>s+((typeof c.lastMarketValue==='number')?c.lastMarketValue:0),0);
   const report = { groups:actions.length, retired:actions.reduce((s,a)=>s+a.retireIds.length,0),
                    before:+before.toFixed(2), after:+after.toFixed(2), removed:+(before-after).toFixed(2),
-                   records:collection.length, dryRun, actions };
+                   records:collection.length, dryRun, actions,
+                   // true when the collection was actually modified — the caller's
+                   // signal to persist and redraw. Always false for a dry run.
+                   changed: !dryRun && actions.length > 0 };
   try { console.log('[cleanup]', JSON.stringify(report)); } catch(e){}
   return report;
 }
@@ -5206,35 +5211,6 @@ function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-
 // Rollback: delete this block and restore fmtPrice's original one-line body.
 // ════════════════════════════════════════════════════════════════════════════
 
-// num — safe numeric parser. Returns parseFloat(v), or `fallback` when not finite.
-function num(v, fallback=0){ const n = parseFloat(v); return isFinite(n) ? n : fallback; }
-
-// money — canonical price formatter (fmtPrice delegates here).
-// invalid / null / non-positive → '—'; otherwise '$' + value.toFixed(2).
-function money(v){ return (v == null || !isFinite(v) || v <= 0) ? '—' : '$' + v.toFixed(2); }
-
-// moneyFull — always shows a value with thousands separators; preserves '$0.00'.
-function moneyFull(v){ return '$' + num(v, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-
-// moneyK — compact thousands display ('$1.5k', '$12k'); full value below 1000.
-function moneyK(v){ const n = num(v, 0); return n >= 1000 ? '$' + (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : moneyFull(n); }
-
-// moneySigned — explicit +/- sign ('+$5.00', '-$5.00').
-function moneySigned(v){ const n = num(v, 0); return (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toFixed(2); }
-
-// pct — signed percent, configurable decimals; '' when not finite.
-function pct(v, dp=1){ if (v == null || !isFinite(v)) return ''; return (v >= 0 ? '+' : '') + v.toFixed(dp) + '%'; }
-
-// fmtDate — central short date formatter ('Jun 10'); '' on invalid input.
-function fmtDate(v){ const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
-
-// esc — THE canonical HTML escaper for dynamic strings placed into innerHTML.
-// Apply to anything the user typed (card/product names, sets, notes, image URLs)
-// or that arrived from a third-party API. null/undefined → '' so it is a drop-in
-// for the existing `${x||''}` patterns. Never apply it to markup the app itself
-// generates (editionBadge(), tileImage(), nested templates) — that is already HTML.
-function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]); }
-
 function getBestCached(card){return cardValue(card);}
 
 // ═══ PORTFOLIO ═══
@@ -5244,6 +5220,96 @@ function getBestCached(card){return cardValue(card);}
 // Unlimited snapshots, triggered on open + data change
 // ══════════════════════════════════════════════════
 const HISTORY_KEY = 'pkv2_ph2'; // v2 richer format
+
+// ════════════════════════════════════════════════════════════════════════════
+// ── HISTORY STORE ──
+// ARCHITECTURAL INVARIANT: nothing outside this block reads or writes the
+// history keys directly. Before this, five renderers, the sync layer and the
+// export path each did their own JSON.parse(localStorage.getItem(...)) with
+// three different spellings of the key ('pkv2_ph2' vs HISTORY_KEY) and two
+// different fallbacks ('[]' vs '{}'), so history had no owner and a malformed
+// record failed differently depending on which screen you were looking at.
+// Keys, formats and fallbacks are UNCHANGED — this only centralises access.
+//   pkv2_ph2 (portfolio history) — array of rich snapshots {date,totalValue,...}
+//   pkv2_vh  (value history)     — LEGACY array of {d,v}; read-only fallback
+//   pkv2_wh  (wish history)      — object keyed by wishlist id
+// ════════════════════════════════════════════════════════════════════════════
+function readPortfolioHistory(){
+  const v = readJSON(STORAGE_KEYS.portfolioHistory, []);
+  return Array.isArray(v) ? v : [];
+}
+function writePortfolioHistory(arr){
+  if (!Array.isArray(arr)) return false;
+  return writeJSON(STORAGE_KEYS.portfolioHistory, arr);
+}
+// Legacy {d,v} series. Read-only: nothing writes pkv2_vh any more, but existing
+// installs still have it and it is the fallback when ph2 is empty.
+function readValueHistory(){
+  const v = readJSON(STORAGE_KEYS.valueHistory, []);
+  return Array.isArray(v) ? v : [];
+}
+// The chart series every history view draws: rich ph2 normalised to {d,v},
+// falling back to the legacy vh series. This normalisation was duplicated
+// verbatim in renderDBChart() and renderTimeline().
+function portfolioValueSeries(){
+  const ph2 = readPortfolioHistory();
+  if (ph2.length) return ph2.map(s => ({ d: s.date || s.d, v: s.totalValue || s.v || 0 }));
+  return readValueHistory();
+}
+function readWishHistory(){
+  const v = readJSON(STORAGE_KEYS.wishHistory, {});
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+}
+function writeWishHistory(obj){
+  if (!obj || typeof obj !== 'object') return false;
+  return writeJSON(STORAGE_KEYS.wishHistory, obj);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ── WISH HISTORY MERGE ──
+// SHAPE (written by captureWishSnapshot):
+//   { "<wishlistId>": [ {d:'YYYY-MM-DD', v:Number}, ... ],   // ascending by date
+//     "_total":       [ {d:'YYYY-MM-DD', v:Number}, ... ] }  // reserved key
+//   One point per series per day; a same-day re-capture overwrites v. Points are
+//   never removed (a deleted watchlist item leaves its series behind).
+//
+// WHY THIS EXISTS: pkv2_wh is an OBJECT, but the sync layer treated it as an
+// array — applyAppData() guarded with Array.isArray() (never true, so inbound
+// history was never applied) and mergeAppData() picked a winner with `.length`
+// (undefined on an object, so the comparison was always false). Net effect: wish
+// history never synced, and whichever side "won" replaced the other wholesale.
+//
+// MERGE RULE: per-entry union keyed by date — NOT "more keys wins". Every point
+// carries its own date, so the two sides can be combined without discarding
+// either. On a same-date collision the LOCAL value wins, matching how the rest of
+// mergeAppData treats records the local device holds. Deterministic, and no point
+// present on either side is ever lost. Inputs are never mutated.
+// ════════════════════════════════════════════════════════════════════════════
+function _wishSeries(v){
+  // Tolerate anything: only well-formed {d,v} points survive.
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const p of v) {
+    if (!p || typeof p !== 'object') continue;
+    const d = p.d, n = parseFloat(p.v);
+    if (typeof d !== 'string' || !d || !isFinite(n)) continue;
+    out.push({ d, v: n });
+  }
+  return out;
+}
+function mergeWishHistory(localH, cloudH){
+  const L = (localH && typeof localH === 'object' && !Array.isArray(localH)) ? localH : {};
+  const C = (cloudH && typeof cloudH === 'object' && !Array.isArray(cloudH)) ? cloudH : {};
+  const out = {};
+  for (const key of new Set([...Object.keys(C), ...Object.keys(L)])) {
+    const byDate = new Map();
+    for (const p of _wishSeries(C[key])) byDate.set(p.d, p.v);   // cloud first…
+    for (const p of _wishSeries(L[key])) byDate.set(p.d, p.v);   // …local overwrites same date
+    const series = [...byDate.entries()].map(([d, v]) => ({ d, v })).sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0);
+    if (series.length) out[key] = series;
+  }
+  return out;
+}
 let _phView = 'combined';
 let _phCharts = {};
 
@@ -5251,7 +5317,7 @@ function captureHistorySnapshot() {
   try {
     if (AppState._dirty) AppState.update();
 
-    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    const history = readPortfolioHistory();
     const now     = new Date();
     const dateKey = now.toISOString().slice(0, 10); // YYYY-MM-DD
     const timeKey = now.toISOString();
@@ -5286,7 +5352,7 @@ function captureHistorySnapshot() {
       history.push(snapshot); // new day
     }
 
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    writePortfolioHistory(history);
     savePortfolioSnapshot();   // mirror the daily snapshot to structured analytics
     return history;
   } catch(err) {
@@ -5315,7 +5381,7 @@ function renderPortfolioHistory() {
     return;
   }
 
-  const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  const history = readPortfolioHistory();
   if (!history.length) {
     document.getElementById('port-history-section').style.display = 'none';
     return;
@@ -5887,12 +5953,7 @@ function fmtChartDate(d){
 }
 
 function renderDBChart() {
-  // Read from both history keys — use richer ph2 if available, fall back to vh
-  const ph2 = JSON.parse(localStorage.getItem('pkv2_ph2') || '[]');
-  const vh  = JSON.parse(localStorage.getItem('pkv2_vh')  || '[]');
-  // Build pts from whichever has data — prefer ph2
-  let rawHistory = ph2.length ? ph2.map(s=>({d:s.date||s.d, v:s.totalValue||s.v||0})) : vh;
-  let pts = [...rawHistory].filter(p=>p.v>0);
+  let pts = portfolioValueSeries().filter(p=>p.v>0);
   if (_dbRange === '3m') pts = pts.slice(-90);
   if (_dbRange === '1m') pts = pts.slice(-30);
 
@@ -6249,8 +6310,14 @@ function editCashPosition() {
 function saveCashPosition() {
   const val = parseFloat(document.getElementById('cash-input')?.value || 0);
   _cashPosition = isNaN(val) || val < 0 ? 0 : val;
-  localStorage.setItem('pkv2_cash', _cashPosition.toFixed(2));
+  localStorage.setItem(STORAGE_KEYS.cash, _cashPosition.toFixed(2));
+  // cashPosition participates in sync (collectAppData / mergeAppData), but this
+  // path never marked the state dirty or queued a push — the edit stayed on one
+  // device and could be overwritten by the stale cloud value on the next merge.
+  AppState._dirty = true;
+  notifyPersisted();
   document.getElementById('cash-overlay')?.remove();
+  AppState.update();          // KPIs read AppState.cashPosition, not the raw global
   renderDBKPIs();
   toast('Cash position saved', 'green');
 }
@@ -6259,12 +6326,9 @@ function setTLRange(r,el){tlRange=r;document.querySelectorAll('.tl-btn').forEach
 
 let _tlChart = null;
 function renderTimeline(){
-  // Read from richer ph2 history first, fall back to vh
-  const ph2 = JSON.parse(localStorage.getItem('pkv2_ph2')||'[]');
-  const vh  = JSON.parse(localStorage.getItem('pkv2_vh')||'[]');
-  const history = ph2.length
-    ? ph2.map(s=>({d:s.date||s.d, v:s.totalValue||s.v||0})).filter(p=>p.v>0)
-    : vh;
+  // ph2 was filtered to v>0 before use, the vh fallback was not — preserved exactly.
+  const _series = portfolioValueSeries();
+  const history = readPortfolioHistory().length ? _series.filter(p=>p.v>0) : _series;
 
   const empty=document.getElementById('tl-empty');
   const labels=document.getElementById('tl-labels');
@@ -6682,22 +6746,26 @@ async function loadPricesForCards(cards){
 }
 
 // Build a flat list of every card/slab/wishlist item that needs a price
+// Owned holdings only. Watchlist items are deliberately NOT included.
+//
+// They used to be pushed in here as pseudo-cards { id:'wish_'+id, type:'holo',
+// cond:'NM' }, which loadAllPrices() then cached under cacheKey(pseudo) =
+// 'wish_<id>_NM_unlimited'. The watchlist UI reads 'wish_<id>' (wishPriceData), so
+// that entry was never read by anything: every watchlist item cost TWO price
+// fetches per cold refresh, and the wasted one used a worse query (the pseudo-card
+// carried no cardId / set / num / grade). renderWishlist() owns watchlist pricing
+// with the full probe — see the lazy loader at the bottom of that function.
 function getAllPriceableItems(){
   const items = [];
-  // All singles and PSA slabs
   collection.forEach(c => items.push(c));
-  // Wishlist items as pseudo-cards
-  wishlist.forEach(w => items.push({
-    id: 'wish_'+w.id,
-    name: w.name,
-    type: 'holo',
-    cond: 'NM',
-    img: null
-  }));
   return items;
 }
 
 let _loadingPrices = false;
+// INVARIANT: the price loaders own `pcache` and the per-card price strips
+// (`#ps-<id>`), and nothing else. They must never mutate `collection` beyond
+// backfilling a missing `img`, and they must not be called from a renderer —
+// the dependency runs pricing → UI, never the reverse.
 async function loadAllPrices(){
   if(_loadingPrices) return; // prevent concurrent runs
   const all = getAllPriceableItems();
@@ -6794,9 +6862,9 @@ function setTypeFilter(f,el){typeFilter=f;document.querySelectorAll('#page-singl
 //   v2 "log"     — written by saveDealLog() via #deal-log-modal:
 //                  { id, dealType:'purchase'|'sale'|'trade', status:'open'|'closed',
 //                    cardsIn[], cardsOut[], buyPrice, sellPrice, platform, ... }
-// The v1 UI is UNREACHABLE (nothing calls openDealModal(); see the note on it below),
-// but v1 records may still exist in a user's localStorage / Supabase row from an
-// earlier build. Because every renderer keys off `status`, those records were stored
+// The v1 UI has been REMOVED (2026-08 — proven unreachable), but v1 records may
+// still exist in a user's localStorage / Supabase row from an earlier build, so
+// everything below stays. Because every renderer keys off `status`, those records were stored
 // and synced but displayed nowhere. These helpers give downstream code one shape to
 // read WITHOUT rewriting stored data — nothing here mutates a deal record.
 // ════════════════════════════════════════════════════════════════════════════
@@ -6823,137 +6891,14 @@ function normalizeDeal(d){
   };
 }
 
-// LEGACY (v1) DEAL ENTRY POINT — retained, not deleted, but unreachable.
-// Caller analysis (2026-08): openDealModal() has ZERO callers and #deal-modal is
-// never passed to openModal() from anywhere else, so this path cannot be entered
-// from the UI. It is kept so historical records stay interpretable and so the
-// markup/handlers are not orphaned. New deals go through openDealLogModal().
-function openDealModal(id){
-  editingDealId=id||null;document.getElementById('deal-modal-title').textContent=id?'Edit Deal':'Log Deal';
-  if(id){const d=deals.find(x=>x.id===id);if(!d)return;document.getElementById('d-name').value=d.name||'';document.getElementById('d-amount').value=d.amount||'';document.getElementById('d-date').value=d.date||'';document.getElementById('d-source').value=d.source||'';document.getElementById('d-cond').value=d.cond||'';document.getElementById('d-notes').value=d.notes||'';document.getElementById('d-type').value=d.type||'buy';document.querySelectorAll('#deal-modal .type-pill').forEach(b=>b.classList.remove('active'));const p=document.querySelector(`#deal-modal .type-pill[data-val="${d.type||'buy'}"]`);if(p)p.classList.add('active');}
-  else{['d-name','d-amount','d-source','d-cond','d-notes'].forEach(i=>document.getElementById(i).value='');document.getElementById('d-date').value=new Date().toISOString().slice(0,10);document.getElementById('d-type').value='buy';document.querySelectorAll('#deal-modal .type-pill').forEach(b=>b.classList.remove('active'));document.querySelector('#deal-modal .type-pill[data-val="buy"]').classList.add('active');document.getElementById('deal-selected').style.display='none';document.getElementById('deal-dd').style.display='none';dealSearchSelected=null;}
-  openModal('deal-modal');
-}
-// ── DEAL SMART SEARCH ──
-let dealSearchTimer = null;
-let dealSearchSelected = null;
-
-
-async function runDealSearch(q) {
-  const dd = document.getElementById('deal-dd');
-  const rows = [];
-
-  // ── Section 1: Cards already in your vault (instant, no API needed) ──
-  const vaultHits = collection.filter(card =>
-    card.name.toLowerCase().includes(q.toLowerCase()) ||
-    (card.set && card.set.toLowerCase().includes(q.toLowerCase())) ||
-    (card.num && card.num.includes(q))
-  ).slice(0, 4);
-
-  if (vaultHits.length) {
-    rows.push(`<div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;padding:8px 12px 4px;background:var(--bg4);">From Your Vault</div>`);
-    rows.push(...vaultHits.map(card => {
-      const p = cardPriceData(card);
-      const bp = cardValue(card);
-      const img = p?.img || card.img || '';
-      const label = [card.name, card.grade || card.cond, card.set, card.num ? '#'+card.num : ''].filter(Boolean).join(' · ');
-      return `<div class="sd-item" onclick="selectDealCard(${JSON.stringify({name:label,img,set:card.set||'',num:card.num||'',grade:card.grade||'',cond:card.cond||''}).replace(/"/g,'&quot;')})">
-        ${img ? `<img class="sd-thumb" src="${esc(img)}" alt="${esc(card.name)}" loading="lazy" style="height:50px;width:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">` : '<div class="sd-ph" style="width:36px;height:50px;">⟡</div>'}
-        <div style="min-width:0;flex:1;">
-          <div class="sd-name">${esc(card.name)}${card.grade ? ' <span style="color:var(--gold);font-size:10px;font-family:var(--mono);">'+esc(card.grade)+'</span>' : ''}</div>
-          <div class="sd-meta">${esc(card.set||'')}${card.num?' · #'+esc(card.num):''} · ${esc(card.cond)}</div>
-        </div>
-        ${bp > 0 ? `<div style="text-align:right;flex-shrink:0;"><div class="sd-pval">${fmtPrice(bp)}</div><div class="sd-plbl">market</div></div>` : ''}
-      </div>`;
-    }));
-  }
-
-  // ── Section 2: Live search from pokemontcg.io ──
-  try {
-    const hdrs = keys.ptcg ? { 'X-Api-Key': keys.ptcg } : {};
-    const r = await fetch(`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(buildNameQuery(q))}&orderBy=-set.releaseDate&pageSize=60`, { headers: hdrs });
-    if (r.ok) {
-      const j = await r.json();
-      if (j.data?.length) {
-        rows.push(`<div style="font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;padding:8px 12px 4px;background:var(--bg4);">All Cards</div>`);
-        rows.push(searchCountLine(j, q, {compact:true}));
-        rows.push(...j.data.map(card => {
-          const tier = card.tcgplayer?.prices ? Object.values(card.tcgplayer.prices)[0] : null;
-          const price = tier?.market || null;
-          const data = { name: card.name, img: card.images?.small || '', set: card.set?.name || '', num: card.number || '', grade: '', cond: 'NM' };
-          return `<div class="sd-item" onclick="selectDealCard(${JSON.stringify(data).replace(/"/g,'&quot;')})">
-            ${card.images?.small ? `<img class="sd-thumb" src="${card.images.small}" alt="${card.name}" loading="lazy" style="height:50px;width:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">` : '<div class="sd-ph" style="width:36px;height:50px;">⟡</div>'}
-            <div style="min-width:0;flex:1;">
-              <div class="sd-name">${esc(card.name)}</div>
-              <div class="sd-meta">${esc(card.set?.name||'')} · #${esc(card.number||'?')} · ${esc(card.rarity||'')}</div>
-            </div>
-            ${price ? `<div style="text-align:right;flex-shrink:0;"><div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div></div>` : ''}
-          </div>`;
-        }));
-      }
-    }
-  } catch(e) {}
-
-  if (!rows.length) {
-    dd.innerHTML = `<div style="padding:12px 14px;font-size:12px;color:var(--muted);">No results — type a name to search all cards.</div>`;
-    return;
-  }
-  dd.innerHTML = rows.join('');
-}
-
-function selectDealCard(data) {
-  dealSearchSelected = data;
-  // Build display name: name + grade if graded, or name + set + num
-  const displayName = data.grade
-    ? `${data.name} ${data.grade}`
-    : [data.name, data.set, data.num ? '#'+data.num : ''].filter(Boolean).join(' · ');
-
-  document.getElementById('d-name').value = displayName;
-  document.getElementById('deal-dd').style.display = 'none';
-
-  // Show preview strip
-  const sel = document.getElementById('deal-selected');
-  sel.style.display = 'flex';
-  const imgEl = document.getElementById('deal-sel-img');
-  imgEl.innerHTML = data.img
-    ? `<img src="${esc(data.img)}" style="width:100%;height:100%;object-fit:cover;" alt="${esc(data.name)}">`
-    : '⟡';
-  document.getElementById('deal-sel-name').textContent = data.name + (data.grade ? ' · ' + data.grade : '');
-  document.getElementById('deal-sel-meta').textContent = [data.set, data.num ? '#'+data.num : '', data.cond].filter(Boolean).join(' · ');
-
-  // Auto-fill condition field
-  if (data.grade) document.getElementById('d-cond').value = data.grade;
-  else if (data.cond) document.getElementById('d-cond').value = data.cond;
-}
-
-function clearDealSelection() {
-  dealSearchSelected = null;
-  document.getElementById('d-name').value = '';
-  document.getElementById('deal-selected').style.display = 'none';
-  document.getElementById('d-name').focus();
-}
-
-function closeDealDD() {
-  document.getElementById('deal-dd').style.display = 'none';
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click', e => {
-  if (!e.target.closest('#deal-modal')) closeDealDD();
-});
-
-function selectDealType(val,el){document.querySelectorAll('#deal-modal .type-pill').forEach(b=>b.classList.remove('active'));el.classList.add('active');document.getElementById('d-type').value=val;}
-// LEGACY (v1) DEAL WRITER — reachable only from #deal-modal, which nothing opens
-// (see openDealModal above). Left in place so the retired modal's markup stays
-// functional rather than half-wired; new deals go through saveDealLog(). Records
-// it produces are read back by normalizeDeal() / renderLegacyDeals().
-function saveDeal(){
-  const name=document.getElementById('d-name').value.trim();const amount=document.getElementById('d-amount').value;
-  if(!name||!amount){toast('Name and amount required','red');return;}
-  const data={id:editingDealId||newId('d'),type:document.getElementById('d-type').value,name,amount:parseFloat(amount),date:document.getElementById('d-date').value,source:document.getElementById('d-source').value.trim(),cond:document.getElementById('d-cond').value.trim(),notes:document.getElementById('d-notes').value.trim(),added:editingDealId?(deals.find(x=>x.id===editingDealId)||{}).added:new Date().toISOString()};
-  if(editingDealId)deals=deals.map(x=>x.id===editingDealId?data:x);else deals.push(data);
-  save();closeModal('deal-modal');renderDeals();toast(editingDealId?'Deal updated':'Deal logged','green');
-}
+// (2026-08) REMOVED: the v1 deal-modal JavaScript cluster — openDealModal(),
+// runDealSearch(), selectDealCard(), clearDealSelection(), closeDealDD(),
+// selectDealType(), saveDeal(), dealSearchTimer, dealSearchSelected, and a
+// document-level click listener that ran closest('#deal-modal') on EVERY click
+// in the app to close a dropdown that no longer existed. All were reachable
+// only from the #deal-modal markup removed above; each had zero other callers.
+// Deliberately KEPT: onDealSearch() / doDealSearch(), which serve the LIVE
+// deals-page search bar, and the whole legacy-deal READ path.
 // ══════════════════════════════
 // DEAL PERFORMANCE CENTER
 // ══════════════════════════════
@@ -7641,7 +7586,7 @@ function applyDealToPortfolio(deal) {
         });
         if (removeCardFromCollection(card)) removed++;
       });
-      localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
+      saveSoldHistory();
       return removed ? `Sold ${removed} card${removed>1?'s':''} · logged to Sold History` : '';
     }
 
@@ -8396,7 +8341,7 @@ function confirmSell(){
     realized_pnl: (salePrice - paid) * (card.qty || 1),
     occurred_at:  new Date().toISOString()
   });
-  localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
+  saveSoldHistory();
 
   // Remove from collection
   retire('card', card.id);
@@ -8419,8 +8364,12 @@ function restoreSoldCard(soldId){
     };
     card.id = newId('c'); // fresh id
     collection.push(card);
+    // Retire the sold record in the deletion ledger before dropping it. Without this,
+    // mergeById() on the next sync sees the entry still present in the cloud (or on
+    // another device) and resurrects it — the card would be back in the vault AND
+    // still listed as sold. clearAll() already retires 'sold' entries this way.
+    retire('sold', soldId);
     soldHistory = soldHistory.filter(s=>s.id!==soldId);
-    localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
     save();
     renderAll();
     if(typeof renderSoldHistory==='function') renderSoldHistory();
@@ -8430,9 +8379,14 @@ function restoreSoldCard(soldId){
 
 function deleteSoldEntry(soldId){
   showConfirm('Delete from history?','This permanently removes the record.',()=>{
+    // Same ledger requirement as restoreSoldCard — and this path previously never
+    // called save(), so the delete was written to localStorage but never marked
+    // dirty, never queued a push, and left realized P&L stale on the dashboard.
+    retire('sold', soldId);
     soldHistory = soldHistory.filter(s=>s.id!==soldId);
-    localStorage.setItem('pkv2_sold', JSON.stringify(soldHistory));
+    save();
     renderSoldHistory();
+    renderDashboard();          // realized P&L is derived from soldHistory
     toast('Record deleted','red');
   });
 }
@@ -8618,7 +8572,6 @@ async function repriceCard(id){
 // Grade detection and reason color-coding are display-only parses. No pricing
 // read-modifies, no fetches, no writes. Rollback: delete this function, the
 // evxFilter helper, the .evx-* CSS block, and its term in the openDetail call site.
-function evxEsc(s){ return esc(s); }   // kept as an alias — esc() is the canonical escaper
 function evxFilter(btn){
   const sec = btn.closest('.evx-sec'); if(!sec) return;
   sec.querySelectorAll('.evx-chip').forEach(c=>c.classList.toggle('evx-chip-on', c===btn));
@@ -9057,9 +9010,7 @@ function modalPickCard(card){
   updateAddPreview();
 }
 // Close modal dropdown when clicking outside
-document.addEventListener('click',e=>{
-  if(!e.target.closest('#add-modal'))document.getElementById('modal-name-dd')?.classList.remove('open');
-});
+// (dismiss listener moved to initGlobalListeners — see APPLICATION BOOTSTRAP)
 function onNameSearch(val){clearTimeout(searchTimer);const dd=document.getElementById('name-dd');if(!val.trim()){dd.classList.remove('open');return;}dd.classList.add('open');dd.innerHTML='<div class="sd-loading"><div class="spinner"></div>Searching…</div>';searchTimer=setTimeout(()=>doNameSearch(val),350);}
 async function doNameSearch(q){
   const dd=document.getElementById('name-dd');
@@ -9069,7 +9020,7 @@ async function doNameSearch(q){
       return `<div class="sd-item" onclick="quickAdd(window._sdCards['${key}'])">${c.images?.small?`<img class="sd-thumb" src="${c.images.small}" alt="${esc(c.name)}" loading="lazy">`:'<div class="sd-ph">⟡</div>'}<div style="min-width:0;"><div class="sd-name">${esc(c.name)}</div><div class="sd-meta">${esc(c.set?.name||'')} · #${esc(c.number||'?')} · ${esc(c.rarity||'')}</div></div><div class="sd-price">${price!=null?`<div class="sd-pval">$${price.toFixed(2)}</div><div class="sd-plbl">TCGPlayer</div>`:'<div class="sd-plbl">Click to add</div>'}</div></div>`;}).join('');
   }catch(e){dd.innerHTML='<div style="padding:14px;font-size:12px;color:var(--muted);">Search failed. Check pokemontcg.io key.</div>';}
 }
-document.addEventListener('click',e=>{if(!e.target.closest('#mode-name'))document.getElementById('name-dd').classList.remove('open');});
+// (dismiss listener moved to initGlobalListeners — see APPLICATION BOOTSTRAP)
 
 function quickAdd(card){document.getElementById('name-dd').classList.remove('open');document.getElementById('name-search').value='';_pickerCard=card;document.getElementById('picker-img').src=card.img;document.getElementById('picker-img').style.display=card.img?'':'none';document.getElementById('picker-img-ph').style.display=card.img?'none':'';document.getElementById('picker-name').textContent=card.name;document.getElementById('picker-meta').textContent=[card.set,card.num?'#'+card.num:'',card.rarity].filter(Boolean).join(' · ');document.getElementById('picker-graded-panel').style.display='none';document.getElementById('picker-grade-sel').value='10';document.getElementById('picker-cert').value='';document.getElementById('picker-grader').value='PSA';document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='');document.getElementById('picker-confirm-btn').disabled=true;_pickerEdition='unlimited';const _pe=editionEligibility({cardId:card.id,set:card.set,type:'standard'});const _per=document.getElementById('picker-edition-row');if(_pe.eligible){_per.style.display='';document.getElementById('picker-ed-shadowless').style.display=_pe.shadowless?'':'none';document.querySelectorAll('#picker-edition-row .ed-pill').forEach(p=>p.classList.toggle('active',p.dataset.val==='unlimited'));}else{_per.style.display='none';}document.getElementById('picker-watch-panel').style.display='none';_pickerWatchKind='single';document.querySelectorAll('#picker-watch-panel .ed-pill').forEach(b=>b.classList.toggle('active',b.dataset.kind==='single'));document.getElementById('picker-watch-grade').style.display='none';document.getElementById('picker-watch-grader').value='PSA';document.getElementById('picker-watch-grade-sel').value='10';openModal('card-picker-modal');}
 function pickerSelectType(type,el){document.querySelectorAll('.picker-choice').forEach(b=>b.style.borderColor='var(--border)');el.style.borderColor='var(--gold)';document.getElementById('picker-graded-panel').style.display=type==='graded'?'':'none';document.getElementById('picker-watch-panel').style.display=type==='watchlist'?'':'none';document.getElementById('picker-confirm-btn').disabled=false;}
@@ -9184,7 +9135,10 @@ function updateAddPreview(){const name=document.getElementById('f-name').value.t
 async function verifyCert(){const cert=document.getElementById('f-cert').value.trim();if(!cert)return;const msg=document.getElementById('cert-msg');msg.innerHTML='<span style="color:var(--muted)"><span class="spinner" style="display:inline-block;vertical-align:-2px;margin-right:4px"></span>Verifying…</span>';if(!keys.psa){msg.innerHTML='<span style="color:var(--gold)">⚠ Add PSA token in Settings.</span>';return;}try{const r=await fetch(`https://api.psacard.com/publicapi/cert/GetByCertNumber/${cert}`,{headers:{Authorization:'bearer '+keys.psa}});if(!r.ok)throw new Error();const j=await r.json();const info=j.PSACert;if(info){document.getElementById('f-name').value=info.Subject||document.getElementById('f-name').value;document.getElementById('f-grade').value='PSA '+(info.CardGrade||'');document.getElementById('f-type').value='graded';msg.innerHTML=`<span style="color:var(--green)">✓ PSA ${info.CardGrade} — ${info.Subject}</span>`;}}catch(e){msg.innerHTML='<span style="color:var(--red)">Cert not found.</span>';}}
 
 // ═══ WISHLIST ═══
-function addWish(){const n=document.getElementById('wish-input')?.value.trim();if(!n)return;wishlist.push({id:newId('w'),name:n,added:new Date().toISOString()});if(document.getElementById('wish-input'))document.getElementById('wish-input').value='';save();renderWishlist();toast('Added to watchlist','green');}
+// (2026-08) REMOVED: addWish() — read #wish-input, an element that does not exist
+// anywhere in the document, and had zero callers (no inline handler, no string
+// invocation, no dynamic lookup). Watchlist entries are created by wishAdd* /
+// pickerConfirm(), which are unaffected.
 function removeWish(id){retire('wishlist',id);wishlist=wishlist.filter(w=>w.id!==id);save();renderWishlist();}
 
 let _wishTimer = null;
@@ -9296,7 +9250,7 @@ function setWishChart(view, el) {
 
 function captureWishSnapshot() {
   // Save today's prices for all watched cards
-  const history = JSON.parse(localStorage.getItem(WISH_HISTORY_KEY) || '{}');
+  const history = readWishHistory();
   const today   = new Date().toISOString().slice(0, 10);
   let totalVal  = 0;
 
@@ -9320,7 +9274,7 @@ function captureWishSnapshot() {
     else lastTotal.v = totalVal;
   }
 
-  localStorage.setItem(WISH_HISTORY_KEY, JSON.stringify(history));
+  writeWishHistory(history);
 }
 
 function renderWishCharts() {
@@ -9343,7 +9297,7 @@ function renderWishCharts() {
 }
 
 function renderWishValueChart() {
-  const history = JSON.parse(localStorage.getItem(WISH_HISTORY_KEY) || '{}');
+  const history = readWishHistory();
   const pts = history._total || [];
 
   if (_wcCharts.value) { _wcCharts.value.destroy(); delete _wcCharts.value; }
@@ -9463,7 +9417,7 @@ function renderWishSparklines() {
   wishlist.forEach(w => {
     const canvas = document.getElementById('wsp-'+w.id);
     if (!canvas) return;
-    const history = JSON.parse(localStorage.getItem(WISH_HISTORY_KEY) || '{}');
+    const history = readWishHistory();
     const pts = (history[w.id] || []).map(p => p.v);
 
     // If no history, build a simulated sparkline from trend data
@@ -9557,12 +9511,19 @@ let _wishTried = {};                 // wishId → last fetch-attempt ts (retry 
 const WISH_RETRY_MS = 5*60*1000;     // don't refetch an unpriceable wishlist card more than once / 5 min
 // Watchlist items are priced into their own 'wish_<id>' cache namespace — NOT via
 // cacheKey(), because a watchlist entry is not an owned holding and has no cond/
-// edition identity. Reads and writes both go through this accessor so the namespace
-// is declared in exactly one place.
+// edition identity. Reads and writes both go through these two helpers so the
+// namespace is declared in exactly one place.
+function wishCacheKey(w){ return 'wish_' + (w && w.id); }
 function wishPriceData(w){
   if (!w || w.id == null) return null;
-  const e = pcache['wish_' + w.id];
-  return (e && e.data) ? e.data : null;
+  const e = pcache[wishCacheKey(w)];
+  if (e && e.data) return e.data;
+  // Tolerant read of the legacy key written by the retired loadAllPrices()
+  // pseudo-card path ('wish_<id>_NM_unlimited'). Nothing writes it any more; existing
+  // entries stay readable so a user's cached watchlist prices don't blank out after
+  // this change. No migration, no deletion — the stale keys simply age out.
+  const legacy = pcache['wish_' + w.id + '_NM_unlimited'];
+  return (legacy && legacy.data) ? legacy.data : null;
 }
 
 function renderWishlist(){
@@ -9638,13 +9599,15 @@ function renderWishlist(){
 
   // Lazy load prices
   wishlist.forEach(async w=>{
-    const ck='wish_'+w.id;
-    const cached=pcache[ck]?.data;
+    const ck=wishCacheKey(w);
+    // Tolerant read (canonical key, then the retired bulk-loader key) so an item
+    // already priced by the old path is not re-fetched just because the key moved.
+    const cached=wishPriceData(w);
     if(cached&&bestPrice(cached)>0) return;                              // usable price already cached
     const now=Date.now();
     if(_wishTried[w.id]&&(now-_wishTried[w.id])<WISH_RETRY_MS) return;   // retry throttle — no refetch storm
     _wishTried[w.id]=now;
-    const data=await fetchLivePrices({id:'wish_'+w.id,name:w.name,cardId:w.cardId,type:w.type==='graded'?'graded':'holo',grade:w.grade||'',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
+    const data=await fetchLivePrices({id:ck,name:w.name,cardId:w.cardId,type:w.type==='graded'?'graded':'holo',grade:w.grade||'',cond:'NM',edition:w.edition||'unlimited',img:w.img||null,set:w.set||'',num:w.num||''});
     if(data&&bestPrice(data)>0){                                        // cache ONLY usable results
       pcache[ck]={ts:now,data};
       idbPut(ck,pcache[ck]);
@@ -9793,9 +9756,7 @@ function ovPickCard(card){
 }
 
 // Close on outside click
-document.addEventListener('click',e=>{
-  if(!e.target.closest('.card-search-wrap'))closeOverviewSearch();
-});
+// (dismiss listener moved to initGlobalListeners — see APPLICATION BOOTSTRAP)
 
 
 // ── Card Search Tab ──
@@ -11365,7 +11326,9 @@ async function scanCard(input) {
   document.getElementById('scan-result').style.display = 'none';
   document.getElementById('scan-added').style.display = 'none';
   document.getElementById('scan-drop').style.display = 'none';
+  document.getElementById('scan-matches').style.display = 'none';
   scanSelectedCard = null;
+  window._scanMatches = null; window._scanParsed = null; _scanPriceToken++;
 
   try {
     // Step 1 — pre-process (normalise rotation & size)
@@ -11471,29 +11434,236 @@ async function searchAndShowMatches(parsed) {
     scored.sort((a,b) => b.score - a.score);
     const sorted = scored.map(x => x.card);
     if (sorted.length === 1 || scored[0].score >= 5) {
-      showScanResultCard(sorted[0]);
+      showScanResultCard(sorted[0], parsed);
     } else {
       showScanMatches(sorted, parsed);
     }
   } catch(e) {
-    // NOTE (2026-08): showScanResultCard() and showScanMatches() are called above but
-    // are NOT DEFINED anywhere in this file, so a successful catalogue match throws
-    // here and silently degrades to the manual form. Logged rather than swallowed so
-    // the failure is diagnosable; implementing those two renderers is a separate task.
+    // Genuine failures only (network / API shape). Both renderers now exist, so a
+    // successful catalogue match no longer lands here. Logged, never swallowed.
     console.warn('[scanner] match rendering failed — falling back to manual entry:', e);
     document.getElementById('scan-loading').style.display = 'none';
     showScanResultManual(parsed);
   }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ── SCANNER RESULT RENDERERS (2026-08) ──
+// showScanResultCard() and showScanMatches() were called by searchAndShowMatches()
+// but did not exist anywhere in the file: EVERY successful catalogue match threw a
+// ReferenceError into the surrounding catch and silently degraded to the manual
+// form, so the scanner never actually used its own lookup. Implemented here against
+// the contract the rest of the scanner already assumes:
+//   • scanSelectedCard must be {id,name,set,num,img,cardId,type,rarity} — the shape
+//     showScanResultManual() builds and addScannedCard() spreads.
+//   • the #scan-result strip (img/name/meta/price) is the single result surface.
+//   • #scan-matches / #scan-matches-list is the multi-candidate surface (markup
+//     already existed, unused).
+// Nothing is fabricated: no invented confidence, no placeholder price, no guessed
+// set. Everything shown comes from the pokemontcg.io record or the vision read.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Guards against a slow price fetch for match A landing after the user picks match B.
+let _scanPriceToken = 0;
+
+// pokemontcg.io record → the card shape this app uses internally.
+function scanCardFromApi(apiCard, parsed){
+  const RAW_TYPES = ['standard','holo','reverse','ex'];
+  const visionType = (parsed && parsed.type || '').toString().toLowerCase();
+  const card = {
+    id:     '',                                     // real id assigned by addScannedCard()
+    name:   apiCard.name || (parsed && parsed.name) || '',
+    set:    (apiCard.set && apiCard.set.name) || (parsed && parsed.set) || '',
+    num:    apiCard.number || (parsed && parsed.number) || '',
+    img:    (apiCard.images && (apiCard.images.small || apiCard.images.large)) || '',
+    cardId: apiCard.id || '',
+    type:   scanIsGraded ? 'graded' : (RAW_TYPES.includes(visionType) ? visionType : 'standard'),
+    rarity: apiCard.rarity || (parsed && parsed.rarity) || ''
+  };
+  if (scanIsGraded) {
+    // The grade was read off the slab label in scanCard(); carry it onto the record
+    // so addScannedCard() produces a real graded holding instead of a bare type flag.
+    if (scanGrade) card.grade = scanGrade;
+    const cert = (parsed && parsed.cert || '').toString().trim();
+    if (cert) card.cert = cert;
+  }
+  return card;
+}
+
+// Reflect the label-read grade into the grade selects, then re-read them so
+// scanGrade and the UI can never disagree (an unknown grade leaves the default).
+function applyScanGradeToSelects(){
+  const m = (scanGrade || '').match(/^(\S+)\s+(.+)$/);
+  const graderSel = document.getElementById('scan-grader');
+  const gradeSel  = document.getElementById('scan-grade-sel');
+  if (m && graderSel && gradeSel) {
+    const hasOpt = (sel, v) => Array.from(sel.options).some(o => o.value === v);
+    if (hasOpt(graderSel, m[1])) graderSel.value = m[1];
+    if (hasOpt(gradeSel,  m[2])) gradeSel.value  = m[2];
+  }
+  if (graderSel && gradeSel) setScanGrade();   // canonicalise scanGrade from the UI
+}
+
+// Show/hide the condition vs grade rows and the edition row for the chosen card.
+function applyScanCardOptions(card){
+  const gradeRow = document.getElementById('scan-grade-row');
+  const condRow  = document.getElementById('scan-cond-row');
+  const gradeHint= document.getElementById('scan-grade-hint');
+  if (scanIsGraded) {
+    if (gradeRow) gradeRow.style.display = '';
+    if (condRow)  condRow.style.display  = 'none';
+    if (gradeHint) gradeHint.textContent = scanGrade ? '· read from slab label' : '';
+    applyScanGradeToSelects();
+    if (scanSelectedCard) scanSelectedCard.grade = scanGrade;
+  } else {
+    if (gradeRow) gradeRow.style.display = 'none';
+    if (condRow)  condRow.style.display  = '';
+    if (gradeHint) gradeHint.textContent = '';
+  }
+
+  // Edition is only offered for sets that actually have editions (WOTC-era).
+  const row  = document.getElementById('scan-edition-row');
+  const hint = document.getElementById('scan-edition-hint');
+  const shadowlessPill = document.getElementById('scan-ed-shadowless');
+  const el = editionEligibility({ cardId: card.cardId, set: card.set, type: card.type });
+  if (el.eligible) {
+    if (row) row.style.display = '';
+    if (shadowlessPill) shadowlessPill.style.display = el.shadowless ? '' : 'none';
+    let pick = 'unlimited';
+    if (scanDetectedEdition === 'shadowless' && el.shadowless) pick = 'shadowless';
+    else if (scanDetectedEdition === '1stEdition')             pick = '1stEdition';
+    else if (scanDetectedEdition === 'unlimited')              pick = 'unlimited';
+    setScanEdition(pick);
+    if (hint) hint.textContent = scanDetectedEdition ? '· detected from image — verify' : '';
+  } else {
+    if (row) row.style.display = 'none';
+    if (hint) hint.textContent = '';
+    setScanEdition('unlimited');
+  }
+}
+
+// Live price for the identified card. Uses fetchLivePrices directly (as the
+// watchlist does) rather than getPrices(), so a not-yet-owned probe never writes
+// into pcache or cardHistory under a throwaway id.
+async function loadScanPrice(card){
+  const token = ++_scanPriceToken;
+  const el = document.getElementById('scan-result-price');
+  if (el) el.textContent = 'Checking price…';
+  try{
+    const data = await fetchLivePrices({
+      id: 'scan_' + (card.cardId || card.name || 'x'),
+      name: card.name, cardId: card.cardId, set: card.set, num: card.num,
+      type: card.type, grade: card.grade || '', cond: scanCond || 'NM',
+      edition: scanEdition || 'unlimited', img: card.img || null
+    });
+    if (token !== _scanPriceToken) return;                     // superseded by another pick
+    const bp = bestPrice(data, card.type === 'graded');
+    if (el) el.textContent = (isFinite(bp) && bp > 0) ? '$' + bp.toFixed(2) : 'No price found';
+    if (!card.img && data && data.img) {
+      card.img = data.img;
+      const imgEl = document.getElementById('scan-result-img');
+      if (imgEl) imgEl.innerHTML = `<img src="${esc(data.img)}" alt="${esc(card.name)}" style="width:100%;height:100%;object-fit:cover;">`;
+    }
+  }catch(e){
+    if (token !== _scanPriceToken) return;
+    console.warn('[scanner] price lookup failed:', e && e.message);
+    if (el) el.textContent = 'Price unavailable';             // honest — never a fake number
+  }
+}
+
+// SINGLE CONFIDENT MATCH — fill the result strip and arm "Add to Vault".
+function showScanResultCard(apiCard, parsed, opts){
+  if (!apiCard) { showScanResultManual(parsed || {}); return; }
+  opts = opts || {};
+  const card = scanCardFromApi(apiCard, parsed);
+  scanSelectedCard = card;
+
+  const imgEl = document.getElementById('scan-result-img');
+  if (imgEl) imgEl.innerHTML = card.img
+    ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" style="width:100%;height:100%;object-fit:cover;">`
+    : '⟡';
+  document.getElementById('scan-result-name').textContent = card.name;
+  document.getElementById('scan-result-meta').textContent =
+    [card.set, card.num ? '#' + card.num : '', card.rarity, scanIsGraded ? (scanGrade || 'Graded') : '']
+      .filter(Boolean).join(' · ');
+  document.getElementById('scan-result-price').textContent = '';
+
+  applyScanCardOptions(card);
+
+  // Keep the candidate list on screen when the user picked from it, so they can
+  // change their mind; hide it on a direct single-match result.
+  const matches = document.getElementById('scan-matches');
+  if (matches && !opts.keepMatches) matches.style.display = 'none';
+
+  document.getElementById('scan-loading').style.display = 'none';
+  document.getElementById('scan-result').style.display = '';
+  loadScanPrice(card);
+}
+
+// MULTIPLE CANDIDATES — the user must pick before anything can be added.
+function showScanMatches(cards, parsed){
+  const list = document.getElementById('scan-matches-list');
+  const wrap = document.getElementById('scan-matches');
+  if (!list || !wrap || !Array.isArray(cards) || !cards.length) { showScanResultManual(parsed || {}); return; }
+
+  // Nothing is selected yet — addScannedCard() already refuses on a null selection.
+  scanSelectedCard = null;
+  window._scanMatches = cards;
+  window._scanParsed  = parsed || null;   // scanPickMatch() forwards this on selection
+
+  list.innerHTML = cards.slice(0, 12).map((c, i) => {
+    const img = (c.images && c.images.small) || '';
+    return `<div class="sd-item" id="scan-match-${i}" onclick="scanPickMatch(${i})">
+      ${img ? `<img class="sd-thumb" src="${esc(img)}" alt="${esc(c.name || '')}" loading="lazy">` : '<div class="sd-ph">⟡</div>'}
+      <div style="min-width:0;flex:1;">
+        <div class="sd-name">${esc(c.name || '')}</div>
+        <div class="sd-meta">${esc((c.set && c.set.name) || '')}${c.number ? ' · #' + esc(c.number) : ''}${c.rarity ? ' · ' + esc(c.rarity) : ''}</div>
+      </div>
+      <div class="sd-price"><div class="sd-plbl">Select</div></div>
+    </div>`;
+  }).join('');
+  wrap.style.display = '';
+
+  // Result strip shows what the image was read as, clearly marked as unconfirmed.
+  const imgEl = document.getElementById('scan-result-img');
+  if (imgEl) imgEl.innerHTML = '⟡';
+  document.getElementById('scan-result-name').textContent = (parsed && parsed.name) || 'Pick the matching card';
+  document.getElementById('scan-result-meta').textContent = `${cards.length} possible matches — choose one below`;
+  document.getElementById('scan-result-price').textContent = '';
+
+  document.getElementById('scan-loading').style.display = 'none';
+  document.getElementById('scan-result').style.display = '';
+}
+
+function scanPickMatch(idx){
+  const cards = window._scanMatches || [];
+  const chosen = cards[idx];
+  if (!chosen) return;
+  document.querySelectorAll('#scan-matches-list .sd-item').forEach((el, i) => {
+    el.style.background = (i === idx) ? 'var(--bg4)' : '';
+  });
+  showScanResultCard(chosen, window._scanParsed, { keepMatches: true });
+}
+
 function showScanResultManual(parsed) {
   // AI identified but no API match — pre-fill what we know
-  scanSelectedCard = { id: newId('c'), name: parsed.name, set: parsed.set || '', num: parsed.number || '', img: '', cardId: '', type: parsed.type || 'standard', rarity: parsed.rarity || '' };
+  parsed = parsed || {};
+  scanSelectedCard = { id: newId('c'), name: parsed.name || '', set: parsed.set || '', num: parsed.number || '', img: '', cardId: '', type: scanIsGraded ? 'graded' : (parsed.type || 'standard'), rarity: parsed.rarity || '' };
+  // Carry the slab read through on this path too — previously a scanned PSA slab
+  // was added as type:'graded' with NO grade and NO cert, which made it unpriceable
+  // by the graded engine and blank on the PSA tiles.
+  if (scanIsGraded) {
+    if (scanGrade) scanSelectedCard.grade = scanGrade;
+    const cert = (parsed.cert || '').toString().trim();
+    if (cert) scanSelectedCard.cert = cert;
+  }
   document.getElementById('scan-result-img').innerHTML = '⟡';
-  document.getElementById('scan-result-name').textContent = parsed.name;
+  document.getElementById('scan-result-name').textContent = parsed.name || 'Unidentified card';
   document.getElementById('scan-result-meta').textContent = [parsed.set, parsed.number ? '#' + parsed.number : '', parsed.rarity].filter(Boolean).join(' · ') || 'No API match — verify manually';
   document.getElementById('scan-result-price').textContent = '';
   document.getElementById('scan-matches').style.display = 'none';
+  applyScanCardOptions(scanSelectedCard);
+  document.getElementById('scan-loading').style.display = 'none';
   document.getElementById('scan-result').style.display = '';
 }
 
@@ -11508,7 +11678,9 @@ function showScanError(msg) {
 }
 
 function addScannedCard() {
-  if (!scanSelectedCard) { toast('No card selected', 'red'); return; }
+  // Null when several candidates are showing and none has been picked — the honest
+  // state, not a silent guess at the top match.
+  if (!scanSelectedCard) { toast('Pick the matching card first', 'red'); return; }
   const paid = document.getElementById('scan-paid').value;
   const qty  = parseInt(document.getElementById('scan-qty').value) || 1;
   const card = {
@@ -11521,6 +11693,9 @@ function addScannedCard() {
     notes: 'Added via Card Scanner',
     added: new Date().toISOString(),
   };
+  // Mirror saveCard()'s invariant: a record carrying a grade or cert IS a graded
+  // holding, so the graded pricing engine and the PSA views classify it correctly.
+  if ((card.grade && String(card.grade).trim()) || (card.cert && String(card.cert).trim())) card.type = 'graded';
   collection.push(card);
   save();
   renderAll();
@@ -11534,7 +11709,10 @@ function addScannedCard() {
 
 function resetScanner() {
   scanSelectedCard = null; scanCond = 'NM'; scanEdition = 'unlimited'; scanDetectedEdition = null; scanGrade = ''; scanIsGraded = false;
-  ['scan-loading','scan-result','scan-preview-wrap','scan-added','scan-edition-row','scan-grade-row'].forEach(id => document.getElementById(id).style.display = 'none');
+  // Candidate-list state from a previous scan must not leak into the next one.
+  window._scanMatches = null; window._scanParsed = null; _scanPriceToken++;
+  const _ml = document.getElementById('scan-matches-list'); if (_ml) _ml.innerHTML = '';
+  ['scan-loading','scan-result','scan-preview-wrap','scan-added','scan-edition-row','scan-grade-row','scan-matches','scan-confidence-warn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   const ccr = document.getElementById('scan-cond-row'); if (ccr) ccr.style.display = '';
   document.getElementById('scan-drop').style.display = '';
   document.getElementById('scan-file').value = '';
@@ -11543,6 +11721,27 @@ function resetScanner() {
   setScanCond('NM'); setScanEdition('unlimited');
 }
 
+// ── PAGE RENDERER REGISTRATION ──
+// The UI layer declaring itself to the state layer. Runs at parse time, before
+// any render can be triggered (init() is called from the DOM-ready handler at
+// the very bottom of the file), so the registry is always populated in time.
+// This block is the whole of the UI→core coupling: when the file is split, this
+// is what each feature file contributes, and AppState needs to know nothing.
+function registerPageRenderers(){
+  registerPageRenderer('page-dashboard', renderDashboard);
+  registerPageRenderer('page-portfolio', renderPortfolio);
+  registerPageRenderer('page-psa',       renderPSA);
+  registerPageRenderer('page-singles',   renderSingles);
+  registerPageRenderer('page-sealed',    renderSealed);
+  registerPageRenderer('page-analyzer',  renderAnalyzer);
+  registerPageRenderer('page-deals',     renderDeals);
+  registerPageRenderer('page-wishlist',  renderWishlist);
+}
+// Called by boot(), not at parse time — see APPLICATION BOOTSTRAP.
+
+// Full redraw of every page. Kept as an explicit list (not a loop over the
+// registry) because the ORDER matters: renderDashboard() reads totals that the
+// portfolio pass refreshes, so it stays last.
 function renderAll(){
   AppState.update();
   safeRender(renderPortfolio,  'renderPortfolio');
@@ -11999,8 +12198,26 @@ function saveTransactionToDatabase(txn){
   });
 }
 
+// ── SOLD HISTORY PERSISTENCE ──
+// soldHistory IS part of synced app state (collectAppData / mergeAppData / applyAppData),
+// but save() never owned it: four call sites each did their own
+// localStorage.setItem('pkv2_sold', ...). One of them (deleteSoldEntry) never called
+// save() at all, so the write never marked the state dirty and never queued a cloud
+// push. This is the single persistence path for sold history. Storage key, record
+// shape and sync scope are all unchanged.
+function saveSoldHistory(){
+  try{
+    localStorage.setItem(STORAGE_KEYS.soldHistory, JSON.stringify(soldHistory));
+  }catch(e){
+    console.warn('[soldHistory] persist failed:', e && e.message);
+  }
+  AppState._dirty = true;
+  notifyPersisted();          // debounced downstream — safe to call twice
+}
+
 function save(){
   idbColSave(collection);
+  saveSoldHistory();          // sold history can no longer be forgotten by a caller
   localStorage.setItem('pkv2_wish',JSON.stringify(wishlist));
   localStorage.setItem('pkv2_sealed',JSON.stringify(sealed));
   localStorage.setItem('pkv2_deals',JSON.stringify(deals));
@@ -12010,11 +12227,10 @@ function save(){
   });
   AppState._dirty = true;
   setTimeout(captureHistorySnapshot, 500); // capture after state updates
-  // Background push to cloud (no-op if signed out / offline)
-  if (typeof syncQueuePush === 'function') syncQueuePush();
+  notifyPersisted();          // cloud push happens via a subscriber, not a direct call
 }
 function exportData(){
-  const history = JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');
+  const history = readPortfolioHistory();
   const data = {collection,wishlist,sealed,deals,history,cardHistory,cashPosition:AppState.cashPosition,exported:new Date().toISOString(),version:'5.0'};
   const b=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mytcgledger-v6-export.json';a.click();
@@ -12037,7 +12253,7 @@ function importData(e){
       if(Array.isArray(sealed))sealed=applyDeletions(sealed,deletionLedger,'sealed');
       if(Array.isArray(wishlist))wishlist=applyDeletions(wishlist,deletionLedger,'wishlist');
       if(Array.isArray(deals))deals=applyDeletions(deals,deletionLedger,'deal');
-      if(d.history){localStorage.setItem(HISTORY_KEY,JSON.stringify(d.history));}
+      if(d.history){writePortfolioHistory(d.history);}
       if (Object.prototype.hasOwnProperty.call(d, 'cashPosition')) { const importedCash = parseFloat(d.cashPosition); _cashPosition = Number.isFinite(importedCash) && importedCash >= 0 ? importedCash : 0; localStorage.setItem('pkv2_cash', _cashPosition.toFixed(2)); }
       save();init();toast('Imported successfully — history restored','green');
     }catch{toast('Invalid JSON file','red');}
@@ -12092,16 +12308,81 @@ function refreshCurrentPage(){
 }
 
 // ═══ MODALS / UTILS ═══
-function openModal(id){document.getElementById(id).classList.add('open');}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
-document.querySelectorAll('.modal-bg').forEach(bg=>bg.addEventListener('click',e=>{if(e.target===bg)bg.classList.remove('open');}));
-let confirmCb=null;
-function showConfirm(title,msg,cb){document.getElementById('confirm-title').textContent=title;document.getElementById('confirm-msg').textContent=msg;confirmCb=cb;document.getElementById('confirm-bg').classList.add('open');}
-function closeConfirm(){document.getElementById('confirm-bg').classList.remove('open');confirmCb=null;}
-document.getElementById('confirm-ok').onclick=()=>{if(confirmCb)confirmCb();closeConfirm();};
-function toast(msg,color='green',undoCb=null){const t=document.getElementById('toast');document.getElementById('toast-msg').textContent=msg;document.getElementById('toast-dot').style.background=color==='green'?'var(--green)':color==='red'?'var(--red)':'var(--gold)';const ub=document.getElementById('toast-undo');if(ub){if(undoCb){ub.style.display='';ub.onclick=()=>{t.classList.remove('show');try{undoCb();}catch(e){}};}else{ub.style.display='none';ub.onclick=null;}}t.classList.add('show');if(window._toastTimer)clearTimeout(window._toastTimer);window._toastTimer=setTimeout(()=>t.classList.remove('show'),undoCb?6000:2800);}
+// ════════════════════════════════════════════════════════════════════════════
+// ── APPLICATION BOOTSTRAP ──
+// The ENTIRE startup path, in dependency order and in one place. Everything here
+// used to be scattered bare top-level statements whose correctness depended on
+// where they happened to sit in the file — the single biggest hazard for a
+// physical file split, because moving a function is safe but moving top-level
+// execution is not.
+//
+// ORDERING CONTRACT (each step depends only on the ones above it):
+//   1  initGlobalListeners()  document-level wiring. Needs the DOM to exist; does
+//                             NOT need app state. Idempotent.
+//   2  registerPageRenderers() UI declares itself to AppState. MUST run before any
+//                             render can be dispatched.
+//   3  init()                 the existing boot: hydrate storage -> auth -> first
+//                             render. Unchanged, still the last thing to run.
+//
+// Migrations, the Supabase client config, the persistence hook and the profile
+// registrations deliberately stay where they are — see BOOTSTRAP NOTES below.
+// Every function here is idempotent: calling boot() twice must be harmless.
+// ════════════════════════════════════════════════════════════════════════════
+let _bootDone = false;
+let _listenersBound = false;
 
-init();
+// Document-level listeners that were previously bare top-level statements.
+// Guarded so a double call cannot double-bind (which would fire handlers twice).
+function initGlobalListeners(){
+  if (_listenersBound) return;
+  _listenersBound = true;
+  document.querySelectorAll('.modal-bg').forEach(bg =>
+    bg.addEventListener('click', e => { if (e.target === bg) bg.classList.remove('open'); }));
+  const okBtn = document.getElementById('confirm-ok');
+  if (okBtn) okBtn.onclick = () => { if (confirmCb) confirmCb(); closeConfirm(); };
+
+  // "Click outside to dismiss" handlers, relocated here from three different
+  // feature sections where they sat as bare top-level execution. Registration
+  // order among them is preserved; each targets a different container, so they
+  // do not interact. Owning them here means search.js / cards.js can be extracted
+  // as pure function collections with no top-level side effects.
+  document.addEventListener('click', e => {
+    if(!e.target.closest('#add-modal')) document.getElementById('modal-name-dd')?.classList.remove('open');
+  });
+  document.addEventListener('click', e => {
+    if(!e.target.closest('#mode-name')) document.getElementById('name-dd')?.classList.remove('open');
+  });
+  document.addEventListener('click', e => {
+    if(!e.target.closest('.card-search-wrap')) closeOverviewSearch();
+  });
+}
+
+// ── BOOTSTRAP NOTES: why the remaining top-level execution stays put ──
+// Each of these MUST run at parse time; none may be deferred into boot().
+//   L~51   Sentry IIFE ............ must install before any other JS can throw.
+//   L~2609 schema-version guard ... must clear stale caches BEFORE the state
+//                                   declarations below read localStorage.
+//   L~2633 grade/type migration ... same: rewrites pkv2_col before it is read.
+//   L~2671 ptcg key backfill ...... must precede any pricing call.
+//   L~3034 onPersist(syncQueuePush) must be registered before any save() can fire.
+//   L~3050 online/offline listeners order-independent; kept beside the sync code.
+//   L~3397 _indexSealedCatalog .... builds an index from the const array above it.
+//   L~4464 profile registrations .. must follow the register* helpers and precede
+//                                   the first identity/valuation lookup.
+//   L~10640 jpPurgeOldCaches ...... order-independent cache pruning.
+//   L~12462 boot() ................ always last.
+// When the file is split, these belong at the TOP of their own module, in this
+// same relative order, and the module load order must preserve it.
+
+function boot(){
+  if (_bootDone) { console.warn('[boot] already booted — ignoring repeat call'); return; }
+  _bootDone = true;
+  initGlobalListeners();      // 1. DOM wiring
+  registerPageRenderers();    // 2. UI -> AppState registration, before any render
+  init();                     // 3. state hydrate -> auth -> first render
+}
+
+boot();
 </script>
 
 <!-- Cost Basis Editor Modal -->
