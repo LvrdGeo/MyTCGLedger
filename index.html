@@ -2118,6 +2118,12 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
 <!-- LAYER 4 - identity.js: core.js only. Load-time work is the three
      identity-profile registrations and the empty deletion ledger. -->
 <script src="js/identity.js"></script>
+<!-- LAYER 5 - storage.js: core+valuation+state. Load-time work is three
+     declarations; no IndexedDB is opened until init() calls hydrate*(). -->
+<script src="js/storage.js"></script>
+<!-- LAYER 6 - analytics.js: declarations only, no load-time work. Loads after
+     storage.js; storage calls savePortfolioSnapshot() at run time, never at load. -->
+<script src="js/analytics.js"></script>
 
 <script>
 // ╔═══════════════════════════════════════════════════════════════════════╗
@@ -2173,60 +2179,6 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
 
 // ═══ STATE ═══
 let collection = JSON.parse(localStorage.getItem('pkv2_col')   || '[]');
-// ── Tier 1: durable collection store in IndexedDB (separate DB, single record).
-// collection stays the in-memory array; this only retargets persistence.
-// localStorage 'pkv2_col' is left intact as a frozen rollback copy.
-let _colDB = null, _colOK = false;
-function _colOpen(){
-  return new Promise(function(resolve){
-    try {
-      if (!window.indexedDB) return resolve(null);
-      const req = indexedDB.open('mytcg_collection', 1);
-      req.onupgradeneeded = function(e){ const db = e.target.result; if(!db.objectStoreNames.contains('kv')) db.createObjectStore('kv'); };
-      req.onsuccess = function(e){ _colDB = e.target.result; _colOK = true; resolve(_colDB); };
-      req.onerror   = function(){ resolve(null); };
-    } catch(_) { resolve(null); }
-  });
-}
-function _colStore(mode){ return _colDB.transaction('kv', mode).objectStore('kv'); }
-function idbColLoad(){
-  return new Promise(function(resolve){
-    if(!_colOK) return resolve(null);
-    try {
-      const req = _colStore('readonly').get('collection');
-      req.onsuccess = function(){ resolve(req.result != null ? req.result : null); };
-      req.onerror   = function(){ resolve(null); };
-    } catch(_) { resolve(null); }
-  });
-}
-function idbColSave(arr){ try { if(_colOK) _colStore('readwrite').put(arr, 'collection'); } catch(_){} }
-function idbColClear(){ try { if(_colOK) _colStore('readwrite').delete('collection'); } catch(_){} }
-async function hydrateCollection(){
-  await _colOpen();
-  if(!_colOK) return;  // fallback: keep the synchronous localStorage seed (behavior unchanged)
-  try {
-    const stored = await idbColLoad();
-    if (stored == null) {
-      // one-time COPY migration: localStorage seed → IndexedDB (pkv2_col left intact)
-      if (Array.isArray(collection) && collection.length) idbColSave(collection);
-      return;  // in-memory already equals the migrated seed this session
-    }
-    // IndexedDB is authoritative: replace the in-memory array
-    if (Array.isArray(stored)) collection = stored;
-    // Version-gated stale-price-stamp clear (mirrors the load-time schema guard), applied to IDB data
-    if (window._collectionSchemaReset && Array.isArray(collection)) {
-      let _cleared = 0;
-      collection.forEach(function(card){
-        if (card && card.lastMarketValue != null) {
-          delete card.lastMarketValue; delete card.lastPricedAt;
-          delete card.lastPriceConfidence; delete card.lastPriceSource; _cleared++;
-        }
-      });
-      if (_cleared) idbColSave(collection);
-    }
-    try { AppState.update(); AppState.renderActive(); } catch(_){}
-  } catch(_){}
-}
 let sealed     = JSON.parse(localStorage.getItem('pkv2_sealed') || '[]');
 let wishlist   = JSON.parse(localStorage.getItem('pkv2_wish')  || '[]');
 let deals      = JSON.parse(localStorage.getItem('pkv2_deals') || '[]');
@@ -2784,80 +2736,6 @@ function renderAccountSection() {
 
 let prefs      = readJSON(STORAGE_KEYS.prefs, { cond: 'NM' });  // Patch 5: key via STORAGE_KEYS.prefs (resolves to 'pkv2_prefs')
 let pcache     = JSON.parse(localStorage.getItem('pkv2_pcache')|| '{}');
-// ── Tier 1: durable price cache in IndexedDB (per-key writes). pcache stays the
-// synchronous in-memory object used by every read; this only changes persistence.
-// The localStorage 'pkv2_pcache' blob is left in place as a frozen rollback copy.
-let _idbDB = null, _idbOK = false;
-function _idbOpen(){
-  return new Promise(function(resolve){
-    try {
-      if (!window.indexedDB) return resolve(null);
-      const req = indexedDB.open('mytcg_pcache', 1);
-      req.onupgradeneeded = function(e){ const db = e.target.result; if(!db.objectStoreNames.contains('pcache')) db.createObjectStore('pcache'); };
-      req.onsuccess = function(e){ _idbDB = e.target.result; _idbOK = true; resolve(_idbDB); };
-      req.onerror   = function(){ resolve(null); };
-    } catch(_) { resolve(null); }
-  });
-}
-function _idbStore(mode){ return _idbDB.transaction('pcache', mode).objectStore('pcache'); }
-function idbGetAll(){
-  return new Promise(function(resolve){
-    if(!_idbOK) return resolve({});
-    try {
-      const out = {}, cur = _idbStore('readonly').openCursor();
-      cur.onsuccess = function(e){ const c = e.target.result; if(c){ out[c.key] = c.value; c.continue(); } else resolve(out); };
-      cur.onerror   = function(){ resolve(out); };
-    } catch(_) { resolve({}); }
-  });
-}
-function idbPut(k,v){ try { if(_idbOK) _idbStore('readwrite').put(v,k); } catch(_){} }
-function idbDelete(k){ try { if(_idbOK) _idbStore('readwrite').delete(k); } catch(_){} }
-function idbClear(){ try { if(_idbOK) _idbStore('readwrite').clear(); } catch(_){} }
-async function hydratePcache(){
-  await _idbOpen();
-  if(!_idbOK) return;  // fallback: keep the synchronous localStorage seed (behavior unchanged)
-  try {
-    if (window._pcacheSchemaReset) { idbClear(); return; }  // schema bump → wipe stale IDB too
-    const all = await idbGetAll();
-    const seedKeys = Object.keys(pcache);
-    if ((!all || Object.keys(all).length === 0) && seedKeys.length) {
-      // one-time COPY migration: localStorage blob → IndexedDB (blob left intact)
-      seedKeys.forEach(function(k){ idbPut(k, pcache[k]); });
-      return;  // pcache already equals the migrated seed this session
-    }
-    // IndexedDB is authoritative: replace in-memory contents (drops stale/invalidated keys)
-    Object.keys(pcache).forEach(function(k){ delete pcache[k]; });
-    Object.assign(pcache, all);
-    try { AppState.update(); AppState.renderActive(); } catch(_){}
-  } catch(_){}
-}
-
-// ── PER-CARD PRICE HISTORY ENGINE ──
-// Records each card's price over time → real trend charts. {cacheKey: [{d,v}]}
-let cardHistory = JSON.parse(localStorage.getItem('pkv2_cardhist') || '{}');
-function recordCardPrice(card, price) {
-  if (!price || price <= 0 || !isFinite(price)) return;
-  const key = cacheKey(card);
-  const today = new Date().toISOString().slice(0,10);
-  if (!cardHistory[key]) cardHistory[key] = [];
-  const s = cardHistory[key];
-  const last = s[s.length-1];
-  if (last && last.d === today) last.v = +price.toFixed(2);
-  else s.push({ d: today, v: +price.toFixed(2) });
-  if (s.length > 400) s.splice(0, s.length - 400);
-}
-function saveCardHistory() {
-  try { localStorage.setItem('pkv2_cardhist', JSON.stringify(cardHistory)); } catch(e){}
-}
-function getCardHistory(card, days) {
-  const key = cacheKey(card);
-  let s = cardHistory[key] || [];
-  if (days && s.length) {
-    const cut = new Date(Date.now()-days*86400000).toISOString().slice(0,10);
-    s = s.filter(p => p.d >= cut);
-  }
-  return s;
-}
 let allSets=[], typeFilter='', sealedFilter='', sealedSetFilter='', sortBy='added';
 let editingId=null, editingSealedId=null, tlRange='all';   // editingDealId removed with the v1 deal modal
 let _pickerCard=null, _pickerEdition='unlimited', _pickerWatchKind='single', searchTimer=null;
@@ -4253,50 +4131,6 @@ function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-
 const HISTORY_KEY = 'pkv2_ph2'; // v2 richer format
 
 // ════════════════════════════════════════════════════════════════════════════
-// ── HISTORY STORE ──
-// ARCHITECTURAL INVARIANT: nothing outside this block reads or writes the
-// history keys directly. Before this, five renderers, the sync layer and the
-// export path each did their own JSON.parse(localStorage.getItem(...)) with
-// three different spellings of the key ('pkv2_ph2' vs HISTORY_KEY) and two
-// different fallbacks ('[]' vs '{}'), so history had no owner and a malformed
-// record failed differently depending on which screen you were looking at.
-// Keys, formats and fallbacks are UNCHANGED — this only centralises access.
-//   pkv2_ph2 (portfolio history) — array of rich snapshots {date,totalValue,...}
-//   pkv2_vh  (value history)     — LEGACY array of {d,v}; read-only fallback
-//   pkv2_wh  (wish history)      — object keyed by wishlist id
-// ════════════════════════════════════════════════════════════════════════════
-function readPortfolioHistory(){
-  const v = readJSON(STORAGE_KEYS.portfolioHistory, []);
-  return Array.isArray(v) ? v : [];
-}
-function writePortfolioHistory(arr){
-  if (!Array.isArray(arr)) return false;
-  return writeJSON(STORAGE_KEYS.portfolioHistory, arr);
-}
-// Legacy {d,v} series. Read-only: nothing writes pkv2_vh any more, but existing
-// installs still have it and it is the fallback when ph2 is empty.
-function readValueHistory(){
-  const v = readJSON(STORAGE_KEYS.valueHistory, []);
-  return Array.isArray(v) ? v : [];
-}
-// The chart series every history view draws: rich ph2 normalised to {d,v},
-// falling back to the legacy vh series. This normalisation was duplicated
-// verbatim in renderDBChart() and renderTimeline().
-function portfolioValueSeries(){
-  const ph2 = readPortfolioHistory();
-  if (ph2.length) return ph2.map(s => ({ d: s.date || s.d, v: s.totalValue || s.v || 0 }));
-  return readValueHistory();
-}
-function readWishHistory(){
-  const v = readJSON(STORAGE_KEYS.wishHistory, {});
-  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
-}
-function writeWishHistory(obj){
-  if (!obj || typeof obj !== 'object') return false;
-  return writeJSON(STORAGE_KEYS.wishHistory, obj);
-}
-
-// ════════════════════════════════════════════════════════════════════════════
 // ── WISH HISTORY MERGE ──
 // SHAPE (written by captureWishSnapshot):
 //   { "<wishlistId>": [ {d:'YYYY-MM-DD', v:Number}, ... ],   // ascending by date
@@ -4343,54 +4177,6 @@ function mergeWishHistory(localH, cloudH){
 }
 let _phView = 'combined';
 let _phCharts = {};
-
-function captureHistorySnapshot() {
-  try {
-    if (AppState._dirty) AppState.update();
-
-    const history = readPortfolioHistory();
-    const now     = new Date();
-    const dateKey = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const timeKey = now.toISOString();
-
-    // Realized P&L from closed deals
-    const closedDeals = deals.filter(d => d.status === 'closed');
-    const realizedPnL = closedDeals.reduce((sum, d) => {
-      return sum + (parseFloat(d.sellPrice||0) - parseFloat(d.buyPrice||0));
-    }, 0);
-
-    const snapshot = {
-      ts:           timeKey,
-      date:         dateKey,
-      totalValue:   AppState.totalValue,
-      costBasis:    AppState.totalCost,
-      unrealizedPnL:AppState.totalPnL || 0,
-      realizedPnL:  realizedPnL,
-      totalPnL:     (AppState.totalPnL || 0) + realizedPnL,
-      cardCount:    collection.length,
-      slabCount:    AppState.slabsCount,
-      sealedCount:  AppState.sealedCount,
-      cashPosition: AppState.cashPosition,
-      topCard:      AppState.bestCard ? { name: AppState.bestCard.card.name, value: AppState.bestCard.bp } : null,
-      trigger:      'auto',
-    };
-
-    // Update today's snapshot or add new one
-    const todayIdx = history.findIndex(s => s.date === dateKey);
-    if (todayIdx >= 0) {
-      history[todayIdx] = snapshot; // update today's entry
-    } else {
-      history.push(snapshot); // new day
-    }
-
-    writePortfolioHistory(history);
-    savePortfolioSnapshot();   // mirror the daily snapshot to structured analytics
-    return history;
-  } catch(err) {
-    console.error('[History] Snapshot failed:', err);
-    return [];
-  }
-}
 
 function setHistoryView(view, el) {
   _phView = view;
@@ -10784,165 +10570,6 @@ function renderAll(){
   safeRender(renderAnalyzer,   'renderAnalyzer');
   safeRender(renderDashboard,  'renderDashboard');
 }
-// ══════════════════════════════════════════════════════════
-// STRUCTURED ANALYTICS WRITES (Supabase — Phase 2)
-// ──────────────────────────────────────────────────────────
-// Additive long-term analytics store. localStorage + user_app_state remain the
-// source of truth; these writes are fire-and-forget and must NEVER block the UI
-// or throw. dbWrite() silently no-ops when signed out, offline, or if Supabase
-// is unavailable, so a write failure can never corrupt or interrupt a save.
-// ══════════════════════════════════════════════════════════
-async function dbWrite(fn){
-  try{
-    if(!supa || !currentUser || !navigator.onLine) return null;
-    return await fn(supa, currentUser);
-  }catch(e){
-    console.warn('[db] structured write skipped:', e && e.message);
-    return null;
-  }
-}
-
-// Build a complete holdings row from a collection card. market_value comes from
-// the LIVE price cache only (never a stored/synced fallback), matching
-// AppState.update — so a stale value can't pollute the row. With no live price,
-// market_value / price_source / confidence are null (never invented).
-function buildHoldingRow(card, userId){
-  const hit     = cardPriceEntry(card);   // live cache only — never the synced fallback (see note above)
-  const p       = hit?.data;
-  const isG     = card.type==='graded';
-  const bp      = p ? bestPrice(p, isG) : null;
-  const hasLive = bp != null && isFinite(bp) && bp > 0;
-  const a       = (hasLive && p) ? analyzePriceRouted(p, isG) : null;   // {price, confidence, sources}
-  const src     = (a && a.sources && Object.keys(a.sources).length) ? Object.keys(a.sources).join('+') : null;
-  const cb      = parseFloat(card.paid);
-  return {
-    user_id:            userId,
-    client_id:          card.id,
-    name:               card.name || null,
-    card_set:           card.set || null,
-    card_number:        card.num || null,
-    card_id:            card.cardId || null,
-    item_type:          card.type || null,
-    condition:          card.cond || null,
-    edition:            card.edition || null,
-    grade:              card.grade || null,
-    cert:               card.cert || null,
-    rarity:             card.rarity || null,
-    quantity:           parseInt(card.qty, 10) || 1,
-    cost_basis:         (isFinite(cb) && cb >= 0) ? cb : null,
-    acquisition_source: card.source || null,
-    image_url:          card.img || null,
-    notes:              card.notes || null,
-    market_value:       hasLive ? bp : null,
-    price_confidence:   a ? a.confidence : (card.lastPriceConfidence || null),
-    price_source:       src || card.lastPriceSource || null,
-    priced_at:          (hasLive && hit && hit.ts) ? new Date(hit.ts).toISOString()
-                          : (card.lastPricedAt ? new Date(card.lastPricedAt).toISOString() : null),
-    acquired_at:        card.added || null,
-    updated_at:         new Date().toISOString()
-  };
-}
-
-// Upsert one holding (current-state mirror), keyed by (user_id, client_id).
-function saveHoldingToDatabase(card){
-  if(!card || !card.id) return;
-  return dbWrite(async (db, user) => {
-    const { error } = await db.from('holdings').upsert(buildHoldingRow(card, user.id), { onConflict: 'user_id,client_id' });
-    if(error) console.warn('[db] holdings upsert error:', error.message);
-  });
-}
-
-// Build one price-snapshot row: resolved best price + per-source breakdown +
-// comps + confidence, all from real price fields. Missing values => null.
-function buildSnapshotRow(card, data, userId){
-  const a     = analyzePriceRouted(data, card.type==='graded');   // {price, confidence, sources}
-  const num   = v => (v != null && isFinite(parseFloat(v))) ? parseFloat(v) : null;
-  const comps = parseInt(data && data.ebayN, 10);
-  const mp    = (a && isFinite(a.price) && a.price > 0) ? a.price : null;
-  const src   = (a && a.sources && Object.keys(a.sources).length) ? Object.keys(a.sources).join('+') : null;
-  return {
-    user_id:       userId,
-    client_id:     card.id,
-    card_name:     card.name || null,
-    snapshot_date: new Date().toISOString().slice(0,10),   // YYYY-MM-DD (UTC)
-    market_price:  mp,
-    price_source:  src,
-    comps_count:   Number.isFinite(comps) ? comps : null,
-    confidence:    (a && a.confidence) || null,
-    tcg_price:     num(data && data.tcg),
-    ebay_price:    num(data && data.ebay),
-    ppt_price:     num(data && data.ppt),
-    psa_price:     num(data && data.psa),
-    updated_at:    new Date().toISOString()
-  };
-}
-
-// Upsert one price snapshot for a single card (one row per card per day;
-// same-day re-fetches overwrite that day's row via the unique constraint).
-function savePriceSnapshot(card, data){
-  if(!card || !card.id || !data) return;
-  return dbWrite(async (db, user) => {
-    const { error } = await db.from('price_snapshots').upsert(buildSnapshotRow(card, data, user.id), { onConflict: 'user_id,client_id,snapshot_date' });
-    if(error) console.warn('[db] price_snapshots upsert error:', error.message);
-  });
-}
-
-// After a price load, bulk-write snapshots + refresh holding market_value in just
-// TWO upserts (not per card). Owned items only — wishlist pseudo-cards and items
-// no longer in the collection are skipped so structured rows stay aligned. Rows
-// are de-duped by client_id (a single upsert can't touch the same key twice).
-function flushPriceAnalytics(pairs){
-  if(!Array.isArray(pairs) || !pairs.length) return;
-  return dbWrite(async (db, user) => {
-    const ownedIds = new Set(collection.map(c => c.id));
-    const snapRows = [], holdRows = [], seen = new Set();
-    for(const { card, data } of pairs){
-      if(!card || !card.id || !data) continue;
-      if(!ownedIds.has(card.id)) continue;   // owned holdings only
-      if(seen.has(card.id)) continue;        // one row per card per flush
-      seen.add(card.id);
-      snapRows.push(buildSnapshotRow(card, data, user.id));
-      holdRows.push(buildHoldingRow(card, user.id));
-    }
-    if(snapRows.length){
-      const { error } = await db.from('price_snapshots').upsert(snapRows, { onConflict: 'user_id,client_id,snapshot_date' });
-      if(error) console.warn('[db] price_snapshots bulk upsert error:', error.message);
-    }
-    if(holdRows.length){
-      const { error } = await db.from('holdings').upsert(holdRows, { onConflict: 'user_id,client_id' });
-      if(error) console.warn('[db] holdings bulk price refresh error:', error.message);
-    }
-  });
-}
-
-// Upsert one account-level portfolio snapshot per day (unique user_id+date).
-// Reads the app's own freshly-computed AppState totals, so the row matches the
-// on-screen numbers exactly — no parallel recomputation. Same-day updates
-// overwrite that day's row. client_id stays null here (account-level).
-function savePortfolioSnapshot(){
-  return dbWrite(async (db, user) => {
-    if (AppState._dirty) AppState.update();
-    const n = v => (v != null && isFinite(v)) ? v : null;
-    const cnt = v => Number.isFinite(v) ? v : null;
-    const row = {
-      user_id:        user.id,
-      snapshot_date:  new Date().toISOString().slice(0,10),   // YYYY-MM-DD (UTC)
-      total_value:    n(AppState.totalValue),
-      total_cost:     n(AppState.totalCost),
-      total_pnl:      n(AppState.totalPnL),
-      total_pnl_pct:  n(AppState.totalPnLPct),
-      cash_position:  n(AppState.cashPosition),
-      singles_count:  cnt(AppState.singlesCount),
-      slabs_count:    cnt(AppState.slabsCount),
-      sealed_count:   cnt(AppState.sealedCount),
-      holdings_count: collection.length + sealed.length,      // all owned line items
-      updated_at:     new Date().toISOString()
-    };
-    const { error } = await db.from('portfolio_snapshots').upsert(row, { onConflict: 'user_id,snapshot_date' });
-    if(error) console.warn('[db] portfolio_snapshots upsert error:', error.message);
-  });
-}
-
 // ── Market signals ─────────────────────────────────────────────────────────
 // Computes per-card intelligence from data already in memory: live cache price,
 // cost basis, eBay comps (analyzePrice), and the LOCAL 7-day price history
@@ -11199,67 +10826,6 @@ function renderIntelligence(){
   el.innerHTML = html;
 }
 
-// Append-only event log — one immutable INSERT per add / edit / sell event.
-// All numerics are guarded: a bad/empty value becomes null, never NaN.
-function saveTransactionToDatabase(txn){
-  if(!txn || !txn.txn_type) return;
-  return dbWrite(async (db, user) => {
-    const qty = parseInt(txn.quantity, 10);
-    const up  = parseFloat(txn.unit_price);
-    const cb  = parseFloat(txn.cost_basis);
-    const rp  = parseFloat(txn.realized_pnl);
-    const ta  = (txn.total_amount != null) ? parseFloat(txn.total_amount)
-                  : (Number.isFinite(up) && Number.isFinite(qty) ? up * qty : NaN);
-    const row = {
-      user_id:      user.id,
-      client_id:    txn.client_id || null,
-      txn_type:     txn.txn_type,
-      card_name:    txn.card_name || null,
-      quantity:     Number.isFinite(qty) ? qty : null,
-      unit_price:   Number.isFinite(up) ? up : null,
-      total_amount: Number.isFinite(ta) ? ta : null,
-      cost_basis:   Number.isFinite(cb) ? cb : null,
-      realized_pnl: Number.isFinite(rp) ? rp : null,
-      source:       txn.source || null,
-      notes:        txn.notes || null,
-      occurred_at:  txn.occurred_at ? new Date(txn.occurred_at).toISOString() : new Date().toISOString()
-    };
-    const { error } = await db.from('transactions').insert(row);
-    if(error) console.warn('[db] transactions insert error:', error.message);
-  });
-}
-
-// ── SOLD HISTORY PERSISTENCE ──
-// soldHistory IS part of synced app state (collectAppData / mergeAppData / applyAppData),
-// but save() never owned it: four call sites each did their own
-// localStorage.setItem('pkv2_sold', ...). One of them (deleteSoldEntry) never called
-// save() at all, so the write never marked the state dirty and never queued a cloud
-// push. This is the single persistence path for sold history. Storage key, record
-// shape and sync scope are all unchanged.
-function saveSoldHistory(){
-  try{
-    localStorage.setItem(STORAGE_KEYS.soldHistory, JSON.stringify(soldHistory));
-  }catch(e){
-    console.warn('[soldHistory] persist failed:', e && e.message);
-  }
-  AppState._dirty = true;
-  notifyPersisted();          // debounced downstream — safe to call twice
-}
-
-function save(){
-  idbColSave(collection);
-  saveSoldHistory();          // sold history can no longer be forgotten by a caller
-  localStorage.setItem('pkv2_wish',JSON.stringify(wishlist));
-  localStorage.setItem('pkv2_sealed',JSON.stringify(sealed));
-  localStorage.setItem('pkv2_deals',JSON.stringify(deals));
-  // Invalidate tab render caches so they refresh next visit
-  ['page-singles','page-psa','page-sealed','page-wishlist','page-deals'].forEach(id=>{
-    const el=document.getElementById(id);if(el)el._rendered=false;
-  });
-  AppState._dirty = true;
-  setTimeout(captureHistorySnapshot, 500); // capture after state updates
-  notifyPersisted();          // cloud push happens via a subscriber, not a direct call
-}
 function exportData(){
   const history = readPortfolioHistory();
   const data = {collection,wishlist,sealed,deals,history,cardHistory,cashPosition:AppState.cashPosition,exported:new Date().toISOString(),version:'5.0'};
