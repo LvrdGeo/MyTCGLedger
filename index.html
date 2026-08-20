@@ -357,7 +357,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .empty-title{font-family:var(--disp);font-size:17px;font-weight:700;color:var(--text);margin-bottom:6px}
 .empty-sub{font-size:12.5px;margin-bottom:18px}
 /* MOBILE */
-.mobile-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--bg2);border-top:1px solid var(--border);padding:8px 0 max(8px,env(safe-area-inset-bottom));grid-template-columns:repeat(6,1fr)}
+.mobile-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;background:var(--bg2);border-top:1px solid var(--border);padding:8px 0 max(6px,calc(env(safe-area-inset-bottom,0px) - 16px));grid-template-columns:repeat(6,1fr)}
 .mob-tab{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;cursor:pointer;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:10px;transition:color .15s;-webkit-tap-highlight-color:transparent}
 .mob-tab svg{width:22px;height:22px}.mob-tab.active{color:var(--gold)}
 .mob-tab-primary svg{width:30px;height:30px}
@@ -384,7 +384,7 @@ textarea.input{resize:vertical;min-height:58px;line-height:1.5}
 .mob-account-btn svg{width:17px;height:17px;flex-shrink:0}
 @media(max-width:768px){
   .sidebar{display:none!important}.mobile-tabs{display:grid}.mob-fab{display:flex}.mob-account-btn{display:flex}
-  .toast{bottom:80px}.topbar{padding-top:env(safe-area-inset-top,0px);padding-right:16px;padding-bottom:0;padding-left:16px;gap:8px;height:54px;min-height:54px}
+  .toast{bottom:80px}.topbar{padding-top:max(6px,calc(env(safe-area-inset-top,0px) - 12px));padding-right:16px;padding-bottom:0;padding-left:16px;gap:8px;height:auto;min-height:calc(48px + max(6px,calc(env(safe-area-inset-top,0px) - 12px)))}
   .page-title small{display:none}.topbar .btn-ghost{display:none}.topbar .btn-primary{display:none}.topbar .topbar-sold-btn{display:inline-flex!important}
   .port-hero{padding:16px 14px 0}.port-total{font-size:32px}
   .kpi-row{grid-template-columns:1fr 1fr 1fr}.kpi{padding:10px 12px}.kpi-val{font-size:14px}
@@ -885,7 +885,11 @@ body.wish-searching #wish-search-bar{position:sticky;top:0;z-index:30;background
    all of them; the per-grid rule above then adds nothing extra on mobile.
    Rollback: delete this block. */
 @media(max-width:768px){
-  .page.active{padding-bottom:calc(88px + env(safe-area-inset-bottom,20px))}
+  .page.active{padding-bottom:calc(88px + max(0px,calc(env(safe-area-inset-bottom,20px) - 16px)))}
+  /* Mobile: the dashboard chart wrapper has an inline padding:20px 24px 0, which
+     leaves a visible dead band between the sticky topbar and PORTFOLIO TIMELINE.
+     Trim only the TOP on phones so the first section sits closer to the bar. */
+  #page-dashboard > div[style*="padding:20px 24px 0"]{padding-top:8px!important}
   /* grids already carry their own clearance — don't double it up */
   #wish-grid, #singles-grid, #psa-grid, #sealed-grid{padding-bottom:8px}
 }
