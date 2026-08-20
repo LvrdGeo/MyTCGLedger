@@ -160,3 +160,21 @@ function showConfirm(title,msg,cb){document.getElementById('confirm-title').text
 function closeConfirm(){document.getElementById('confirm-bg').classList.remove('open');confirmCb=null;}
 
 function toast(msg,color='green',undoCb=null){const t=document.getElementById('toast');document.getElementById('toast-msg').textContent=msg;document.getElementById('toast-dot').style.background=color==='green'?'var(--green)':color==='red'?'var(--red)':'var(--gold)';const ub=document.getElementById('toast-undo');if(ub){if(undoCb){ub.style.display='';ub.onclick=()=>{t.classList.remove('show');try{undoCb();}catch(e){}};}else{ub.style.display='none';ub.onclick=null;}}t.classList.add('show');if(window._toastTimer)clearTimeout(window._toastTimer);window._toastTimer=setTimeout(()=>t.classList.remove('show'),undoCb?6000:2800);}
+
+// ════════════════════════════════════════════════════════════════════════════
+// REHOMED IN FINAL MIGRATION - shared display formatters.
+// These lived inline for 27 batches purely because no module owned them.
+// fmtPrice is a thin alias to money(); fmtChartDate formats "YYYY-MM-DD" -> "Jun 23".
+// ════════════════════════════════════════════════════════════════════════════
+function fmtPrice(v){return money(v);}
+
+function fmtTrend(v){if(v==null)return'';return(v>=0?'+':'')+v.toFixed(1)+'%';}
+
+function trendClass(v){return v==null?'ps-trend-fl':v>0?'ps-trend-up':'ps-trend-dn';}
+
+// "2026-06-23" → "Jun 23" (keeps non-ISO labels like "Start" untouched)
+function fmtChartDate(d){
+  const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return d;
+  return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1] + ' ' + (+m[3]);
+}
