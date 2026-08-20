@@ -231,8 +231,13 @@ async function openDetail(id){
   const p=cardPriceData(card)||await getPrices(card);
   const best=bestPrice(p,card.type==='graded'),worst=worstPrice(p);
   const priceAnalysis=analyzePriceRouted(p,card.type==='graded');
-  const roi=card.paid?(best-parseFloat(card.paid)):null;
-  const roiPct=card.paid&&best>0?((best/parseFloat(card.paid)-1)*100).toFixed(1):null;
+  // Basis is the recorded purchase price, or — if none was entered — what the
+  // card was worth the day it was added. Falls back to null (dash) only when
+  // neither exists, so we never report the full market value as pure profit.
+  const _cb=costBasis(card);
+  const roi=_cb.basis!=null?(best-_cb.basis):null;
+  const roiPct=_cb.basis!=null&&best>0?((best/_cb.basis-1)*100).toFixed(1):null;
+  const _cbLbl=_cb.source==='baseline'?'GAIN / LOSS · SINCE ADDED':'GAIN / LOSS';
   // Sparkline
   const histSeries=getCardHistory(card,30);const trendBlock=buildCardTrendBlock(card,histSeries,best);
   // Build precise search strings including set name + number for each platform
@@ -293,7 +298,7 @@ async function openDetail(id){
                 ${card.paid ? '$'+parseFloat(card.paid).toFixed(2) : '<span style="color:var(--muted);font-size:12px;">+ Add</span>'}
               </div>
             </div>
-            <div class="mini-stat"><div class="mini-stat-lbl">GAIN / LOSS</div><div class="mini-stat-val" style="color:${roi!=null?(roi>=0?'var(--green)':'var(--red)'):'var(--muted)'};">${roi!=null?(roi>=0?'+':'')+'$'+roi.toFixed(2)+' ('+roiPct+'%)':'—'}</div></div>
+            <div class="mini-stat"><div class="mini-stat-lbl">${_cbLbl}</div><div class="mini-stat-val" style="color:${roi!=null?(roi>=0?'var(--green)':'var(--red)'):'var(--muted)'};">${roi!=null?(roi>=0?'+':'')+'$'+roi.toFixed(2)+' ('+roiPct+'%)':'—'}</div></div>
             <div class="mini-stat"><div class="mini-stat-lbl">Spread</div><div class="mini-stat-val">${isFinite(worst)&&worst>0?'$'+(worst-best).toFixed(2):'—'}</div></div>
           </div>
         </div>
