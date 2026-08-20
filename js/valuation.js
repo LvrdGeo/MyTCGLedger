@@ -26,7 +26,7 @@
    immediately after core.js and before everything else.
 
    FINANCIAL INVARIANT: this file decides what a held item is WORTH. The pricing
-   methodology below (raw TCGPlayer-led, graded sold-median, ask→sold ×0.90,
+   methodology below (raw TCGPlayer-led, graded sold-median, ask trimmed-median,
    consensus/outlier rules) is contract — do not alter it without a parity run.
    ════════════════════════════════════════════════════════════════════════════ */
 
@@ -314,7 +314,7 @@ function analyzeGraded(p) {
     const isAsk = p.ebaySource && p.ebaySource !== 'ebay-sold-scrape' && p.ebaySource !== 'ebay-sold-cache';   // v21: cached solds are SOLDS
     let conf = isAsk ? 'low' : (n >= 5 ? 'high' : n >= 2 ? 'medium' : 'low');
     let reason = isAsk
-      ? `Estimated sold value from ${n} active eBay ask${n > 1 ? 's' : ''} (trimmed median × 0.90) — no recent solds found`
+      ? `Estimated market value from ${n} active eBay ask${n > 1 ? 's' : ''} (trimmed median) — no recent solds found`
       : n ? `Median of ${n} eBay sold comp${n > 1 ? 's' : ''} at this grade`
           : 'eBay sold comp for this grade';
     // SANITY CHECK: a graded slab should be worth at least as much as the raw card.
@@ -366,14 +366,36 @@ function findConsensus(sources) {
 
 // Estimate realistic SOLD value from active ASKING prices (2026-07). Sellers list
 // above what cards actually sell for, and the single lowest ask is unreliable —
-// a lowball/damaged listing drags it under real value. Trimmed median × 0.90,
+// a lowball/damaged listing drags it under real value. Trimmed median of asks;
+// the outlier trim stays, the 0.90 haircut does NOT (see note below),
 // calibrated on real sold-vs-ask pairs (Umbreon VMAX #215 PSA10: asks median
 // ~$5.1k, real solds $4,350–$5,000 → factor ≈0.87–0.92). Expects ASC-sorted prices.
+// ── COST BASIS RESOLUTION (2026-08) ─────────────────────────────────────────
+// A card's basis is what you PAID if you recorded it, otherwise what it was
+// WORTH the day you added it (stamped once by stampLastValue). This lets a card
+// added without a purchase price still show meaningful performance, measured
+// from its add date rather than from zero.
+//
+// Returns { basis, source, at }:
+//   source 'paid'     — you entered a real purchase price
+//   source 'baseline' — no paid value; measuring since the card was added
+//   source 'none'     — neither available (pre-existing card not yet re-priced)
+// basis is null for 'none' so callers can keep showing a dash rather than
+// inventing a 0 and reporting the whole market value as profit.
+function costBasis(card){
+  if (!card) return { basis: null, source: 'none', at: null };
+  const paid = parseFloat(card.paid);
+  if (paid > 0) return { basis: paid, source: 'paid', at: card.added || null };
+  const base = parseFloat(card.baselineValue);
+  if (base > 0) return { basis: base, source: 'baseline', at: card.baselineAt || card.added || null };
+  return { basis: null, source: 'none', at: null };
+}
+
 function askSoldEstimate(sortedAsks){
   if (!sortedAsks || !sortedAsks.length) return null;
   const arr = sortedAsks.length >= 6 ? sortedAsks.slice(1, -1) : sortedAsks;
   const med = medianOf(arr);
-  return med > 0 ? +(med * 0.90).toFixed(2) : null;
+  return med > 0 ? +med.toFixed(2) : null;
 }
 
 function medianOf(arr) {
