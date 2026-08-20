@@ -91,6 +91,19 @@ function stampLastValue(card, data){
     if (!a || !(a.price > 0)) return;
     rec.lastMarketValue     = +a.price.toFixed(2);
     rec.lastPricedAt        = Date.now();
+    // ── ADD-DATE BASELINE (2026-08) ────────────────────────────────────────
+    // Gain/loss used to require a manually entered cost basis, so a card added
+    // without one showed no P&L at all. Stamp the first price we ever see for
+    // the card as its baseline, so performance can be measured FROM THE DAY IT
+    // WAS ADDED. Stamped here, not in saveCard(), because a manually added card
+    // has no market value yet at save time — the price arrives afterwards.
+    // Written once and never overwritten; a real `paid` always takes priority
+    // (see costBasis() in valuation.js). Cards that already have a paid value
+    // are skipped entirely, so nothing existing is disturbed.
+    if (rec.baselineValue == null && !(parseFloat(rec.paid) > 0)) {
+      rec.baselineValue = +a.price.toFixed(2);
+      rec.baselineAt    = Date.now();
+    }
     rec.lastPriceConfidence = a.confidence || 'medium';
     rec.lastPriceSource     = a.sources ? Object.keys(a.sources).join('+') : '';
     // Debounced save so a batch refresh doesn't spam sync.
@@ -349,8 +362,14 @@ async function fetchLivePrices(card){
             // ASKS → SOLD ESTIMATE (2026-07 accuracy fix). The old heuristic took the
             // single LOWEST ask, which a lowball/damaged listing drags under real value
             // (Umbreon VMAX #215 PSA10: lowest ask $3,500 vs REAL solds $4,350–$5,000).
-            // Sellers list above what cards sell for, so: trimmed median of asks × 0.90,
-            // calibrated against real sold-vs-ask pairs. Labeled LOW confidence + ASKS.
+            // Trimmed median of asks, NO haircut (2026-08). The old x0.90 was a
+            // SECOND discount on top of the one nrvForCard() already applies
+            // (NRV.discount + 13.6% fees + shipping), so market value came out
+            // ~10% under the real market. Verified against Rayquaza VMAX #218
+            // PSA 10: asks trimmed to ~$3,000, x0.90 showed $2,699.99, while real
+            // eBay solds the same day were $2,950 / $3,000 / $2,819.95 (ratio
+            // ~0.98, not 0.90). The haircut belongs downstream in NRV, not here.
+            // Still labeled LOW confidence + ASKS since these are asks, not solds.
             pricePoint = askSoldEstimate(cleanPrices);
           } else {
           // GRADED: MEDIAN of sold comps on the eBay "{grade} Sold" page.
