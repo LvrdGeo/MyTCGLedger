@@ -36,6 +36,7 @@
 
 const HISTORY_KEY = 'pkv2_ph2'; // v2 richer format
 let _cashPosition = parseFloat(localStorage.getItem('pkv2_cash') || '0');
+let _cashPositionAt = parseInt(localStorage.getItem('pkv2_cash_at') || '0', 10) || 0;
 let _currentPage='dashboard';
 let _bootDone = false;
 let _listenersBound = false;
