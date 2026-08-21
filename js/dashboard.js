@@ -432,6 +432,10 @@ function saveCashPosition() {
   const val = parseFloat(document.getElementById('cash-input')?.value || 0);
   _cashPosition = isNaN(val) || val < 0 ? 0 : val;
   localStorage.setItem(STORAGE_KEYS.cash, _cashPosition.toFixed(2));
+  // Cash has no id to merge on, so the only way two devices can agree is a
+  // timestamp. Stamp every edit; mergeAppData picks the newer one.
+  _cashPositionAt = Date.now();
+  localStorage.setItem('pkv2_cash_at', String(_cashPositionAt));
   // cashPosition participates in sync (collectAppData / mergeAppData), but this
   // path never marked the state dirty or queued a push — the edit stayed on one
   // device and could be overwritten by the stale cloud value on the next merge.
