@@ -78,6 +78,7 @@ function collectAppData() {
     // per entry instead of comparing `.length` (see WISH HISTORY MERGE).
     wishHistory: readWishHistory(),
     cashPosition: parseFloat(localStorage.getItem('pkv2_cash') || '0'),
+    cashPositionAt: parseInt(localStorage.getItem('pkv2_cash_at') || '0', 10) || 0,
     deletionLedger: Array.isArray(deletionLedger) ? deletionLedger : [],
     _localChange: _lastLocalChange || Date.now()
   };
@@ -101,6 +102,7 @@ function applyAppData(d) {
     writeWishHistory(d.wishHistory);
   }
   if (typeof d.cashPosition === 'number') { localStorage.setItem('pkv2_cash', d.cashPosition.toFixed(2)); if(typeof _cashPosition!=='undefined') _cashPosition = d.cashPosition; }
+  if (typeof d.cashPositionAt === 'number' && d.cashPositionAt > 0) { localStorage.setItem('pkv2_cash_at', String(d.cashPositionAt)); if(typeof _cashPositionAt!=='undefined') _cashPositionAt = d.cashPositionAt; }
   // Deletion ledger: union in (monotonic — never shrinks), then suppress in-memory lists.
   if (Array.isArray(d.deletionLedger)) {
     deletionLedger = unionLedger(deletionLedger, d.deletionLedger);
@@ -170,7 +172,23 @@ function mergeAppData(localD, cloudD) {
     // Per-entry union by date. Was: `.length` comparison on an object, i.e. always
     // undefined >= undefined === false, so cloud replaced local unconditionally.
     wishHistory:      mergeWishHistory(localD.wishHistory, cloudD.wishHistory),
-    cashPosition: (typeof localD.cashPosition==='number' && localD.cashPosition>0) ? localD.cashPosition : (cloudD.cashPosition||0),
+    // CASH RESOLUTION (2026-08). The old rule was "local wins if local > 0", which
+    // meant a device holding any non-zero cash could NEVER accept another device's
+    // value — a second device stayed permanently out of step. Cash is a scalar with
+    // no id to union on, so it is resolved by WHEN IT WAS LAST EDITED. If neither
+    // side carries a stamp (pre-upgrade data) the old rule is kept, so existing
+    // installs behave exactly as before until the first edit stamps a time.
+    ...(function(){
+      const lAt = +localD.cashPositionAt || 0, cAt = +cloudD.cashPositionAt || 0;
+      const lVal = typeof localD.cashPosition==='number' ? localD.cashPosition : 0;
+      const cVal = typeof cloudD.cashPosition==='number' ? cloudD.cashPosition : 0;
+      if (lAt || cAt) {
+        const localWins = lAt >= cAt;
+        return { cashPosition: localWins ? lVal : cVal,
+                 cashPositionAt: Math.max(lAt, cAt) };
+      }
+      return { cashPosition: (lVal > 0) ? lVal : (cVal || 0), cashPositionAt: 0 };
+    })(),
     _localChange: Date.now()
   };
 }
