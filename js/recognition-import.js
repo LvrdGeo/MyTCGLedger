@@ -56,7 +56,10 @@ const ptcgSourceAdapter = {
       page++;
       if (page > 40) break;                       // hard stop; no runaway paging
     }
-    return { setId, sourceVersion: adapterSourceVersion(cards), cards, reportedTotal: total };
+    // pagesFetched is reported so a caller can PROVE the paging loop ran and that
+    // nothing was silently truncated at the page size.
+    return { setId, sourceVersion: adapterSourceVersion(cards), cards,
+             reportedTotal: total, pagesFetched: page, pageSize };
   },
   normalizeCard(raw){
     const c = raw || {};
@@ -222,6 +225,11 @@ async function importRecognitionSet(setId, options){
   }
   result.fetched = (src.cards || []).length;
   result.sourceVersion = src.sourceVersion || null;
+  result.pagesFetched  = src.pagesFetched != null ? src.pagesFetched : null;
+  result.reportedTotal = src.reportedTotal != null ? src.reportedTotal : null;
+  // A mismatch here means the provider said N but we received M — silent
+  // truncation is the single most damaging failure a catalog import can have.
+  result.truncationSuspected = (result.reportedTotal != null) && (result.fetched < result.reportedTotal);
 
   // 2. NORMALIZE + VALIDATE  (nothing has touched the live store yet)
   const n0 = Date.now();
