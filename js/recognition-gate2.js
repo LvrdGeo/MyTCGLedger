@@ -27,7 +27,18 @@
    The public API also serves this request unauthenticated.
    ════════════════════════════════════════════════════════════════════════════ */
 
-const GATE2_SET_ID = 'base1';   // Pokémon Base Set. Reported if the provider rejects it.
+// Gate 2 imports MULTIPLE sets, because one set cannot prove what Batch C needs:
+//   base1  Base Set 1999 - small, vintage, uniform N/102. printedTotal === total,
+//          so it CANNOT validate the printedTotal fix. One page: no pagination.
+//   swsh7  Evolving Skies - secret rares, so printedTotal (203) != total. This is
+//          the set that actually proves the denominator fix, and at ~237 cards it
+//          also crosses the 250 page boundary closely enough to exercise paging.
+//   swsh9  Brilliant Stars - Trainer Gallery subset gives real alphanumeric
+//          collector numbers (TG01..TG30) from the provider, not from a fixture.
+// Importing them in sequence also proves INCREMENTAL import: set 2 must not
+// destroy set 1, which nothing has tested until now.
+const GATE2_SETS = ['base1', 'swsh7', 'swsh9'];
+const GATE2_SET_ID = GATE2_SETS[0];   // back-compat for single-set runs
 
 function _g2num(n){ return (n == null || isNaN(n)) ? 'n/a' : (Math.round(n * 10) / 10); }
 function _g2type(v){ return v === null ? 'null' : (v === undefined ? 'missing' : Array.isArray(v) ? 'array' : typeof v); }
@@ -60,7 +71,74 @@ function _g2classify(err, resp){
   return { kind:'APPLICATION_ERROR', detail:m };
 }
 
+// ORCHESTRATOR. Runs the per-set gate across several sets in sequence, then adds
+// the checks that only make sense ACROSS sets: incremental import, cross-set
+// integrity, and growth in query time as the catalog gets bigger.
 async function runRecognitionGate2(options){
+  const opts = options || {};
+  if (opts.setId) return runRecognitionGate2Set(opts);      // single-set escape hatch
+  const sets = opts.sets || GATE2_SETS;
+  const MULTI = { ranAt:new Date().toISOString(), sets, perSet:[], problems:[] };
+
+  if (typeof rcClear === 'function') await rcClear();       // start from empty ONCE
+
+  let cumulative = 0;
+  for (const setId of sets){
+    const before = await rcCount();
+    const r = await runRecognitionGate2Set(Object.assign({}, opts, { setId, _multi:true, _skipClear:true }));
+    const after = await rcCount();
+    MULTI.perSet.push({
+      setId,
+      pass: r.gate2Pass,
+      fetched: r.firstImport && r.firstImport.fetched,
+      inserted: r.firstImport && r.firstImport.inserted,
+      pagesFetched: r.firstImport && r.firstImport.pagesFetched,
+      reportedTotal: r.firstImport && r.firstImport.reportedTotal,
+      truncationSuspected: r.firstImport && r.firstImport.truncationSuspected,
+      printedTotal: r.printedTotal,
+      recordsBefore: before, recordsAfter: after,
+      addedThisSet: after - before,
+      variantAudit: r.variantAudit,
+      queryMedianMs: r.performance && r.performance.queryMedianMs,
+      perRecordBytes: r.performance && r.performance.perRecordBytes,
+      problems: r.problems
+    });
+    if (!r.gate2Pass) MULTI.problems.push('set ' + setId + ' failed: ' + r.problems.join(' | '));
+    // INCREMENTAL INTEGRITY: adding a set must never shrink the catalog.
+    if (after < before) MULTI.problems.push('CATALOG SHRANK importing ' + setId + ' (' + before + ' -> ' + after + ')');
+    cumulative = after;
+  }
+
+  // CROSS-SET INTEGRITY: every earlier set must still be queryable after the
+  // later ones landed. This is the check that would have caught a commit that
+  // wiped instead of merged.
+  MULTI.crossSet = [];
+  for (const setId of sets){
+    const rows = await new Promise(res => { const q = _rcTx(RECOGNITION_STORE,'readonly').getAll();
+      q.onsuccess = () => res((q.result||[]).filter(r => r.setId === setId)); q.onerror = () => res([]); });
+    const probe = rows[0];
+    const found = probe
+      ? (await findRecognitionCandidates({ name:probe.name, number:probe.numberDisplay, setId })).candidates.length > 0
+      : false;
+    MULTI.crossSet.push({ setId, recordsPresent: rows.length, stillQueryable: found });
+    if (!rows.length) MULTI.problems.push('set ' + setId + ' has NO records after all imports');
+    if (rows.length && !found) MULTI.problems.push('set ' + setId + ' present but NOT queryable');
+  }
+
+  // Cross-set ambiguity is the real-world version of the Umbreon case: the same
+  // collector number legitimately exists in several sets.
+  const sample = MULTI.crossSet[0] && MULTI.crossSet[0].recordsPresent ? null : null;
+  const numOnly = await findRecognitionCandidates({ number:'1' });
+  MULTI.crossSetAmbiguity = { query:'number "1" only', returned:numOnly.candidates.length,
+    ambiguous:numOnly.ambiguous, distinctSets:[...new Set(numOnly.candidates.map(c => c.record && c.record.setId))] };
+
+  MULTI.totals = { records: cumulative, catalogVersion: await rcGetMeta('catalogVersion'),
+                   importedSets: await rcGetMeta('importedSets') };
+  MULTI.gate2Pass = MULTI.problems.length === 0 && MULTI.perSet.every(p => p.pass);
+  return _g2printMulti(MULTI);
+}
+
+async function runRecognitionGate2Set(options){
   const opts   = options || {};
   const setId  = opts.setId || GATE2_SET_ID;
   const R      = { setId, ranAt:new Date().toISOString(), problems:[] };
@@ -88,7 +166,14 @@ async function runRecognitionGate2(options){
     probeResp = await ptcgFetchOk('/cards?q=' + encodeURIComponent('set.id:' + setId) + '&pageSize=3&page=1');
     const pj  = await probeResp.json();
     probeCards = (pj && pj.data) || [];
-    R.network = { ok:true, httpStatus:probeResp.status, totalCount:(pj && pj.totalCount), returned:probeCards.length };
+    // Response headers inform BOTH the licensing question (attribution/terms
+    // links) and Batch C throughput (rate-limit budget). Only CORS-exposed
+    // headers are readable from a browser; absence is not proof of absence.
+    const hdrs = {};
+    try { probeResp.headers.forEach(function(v,k){ hdrs[k] = v; }); } catch(_){}
+    R.network = { ok:true, httpStatus:probeResp.status, totalCount:(pj && pj.totalCount),
+                  returned:probeCards.length, exposedHeaders:hdrs,
+                  headerNote:'Browsers expose only CORS-whitelisted headers; rate-limit headers may exist but be hidden.' };
   } catch(e){
     R.network = { ok:false, failure:_g2classify(e, probeResp) };
     R.problems.push('Provider fetch failed: ' + R.network.failure.kind + ' — ' + R.network.failure.detail);
@@ -240,6 +325,27 @@ async function runRecognitionGate2(options){
       : 'Browser did not expose navigator.storage.estimate(); only jsonBytes is reported.'
   };
 
+  // ── 7b. VARIANT INFERENCE AUDIT on REAL data ──────────────────────────
+  // inferVariant() guesses from rarity because the provider does not state
+  // variant. This measures how coarse that guess actually is: reverse-holo and
+  // 1st-edition printings are NOT representable, so any set where most cards
+  // collapse to 'normal' is telling us the variant axis is unusable for now.
+  const variantCounts = {}, rarityToVariant = {};
+  all.forEach(function(r){
+    variantCounts[r.variant] = (variantCounts[r.variant] || 0) + 1;
+    const k = (r.rarity || '(none)') + ' -> ' + r.variant;
+    rarityToVariant[k] = (rarityToVariant[k] || 0) + 1;
+  });
+  const collapsed = (variantCounts['normal'] || 0) / (all.length || 1);
+  R.variantAudit = {
+    counts: variantCounts,
+    rarityMapping: rarityToVariant,
+    fractionCollapsedToNormal: Math.round(collapsed * 100) / 100,
+    distinctVariants: Object.keys(variantCounts).length,
+    note: 'Provider does not expose variant. Reverse-holo and 1st-edition are NOT inferable ' +
+          'from this source, so printings that differ only by presentation share one record key.'
+  };
+
   // ── 8. metadata + isolation ───────────────────────────────────────────
   R.catalogMeta = { schemaVersion: await rcGetMeta('schemaVersion'), catalogVersion: await rcGetMeta('catalogVersion'),
     sourceProvider: await rcGetMeta('sourceProvider'), sourceVersion: await rcGetMeta('sourceVersion'),
@@ -250,6 +356,71 @@ async function runRecognitionGate2(options){
 
   R.gate2Pass = R.problems.length === 0 && !!r1.committed && R.idempotency.pass && R.failureSafety.pass;
   return _g2print(R, null);
+}
+
+/* ── MULTI-SET REPORT ─────────────────────────────────────────────────── */
+function _g2printMulti(M){
+  const L = [];
+  L.push('==============================');
+  L.push('MYTCG VISION - GATE 2 REPORT (MULTI-SET)');
+  L.push('==============================');
+  L.push('sets: ' + M.sets.join(', ') + '   ran: ' + M.ranAt);
+  L.push('');
+  L.push('Per-set results:');
+  M.perSet.forEach(function(p){
+    L.push('  [' + p.setId + '] ' + (p.pass ? 'PASS' : 'FAIL'));
+    L.push('     fetched ' + p.fetched + '  inserted ' + p.inserted +
+           '  pages ' + p.pagesFetched + '  providerTotal ' + p.reportedTotal +
+           '  truncationSuspected ' + p.truncationSuspected);
+    L.push('     catalog ' + p.recordsBefore + ' -> ' + p.recordsAfter + '  (+' + p.addedThisSet + ')');
+    if (p.printedTotal){
+      L.push('     printedTotal ' + p.printedTotal.livePrintedTotal +
+             '  total ' + p.printedTotal.liveTotal +
+             '  differ ' + p.printedTotal.valuesDiffer +
+             '  storedDenominator ' + p.printedTotal.storedDenominator +
+             '  usesPrintedTotal ' + p.printedTotal.usesPrintedTotal +
+             '  incorrectlyUsedTotal ' + p.printedTotal.incorrectlyUsesTotal);
+    }
+    if (p.variantAudit){
+      L.push('     variants ' + JSON.stringify(p.variantAudit.counts) +
+             '  collapsedToNormal ' + p.variantAudit.fractionCollapsedToNormal);
+    }
+    L.push('     queryMedian ' + p.queryMedianMs + 'ms  perRecord ~' + p.perRecordBytes + 'B');
+    if (p.problems && p.problems.length) p.problems.forEach(function(x){ L.push('     PROBLEM: ' + x); });
+  });
+  L.push('');
+  L.push('Cross-set integrity (after ALL imports):');
+  M.crossSet.forEach(function(c){
+    L.push('  ' + c.setId + ': records ' + c.recordsPresent + '  stillQueryable ' + c.stillQueryable);
+  });
+  L.push('');
+  if (M.crossSetAmbiguity){
+    L.push('Cross-set ambiguity:');
+    L.push('  ' + M.crossSetAmbiguity.query + ' -> ' + M.crossSetAmbiguity.returned +
+           ' candidates, ambiguous ' + M.crossSetAmbiguity.ambiguous);
+    L.push('  spanning sets: ' + JSON.stringify(M.crossSetAmbiguity.distinctSets));
+    L.push('');
+  }
+  L.push('Totals:');
+  L.push('  records ' + M.totals.records);
+  L.push('  catalogVersion ' + M.totals.catalogVersion);
+  L.push('  importedSets ' + JSON.stringify(M.totals.importedSets));
+  L.push('');
+  if (M.problems.length){ L.push('Problems:'); M.problems.forEach(function(p){ L.push('  - ' + p); }); L.push(''); }
+  L.push('Gate 2 overall:');
+  L.push('  ' + (M.gate2Pass ? 'PASS' : 'FAIL'));
+  L.push('');
+  L.push('Licensing status:');
+  L.push('  UNRESOLVED / REQUIRES REVIEW - this technical test is not licensing approval.');
+  L.push('');
+  L.push('Recommended next step:');
+  L.push('  Send this whole report to Claude. Batch C stays blocked until licensing is resolved.');
+  L.push('==============================');
+  const text = L.join('\n');
+  console.log(text);
+  try { M.reportText = text; window.__gate2Report = M; } catch(_){}
+  console.log('(full object also available as window.__gate2Report)');
+  return M;
 }
 
 /* ── ONE clearly delimited, copy-pasteable report ─────────────────────── */
